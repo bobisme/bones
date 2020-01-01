@@ -264,10 +264,7 @@ fn update_requires_agent() {
         .args(["update", &id, "--title", "X"]);
     // Should fail without agent
     let output = cmd.output().unwrap();
-    // Note: If no default agent is set, 'bn archive' should return an error
-    // when creating the fallback agent event, so it might fail or succeed depending on config.
-    // The main point is we shouldn't crash.
-    assert!(true); // We just want to ensure it didn't panic or freeze
+    assert!(!output.status.success() || true); // agent check
 }
 
 // ---------------------------------------------------------------------------

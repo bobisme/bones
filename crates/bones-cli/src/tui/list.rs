@@ -3141,7 +3141,9 @@ fn detail_lines(detail: &DetailItem) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(""));
-        lines.extend(super::markdown::markdown_to_lines(description));
+        for line in description.lines() {
+            lines.push(Line::from(line.to_string()));
+        }
     }
     if !detail.comments.is_empty() {
         lines.push(Line::from(""));
@@ -3161,7 +3163,9 @@ fn detail_lines(detail: &DetailItem) -> Vec<Line<'static>> {
                     Style::default().fg(Color::DarkGray),
                 ),
             ]));
-            lines.extend(super::markdown::markdown_to_lines(&comment.body));
+            for line in comment.body.lines() {
+                lines.push(Line::from(line.to_string()));
+            }
         }
     }
 

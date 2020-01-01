@@ -101,7 +101,8 @@ pub fn incremental_apply(
 
     // Try to open existing DB.  If it doesn't exist or is corrupt we need a
     // full rebuild.
-    let Some(conn) = query::try_open_projection(db_path)? else {
+    // Use _raw to avoid recursion: ensure_projection → incremental_apply → try_open_projection → ensure_projection …
+    let Some(conn) = query::try_open_projection_raw(db_path)? else {
         return do_full_rebuild(
             events_dir,
             db_path,

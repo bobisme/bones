@@ -52,7 +52,6 @@ struct GoldItem {
     title: String,
     description: String,
     labels: Vec<String>,
-    #[allow(dead_code)]
     deps: Vec<String>,
 }
 

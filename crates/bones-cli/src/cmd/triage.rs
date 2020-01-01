@@ -456,7 +456,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
             score,
@@ -471,7 +470,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
             score,
@@ -486,7 +484,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some(size.to_string()),
             urgency: Urgency::Default,
             score,

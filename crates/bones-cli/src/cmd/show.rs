@@ -4,8 +4,7 @@
 //! when an exact match is not found.
 
 use crate::output::{
-    CliError, OutputMode, pretty_kv, pretty_markdown, pretty_rule, pretty_section, render_error,
-    render_mode,
+    CliError, OutputMode, pretty_kv, pretty_rule, pretty_section, render_error, render_mode,
 };
 use crate::validate;
 use bones_core::db::query;
@@ -224,7 +223,9 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
     if let Some(ref desc) = item.description {
         writeln!(w)?;
         pretty_section(w, "Description")?;
-        pretty_markdown(w, desc)?;
+        for line in desc.lines() {
+            writeln!(w, "{line}")?;
+        }
     }
 
     if !item.comments.is_empty() {
@@ -236,11 +237,11 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
             }
             writeln!(
                 w,
-                "[{}] {}:",
+                "[{}] {}: {}",
                 micros_to_local_datetime(comment.created_at_us),
                 comment.author,
+                comment.body
             )?;
-            pretty_markdown(w, &comment.body)?;
         }
     }
     Ok(())

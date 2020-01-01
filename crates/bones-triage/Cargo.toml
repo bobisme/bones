@@ -1,16 +1,13 @@
 [package]
 name = "bones-triage"
-version.workspace = true
+version = "0.15.3"
 edition = "2024"
-license.workspace = true
-description = "Prioritization and scoring for bones"
-repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core", version = "0.18.1" }
+bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }

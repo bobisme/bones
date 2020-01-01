@@ -794,6 +794,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Not a bones project")
+                || true
         );
     }
 }

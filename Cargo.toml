@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.18.1"
+version = "0.17.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A CRDT-native issue tracker for distributed teams and AI agents"
@@ -45,7 +45,6 @@ rand = "0.8"
 rand_distr = "0.4"
 sha2 = "0.10"
 toml = "0.8"
-pulldown-cmark = "0.13"
 ratatui = "0.29"
 crossterm = "0.28"
 sqlite-vec = "0.1.7-alpha.10"

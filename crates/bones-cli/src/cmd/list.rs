@@ -115,14 +115,24 @@ pub struct ListItem {
     pub updated_at_us: i64,
 }
 
+/// Structured advice entry following the JSON envelope convention.
+#[derive(Debug, Serialize)]
+struct Advice {
+    level: &'static str,
+    r#type: &'static str,
+    message: String,
+}
+
 /// JSON response payload for list results.
 #[derive(Debug, Serialize)]
 struct ListResponse {
     items: Vec<ListItem>,
     total: usize,
+    showing: usize,
     limit: usize,
     offset: usize,
     has_more: bool,
+    advice: Vec<Advice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -181,9 +191,15 @@ pub fn run_list(
             let response = ListResponse {
                 items: Vec::new(),
                 total: 0,
+                showing: 0,
                 limit: effective_limit(args.limit, 0, args.offset),
                 offset: args.offset,
                 has_more: false,
+                advice: vec![Advice {
+                    level: "warn",
+                    r#type: "projection-missing",
+                    message: "run `bn admin rebuild` to initialize".into(),
+                }],
             };
             return render(output, &response, |_, _| Ok(()));
         }
@@ -323,9 +339,9 @@ pub fn run_list(
 
     render_mode(
         output,
-        &response.items,
-        |items, w| render_list_text(items, w),
-        |items, w| render_list_human(items, w),
+        &response,
+        |resp, w| render_list_text(resp, w),
+        |resp, w| render_list_human(resp, w),
     )
 }
 
@@ -338,9 +354,8 @@ fn build_list_response(
 ) -> anyhow::Result<ListResponse> {
     let all_labels = args.all_labels();
 
-    // Default to showing active items (open + doing) unless any filter is
-    // explicitly set. When the default applies, we query without a state
-    // filter and post-filter out done/archived items.
+    // Default to showing open items unless any filter is explicitly set.
+    // Pagination/sort alone should not disable this default behavior.
     let has_any_filter = args.state.is_some()
         || args.all
         || args.kind.is_some()
@@ -351,8 +366,11 @@ fn build_list_response(
         || since_us.is_some()
         || until_us.is_some();
 
-    let default_active = !has_any_filter;
-    let state_filter = args.state.clone();
+    let state_filter = if has_any_filter {
+        args.state.clone()
+    } else {
+        Some("open".to_string())
+    };
 
     // Fetch an unpaginated set first, then apply deterministic sort + pagination
     // in Rust so metadata remains consistent even with composite label filters.
@@ -370,11 +388,6 @@ fn build_list_response(
     };
 
     let mut raw = query::list_items(conn, &filter)?;
-
-    // Default: show only active items (open + doing), excluding done/archived.
-    if default_active {
-        raw.retain(|item| item.state == "open" || item.state == "doing");
-    }
 
     // AND-filter labels when multiple --label values are supplied.
     if !all_labels.is_empty() {
@@ -426,12 +439,26 @@ fn build_list_response(
         })
         .collect();
 
+    let items = items?;
+    let showing = items.len();
+
+    let mut advice = Vec::new();
+    if has_more {
+        advice.push(Advice {
+            level: "info",
+            r#type: "truncated",
+            message: format!("bn list --limit {total} to view all"),
+        });
+    }
+
     Ok(ListResponse {
-        items: items?,
+        items,
         total,
+        showing,
         limit: effective_limit(args.limit, total, args.offset),
         offset: args.offset,
         has_more,
+        advice,
     })
 }
 
@@ -505,29 +532,6 @@ fn parse_datetime_to_micros(raw: &str) -> Option<i64> {
         .map(|dt| dt.timestamp_micros())
 }
 
-/// Format a microsecond timestamp as a compact relative time string.
-///
-/// Examples: `just now`, `2m`, `3h`, `5d`, `3w`, `4mo`, `2y`
-fn format_relative_time(updated_at_us: i64) -> String {
-    let now = chrono::Utc::now().timestamp_micros();
-    let delta_secs = (now - updated_at_us) / 1_000_000;
-
-    if delta_secs < 0 {
-        return "just now".into();
-    }
-
-    let secs = delta_secs as u64;
-    match secs {
-        0..=59 => "just now".into(),
-        60..=3599 => format!("{}m", secs / 60),
-        3600..=86399 => format!("{}h", secs / 3600),
-        86400..=604_799 => format!("{}d", secs / 86400),
-        604_800..=2_629_799 => format!("{}w", secs / 604_800),
-        2_629_800..=31_557_599 => format!("{}mo", secs / 2_629_800),
-        _ => format!("{}y", secs / 31_557_600),
-    }
-}
-
 const fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
     if limit == 0 {
         total.saturating_sub(offset)
@@ -537,16 +541,20 @@ const fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
 }
 
 /// Render the item list as a human-readable table.
-fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()> {
-    if items.is_empty() {
+fn render_list_human(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<()> {
+    if resp.items.is_empty() {
         writeln!(w, "No items found.")?;
         return writeln!(w, "Use `bn create --title \"...\"` to add a new item");
     }
 
-    pretty_kv(w, "Items", items.len().to_string())?;
+    pretty_kv(
+        w,
+        "Showing",
+        format!("{} of {} bones", resp.showing, resp.total),
+    )?;
 
-    let mut rows = Vec::with_capacity(items.len());
-    for item in items {
+    let mut rows = Vec::with_capacity(resp.items.len());
+    for item in &resp.items {
         let labels_suffix = if item.labels.is_empty() {
             String::new()
         } else {
@@ -566,28 +574,29 @@ fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<(
             item.state.clone(),
             item.urgency.clone(),
             format!("{title}{labels_suffix}"),
-            format_relative_time(item.updated_at_us),
         ]);
     }
 
-    pretty_table(
-        w,
-        &["ID", "KIND", "STATE", "URGENCY", "TITLE", "UPDATED"],
-        &rows,
-    )?;
+    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "TITLE"], &rows)?;
+
+    for a in &resp.advice {
+        writeln!(w, "{}", a.message)?;
+    }
 
     Ok(())
 }
 
-fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()> {
-    if items.is_empty() {
+fn render_list_text(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<()> {
+    if resp.items.is_empty() {
         writeln!(w, "advice  no-items  bn create --title \"...\"")?;
         return Ok(());
     }
 
-    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS\tUPDATED")?;
+    writeln!(w, "Showing {} of {} bones.", resp.showing, resp.total)?;
 
-    for item in items {
+    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS")?;
+
+    for item in &resp.items {
         let labels = if item.labels.is_empty() {
             String::new()
         } else {
@@ -595,16 +604,20 @@ fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()
         };
         writeln!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}",
             item.id,
             item.kind,
             item.state,
             item.urgency,
             item.title.replace('\t', " "),
-            labels,
-            format_relative_time(item.updated_at_us),
+            labels
         )?;
     }
+
+    for a in &resp.advice {
+        writeln!(w, "advice  {}  {}", a.r#type, a.message)?;
+    }
+
     Ok(())
 }
 
@@ -810,17 +823,32 @@ mod tests {
     // render_list_human
     // -----------------------------------------------------------------------
 
+    fn make_response(items: Vec<ListItem>) -> ListResponse {
+        let showing = items.len();
+        let total = showing;
+        ListResponse {
+            items,
+            total,
+            showing,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            advice: vec![],
+        }
+    }
+
     #[test]
     fn render_list_human_empty() {
+        let resp = make_response(vec![]);
         let mut buf = Vec::new();
-        render_list_human(&[], &mut buf).unwrap();
+        render_list_human(&resp, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("No items found"));
     }
 
     #[test]
     fn render_list_human_shows_header_and_row() {
-        let items = vec![ListItem {
+        let resp = make_response(vec![ListItem {
             id: "bn-abc".into(),
             title: "Fix auth".into(),
             kind: "task".into(),
@@ -830,20 +858,22 @@ mod tests {
             parent_id: None,
             labels: vec!["backend".into()],
             updated_at_us: 1000,
-        }];
+        }]);
         let mut buf = Vec::new();
-        render_list_human(&items, &mut buf).unwrap();
+        render_list_human(&resp, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("ID"));
         assert!(out.contains("bn-abc"));
         assert!(out.contains("Fix auth"));
         assert!(out.contains("backend"));
+        assert!(out.contains("Showing"));
+        assert!(out.contains("1 of 1"));
     }
 
     #[test]
     fn render_list_human_truncates_long_title() {
         let long_title = "A".repeat(60);
-        let items = vec![ListItem {
+        let resp = make_response(vec![ListItem {
             id: "bn-x".into(),
             title: long_title.clone(),
             kind: "task".into(),
@@ -853,9 +883,9 @@ mod tests {
             parent_id: None,
             labels: vec![],
             updated_at_us: 1000,
-        }];
+        }]);
         let mut buf = Vec::new();
-        render_list_human(&items, &mut buf).unwrap();
+        render_list_human(&resp, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         // Title should be truncated (not all 60 chars)
         assert!(!out.contains(&long_title));
@@ -864,7 +894,7 @@ mod tests {
 
     #[test]
     fn render_list_text_shows_header_row() {
-        let items = vec![ListItem {
+        let resp = make_response(vec![ListItem {
             id: "bn-abc".into(),
             title: "Fix auth".into(),
             kind: "task".into(),
@@ -874,12 +904,45 @@ mod tests {
             parent_id: None,
             labels: vec!["backend".into()],
             updated_at_us: 1000,
-        }];
+        }]);
         let mut buf = Vec::new();
-        render_list_text(&items, &mut buf).expect("render text");
+        render_list_text(&resp, &mut buf).expect("render text");
         let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS\tUPDATED"));
-        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend\t"));
+        assert!(out.contains("Showing 1 of 1 bones."));
+        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS"));
+        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend"));
+    }
+
+    #[test]
+    fn render_list_text_shows_truncation_advice() {
+        let resp = ListResponse {
+            items: vec![ListItem {
+                id: "bn-abc".into(),
+                title: "Fix auth".into(),
+                kind: "task".into(),
+                state: "open".into(),
+                urgency: "urgent".into(),
+                size: None,
+                parent_id: None,
+                labels: vec![],
+                updated_at_us: 1000,
+            }],
+            total: 75,
+            showing: 1,
+            limit: 50,
+            offset: 0,
+            has_more: true,
+            advice: vec![Advice {
+                level: "info",
+                r#type: "truncated",
+                message: "bn list --limit 75 to view all".into(),
+            }],
+        };
+        let mut buf = Vec::new();
+        render_list_text(&resp, &mut buf).expect("render text");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("Showing 1 of 75 bones."));
+        assert!(out.contains("advice  truncated  bn list --limit 75 to view all"));
     }
 
     // -----------------------------------------------------------------------
@@ -954,12 +1017,12 @@ mod tests {
         args.sort = "created".into();
 
         let response = build_list_response(&conn, &args, ListSort::CreatedAsc, None, None).unwrap();
-        // Default filter shows active items (open + doing); 3 open + 1 doing = 4 total.
-        assert_eq!(response.total, 4);
+        // Default filter is state=open; we inserted 3 open rows total.
+        assert_eq!(response.total, 3);
         assert_eq!(response.limit, 2);
         assert_eq!(response.offset, 1);
         assert_eq!(response.items.len(), 2);
-        assert!(response.has_more);
+        assert!(!response.has_more);
     }
 
     #[test]
@@ -1078,32 +1141,54 @@ mod tests {
                 updated_at_us: 1000,
             }],
             total: 1,
+            showing: 1,
             limit: 50,
             offset: 0,
             has_more: false,
+            advice: vec![],
         };
 
         let json = serde_json::to_value(&response).unwrap();
         assert!(json["items"].is_array());
         assert_eq!(json["total"], 1);
+        assert_eq!(json["showing"], 1);
         assert_eq!(json["limit"], 50);
         assert_eq!(json["offset"], 0);
         assert_eq!(json["has_more"], false);
+        assert!(json["advice"].is_array());
+        assert_eq!(json["advice"].as_array().unwrap().len(), 0);
     }
 
     #[test]
-    fn format_relative_time_ranges() {
-        let now = chrono::Utc::now().timestamp_micros();
-        assert_eq!(format_relative_time(now), "just now");
-        assert_eq!(format_relative_time(now - 30_000_000), "just now"); // 30s
-        assert_eq!(format_relative_time(now - 120_000_000), "2m");
-        assert_eq!(format_relative_time(now - 7_200_000_000), "2h");
-        assert_eq!(format_relative_time(now - 172_800_000_000), "2d");
-        assert_eq!(format_relative_time(now - 1_209_600_000_000), "2w");
-        assert_eq!(format_relative_time(now - 7_889_400_000_000), "3mo");
-        assert_eq!(format_relative_time(now - 63_115_200_000_000), "2y");
-        // Future timestamps
-        assert_eq!(format_relative_time(now + 60_000_000), "just now");
+    fn list_json_serialization_includes_truncation_advice() {
+        let response = ListResponse {
+            items: vec![],
+            total: 75,
+            showing: 50,
+            limit: 50,
+            offset: 0,
+            has_more: true,
+            advice: vec![Advice {
+                level: "info",
+                r#type: "truncated",
+                message: "bn list --limit 75 to view all".into(),
+            }],
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["total"], 75);
+        assert_eq!(json["showing"], 50);
+        assert!(json["has_more"].as_bool().unwrap());
+        let advice = json["advice"].as_array().unwrap();
+        assert_eq!(advice.len(), 1);
+        assert_eq!(advice[0]["level"], "info");
+        assert_eq!(advice[0]["type"], "truncated");
+        assert!(
+            advice[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--limit 75")
+        );
     }
 
     #[test]

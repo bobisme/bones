@@ -217,7 +217,7 @@ pub fn current_traceparent() -> Option<String> {
     None
 }
 
-/// If `TRACEPARENT` is set, parse it and install as the current `OTel` context
+/// If `TRACEPARENT` is set, parse it and install as the current OTel context
 /// so that subsequent spans become children of the remote parent.
 #[cfg(feature = "otel")]
 fn install_parent_context() {

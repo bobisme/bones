@@ -4,6 +4,35 @@
 //! using a rolling hash (Gear hash) for content-defined boundaries. A balanced
 //! Merkle tree is built over the chunks so that two replicas can diff in
 //! O(log N) time by comparing hashes top-down.
+//!
+//! This is a **library module** intended for use by external sync tools (e.g.
+//! transport layers over TCP, HTTP, MCP, or file-based exchange). It is not
+//! exposed as a CLI command — bones does not own transport.
+//!
+//! # Usage
+//!
+//! ```rust
+//! use bones_core::sync::prolly::ProllyTree;
+//! # use bones_core::event::{Event, EventType};
+//! # use bones_core::event::data::{CreateData, EventData};
+//! # use bones_core::model::item::{Kind, Urgency};
+//! # use bones_core::model::item_id::ItemId;
+//! # use std::collections::BTreeMap;
+//! # let events: Vec<Event> = vec![];
+//!
+//! // Build trees from each replica's events.
+//! let local_tree = ProllyTree::build(&events);
+//! let remote_tree = ProllyTree::build(&events);
+//!
+//! // Compare root hashes for fast equality check.
+//! if local_tree.root.hash() == remote_tree.root.hash() {
+//!     // Replicas are identical — no sync needed.
+//! } else {
+//!     // Diff in O(k log N) where k = number of differing chunks.
+//!     let missing = local_tree.diff(&remote_tree);
+//!     // `missing` contains event hashes present in remote but not local.
+//! }
+//! ```
 
 use blake3::Hasher as Blake3;
 use serde::{Deserialize, Serialize};

@@ -1,16 +1,13 @@
 [package]
 name = "bones-sim"
-version.workspace = true
+version = "0.15.3"
 edition = "2024"
-license.workspace = true
-description = "Deterministic simulation harness for bones"
-repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core", version = "0.18.1" }
+bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }
