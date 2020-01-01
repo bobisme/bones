@@ -40,7 +40,7 @@ mod validate;
 
 use bones_core::timing;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use output::{OutputMode, resolve_output_mode};
+use output::{CliError, OutputMode, render_error, resolve_output_mode};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -1020,6 +1020,26 @@ fn main() -> anyhow::Result<()> {
 
     let project_root = std::env::current_dir()?;
     let output = cli.output_mode();
+
+    // Check that we're inside a bones project for commands that need one.
+    let needs_project = !matches!(
+        cli.command,
+        Commands::Init(_)
+            | Commands::Completions(_)
+            | Commands::MergeTool { .. }
+            | Commands::MergeDriver { .. }
+    );
+    if needs_project && !project_root.join(".bones").is_dir() {
+        render_error(
+            output,
+            &CliError::with_details(
+                "not a bones project (`.bones` directory not found)",
+                "run `bn init` to create a bones project in this directory",
+                "not_a_project",
+            ),
+        )?;
+        anyhow::bail!("not a bones project");
+    }
 
     let command_result = match cli.command {
         Commands::Init(args) => timing::timed("cmd.init", || {
