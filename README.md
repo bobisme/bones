@@ -106,7 +106,7 @@ bn data migrate-from-beads --beads-jsonl export.jsonl
 ## Installation
 
 ```bash
-cargo install --locked --git https://github.com/bobisme/bones --tag v0.17.2
+cargo install --locked --git https://github.com/bobisme/bones --tag v0.18.0
 ```
 
 ## Shell completions
