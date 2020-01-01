@@ -890,10 +890,10 @@ pub fn try_open_projection(path: &std::path::Path) -> Result<Option<Connection>>
     // Derive the .bones/ directory from the db path (e.g. .bones/bones.db → .bones/).
     // If we can locate it, delegate to ensure_projection which auto-rebuilds
     // a stale or missing projection from the event log.
-    if let Some(bones_dir) = path.parent() {
-        if bones_dir.join("events").is_dir() {
-            return super::ensure_projection(bones_dir);
-        }
+    if let Some(bones_dir) = path.parent()
+        && bones_dir.join("events").is_dir()
+    {
+        return super::ensure_projection(bones_dir);
     }
 
     // Fallback: no events directory found — open without auto-rebuild.
@@ -905,6 +905,11 @@ pub fn try_open_projection(path: &std::path::Path) -> Result<Option<Connection>>
 /// Used internally by [`ensure_projection`](super::ensure_projection) to
 /// avoid infinite recursion, and as a fallback when the events directory
 /// is not discoverable from the db path.
+///
+/// # Errors
+///
+/// Returns an error if the database exists but cannot be opened or fails
+/// an integrity check.
 pub fn try_open_projection_raw(path: &std::path::Path) -> Result<Option<Connection>> {
     if !path.exists() {
         return Ok(None);

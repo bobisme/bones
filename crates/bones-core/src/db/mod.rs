@@ -71,24 +71,21 @@ pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
     let db_path = bones_dir.join("bones.db");
 
     // Try opening existing projection (raw to avoid recursion).
-    let needs_rebuild = match query::try_open_projection_raw(&db_path)? {
-        Some(conn) => {
-            // Check if projection is current by comparing cursor against
-            // shard content. If cursor is at 0 with no hash, the DB was
-            // freshly created and needs a full rebuild.
-            let (offset, hash) = query::get_projection_cursor(&conn).unwrap_or((0, None));
-            if offset == 0 && hash.is_none() {
-                true
-            } else {
-                // Check if there are events beyond the cursor.
-                let mgr = crate::shard::ShardManager::new(bones_dir);
-                let total_bytes = mgr.total_content_len().unwrap_or(0);
-                let cursor = usize::try_from(offset).unwrap_or(0);
-                total_bytes > cursor
-            }
+    let needs_rebuild = query::try_open_projection_raw(&db_path)?.is_none_or(|conn| {
+        // Check if projection is current by comparing cursor against
+        // shard content. If cursor is at 0 with no hash, the DB was
+        // freshly created and needs a full rebuild.
+        let (offset, hash) = query::get_projection_cursor(&conn).unwrap_or((0, None));
+        if offset == 0 && hash.is_none() {
+            true
+        } else {
+            // Check if there are events beyond the cursor.
+            let mgr = crate::shard::ShardManager::new(bones_dir);
+            let total_bytes = mgr.total_content_len().unwrap_or(0);
+            let cursor = usize::try_from(offset).unwrap_or(0);
+            total_bytes > cursor
         }
-        None => true,
-    };
+    });
 
     if needs_rebuild {
         debug!("projection stale or missing, running incremental rebuild");

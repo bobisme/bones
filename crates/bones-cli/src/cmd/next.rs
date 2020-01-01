@@ -45,7 +45,7 @@ pub struct NextArgs {
     pub mode: ScheduleMode,
 
     /// Atomically claim the next bone(s) for yourself (open -> doing).
-    /// Resolves agent from --agent flag, BONES_AGENT, or AGENT env.
+    /// Resolves agent from `--agent` flag, `BONES_AGENT`, or `AGENT` env.
     #[arg(long, conflicts_with = "assign_to")]
     pub take: bool,
 
@@ -218,11 +218,7 @@ pub fn run_next(
 
         // Atomic claim if requested
         if !assign_agents.is_empty() {
-            let claim_agent = if args.take {
-                assign_agents[0].clone()
-            } else {
-                assign_agents[0].clone()
-            };
+            let claim_agent = assign_agents[0].clone();
             match claim_assignment(&assignment.id, &claim_agent, project_root) {
                 Ok(prev) => {
                     assignment.agent = Some(claim_agent);
@@ -232,7 +228,7 @@ pub fn run_next(
                     render_error(
                         output,
                         &CliError::with_details(
-                            &format!("failed to claim {}: {e}", assignment.id),
+                            format!("failed to claim {}: {e}", assignment.id),
                             "the bone may already be in progress",
                             "claim_failed",
                         ),
