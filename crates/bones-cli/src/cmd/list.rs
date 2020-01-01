@@ -20,7 +20,7 @@ use std::str::FromStr;
 pub struct ListArgs {
     /// Filter by state: open, doing, done, archived.
     /// Default: open (when no other filters are set).
-    #[arg(long)]
+    #[arg(long, alias = "status")]
     pub state: Option<String>,
 
     /// Include all states when no explicit state filter is provided.

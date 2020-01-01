@@ -120,6 +120,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut TuiApp)
                 Event::Paste(text) => app.handle_paste(text),
                 _ => {}
             }
+            if app.list_view.needs_terminal_refresh {
+                app.list_view.needs_terminal_refresh = false;
+                terminal.clear().context("clear terminal after editor")?;
+            }
         } else {
             app.tick()?;
         }

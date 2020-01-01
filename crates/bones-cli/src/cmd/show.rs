@@ -190,8 +190,7 @@ pub fn run_show(
 
 /// Render full item details in human-readable format.
 fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    pretty_section(w, &format!("Item {}", item.id))?;
-    writeln!(w, "{}", item.title)?;
+    writeln!(w, "{}: {}", item.id, item.title)?;
     pretty_rule(w)?;
     pretty_kv(w, "kind", &item.kind)?;
     pretty_kv(w, "state", &item.state)?;
@@ -243,9 +242,7 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
 }
 
 fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(w, "Item {}", item.id)?;
-    writeln!(w, "{:-<72}", "")?;
-    writeln!(w, "{}", item.title)?;
+    writeln!(w, "{}: {}", item.id, item.title)?;
     writeln!(w, "kind:        {}", item.kind)?;
     writeln!(w, "state:       {}", item.state)?;
     writeln!(w, "urgency:     {}", item.urgency)?;

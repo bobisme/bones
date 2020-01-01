@@ -1,0 +1,2 @@
+{"ts":"2026-02-25T14:04:50.085358667Z","author":"bones-dev","event":"ReviewCreated","data":{"review_id":"cr-1q3t","jj_change_id":"detached:f9721c42e212d5c6ad5b8f0963ea558f3c85e23c","scm_kind":"git","scm_anchor":"detached:f9721c42e212d5c6ad5b8f0963ea558f3c85e23c","initial_commit":"f9721c42e212d5c6ad5b8f0963ea558f3c85e23c","title":"bn-1df8: list --state should alias to --status"}}
+{"ts":"2026-02-25T14:08:35.527742596Z","author":"bones-dev","event":"ReviewApproved","data":{"review_id":"cr-1q3t"}}

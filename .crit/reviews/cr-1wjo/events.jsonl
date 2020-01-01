@@ -1,0 +1,2 @@
+{"ts":"2026-02-25T14:04:51.583975183Z","author":"bones-dev","event":"ReviewCreated","data":{"review_id":"cr-1wjo","jj_change_id":"detached:8b74a8e09828d4398cdb3ac6fe1f636df139c6bb","scm_kind":"git","scm_anchor":"detached:8b74a8e09828d4398cdb3ac6fe1f636df139c6bb","initial_commit":"8b74a8e09828d4398cdb3ac6fe1f636df139c6bb","title":"bn-1l6w: description panel 60% width by default"}}
+{"ts":"2026-02-25T14:07:39.366806470Z","author":"bob","event":"ReviewApproved","data":{"review_id":"cr-1wjo"}}

@@ -1,0 +1,2 @@
+{"ts":"2026-02-25T14:04:52.593169754Z","author":"bones-dev","event":"ReviewCreated","data":{"review_id":"cr-1q06","jj_change_id":"detached:49ffee14f15c942a6f4d3c4d6cca97e3e3cd8525","scm_kind":"git","scm_anchor":"detached:49ffee14f15c942a6f4d3c4d6cca97e3e3cd8525","initial_commit":"49ffee14f15c942a6f4d3c4d6cca97e3e3cd8525","title":"bn-37vw: ctrl+g opens editor for descriptions and comments"}}
+{"ts":"2026-02-25T14:08:35.654187474Z","author":"bones-dev","event":"ReviewApproved","data":{"review_id":"cr-1q06"}}

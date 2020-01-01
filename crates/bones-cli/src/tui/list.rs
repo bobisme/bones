@@ -40,6 +40,7 @@ use ratatui::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    io::Write as _,
     path::Path,
     path::PathBuf,
     time::{Duration, Instant},
@@ -768,6 +769,7 @@ enum CreateAction {
     None,
     Submit,
     Cancel,
+    OpenEditor,
 }
 
 #[derive(Debug, Clone)]
@@ -934,6 +936,12 @@ impl CreateModalState {
                 }
                 return CreateAction::None;
             }
+            KeyCode::Char('g') if ctrl => {
+                if matches!(self.focus, CreateField::Title | CreateField::Description) {
+                    return CreateAction::OpenEditor;
+                }
+                return CreateAction::None;
+            }
             KeyCode::BackTab => {
                 self.focus = self.focus.prev();
                 return CreateAction::None;
@@ -1040,11 +1048,50 @@ impl CreateModalState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Open `$EDITOR` (falling back to `vi`) with `initial` content.
+///
+/// Suspends the TUI's raw-mode/alt-screen, launches the editor, then
+/// re-enters raw-mode/alt-screen.  Returns the edited text on success,
+/// or `None` if the editor exited with a non-zero status.
+fn open_in_editor(initial: &str) -> anyhow::Result<Option<String>> {
+    use crossterm::{event::{DisableMouseCapture, EnableMouseCapture}, execute, terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode}};
+
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| "vi".to_string());
+
+    let tmp_path = std::env::temp_dir().join(format!("bones-edit-{}.md", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        f.write_all(initial.as_bytes())?;
+    }
+
+    disable_raw_mode()?;
+    execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+
+    let status = std::process::Command::new(&editor).arg(&tmp_path).status();
+
+    enable_raw_mode()?;
+    execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+
+    match status {
+        Ok(s) if s.success() => {
+            let content = std::fs::read_to_string(&tmp_path).unwrap_or_default();
+            let _ = std::fs::remove_file(&tmp_path);
+            Ok(Some(content))
+        }
+        _ => {
+            let _ = std::fs::remove_file(&tmp_path);
+            Ok(None)
+        }
+    }
+}
+
 enum NoteAction {
     None,
     Submit,
     Cancel,
+    OpenEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1098,6 +1145,7 @@ impl NoteModalState {
                     NoteAction::Submit
                 }
             }
+            KeyCode::Char('g') if ctrl => NoteAction::OpenEditor,
             _ => {
                 edit_multiline(&mut self.lines, &mut self.row, &mut self.col, key);
                 NoteAction::None
@@ -1578,6 +1626,9 @@ pub struct ListView {
     help_query: String,
     /// Cursor position within `help_query`.
     help_cursor: usize,
+    /// Set after an external editor is closed; the run loop should clear the
+    /// terminal so the TUI repaints cleanly.
+    pub needs_terminal_refresh: bool,
 }
 
 impl ListView {
@@ -1636,7 +1687,7 @@ impl ListView {
             status_msg: None,
             show_detail: false,
             show_done: false,
-            split_percent: 52,
+            split_percent: 40,
             detail_scroll: 0,
             list_area: Rect::default(),
             detail_area: Rect::default(),
@@ -1648,6 +1699,7 @@ impl ListView {
             note_modal: None,
             help_query: String::new(),
             help_cursor: 0,
+            needs_terminal_refresh: false,
         };
         view.reload()?;
         Ok(view)
@@ -2192,6 +2244,33 @@ impl ListView {
                 self.input_mode = InputMode::Normal;
                 self.create_from_draft(draft)?;
             }
+            CreateAction::OpenEditor => {
+                let modal = self.create_modal.as_mut().unwrap();
+                let initial = match modal.focus {
+                    CreateField::Title => modal.title.clone(),
+                    CreateField::Description => modal.description.join("\n"),
+                    _ => String::new(),
+                };
+                if let Ok(Some(edited)) = open_in_editor(&initial) {
+                    let modal = self.create_modal.as_mut().unwrap();
+                    match modal.focus {
+                        CreateField::Title => {
+                            modal.title = edited.trim_end_matches('\n').to_string();
+                            modal.title_cursor = modal.title.chars().count();
+                        }
+                        CreateField::Description => {
+                            modal.description = edited.lines().map(str::to_owned).collect();
+                            if modal.description.is_empty() {
+                                modal.description.push(String::new());
+                            }
+                            modal.desc_row = modal.description.len().saturating_sub(1);
+                            modal.desc_col = modal.description.last().map(|l| l.chars().count()).unwrap_or(0);
+                        }
+                        _ => {}
+                    }
+                }
+                self.needs_terminal_refresh = true;
+            }
         }
         Ok(())
     }
@@ -2287,6 +2366,19 @@ impl ListView {
             NoteAction::Cancel => {
                 self.note_modal = None;
                 self.input_mode = InputMode::Normal;
+            }
+            NoteAction::OpenEditor => {
+                let current = modal.text();
+                if let Ok(Some(edited)) = open_in_editor(&current) {
+                    let modal = self.note_modal.as_mut().unwrap();
+                    modal.lines = edited.lines().map(str::to_owned).collect();
+                    if modal.lines.is_empty() {
+                        modal.lines.push(String::new());
+                    }
+                    modal.row = modal.lines.len().saturating_sub(1);
+                    modal.col = modal.lines.last().map(|l| l.chars().count()).unwrap_or(0);
+                }
+                self.needs_terminal_refresh = true;
             }
             NoteAction::Submit => {
                 let body = modal.text();
@@ -2816,6 +2908,9 @@ fn kind_state_icon(kind: &str, state: &str) -> &'static str {
 fn icon_color(kind: &str, state: &str) -> Color {
     if state == "done" {
         return Color::DarkGray;
+    }
+    if state == "doing" {
+        return Color::Yellow;
     }
     match kind {
         "bug" => Color::Red,
@@ -4549,6 +4644,17 @@ mod tests {
         assert_eq!(kind_state_icon("bug", "done"), "●");
     }
 
+    #[test]
+    fn icon_color_doing_is_yellow() {
+        assert_eq!(icon_color("task", "doing"), Color::Yellow);
+        assert_eq!(icon_color("bug", "doing"), Color::Yellow);
+        assert_eq!(icon_color("goal", "doing"), Color::Yellow);
+        assert_eq!(icon_color("task", "done"), Color::DarkGray);
+        assert_eq!(icon_color("task", "open"), Color::Green);
+        assert_eq!(icon_color("bug", "open"), Color::Red);
+        assert_eq!(icon_color("goal", "open"), Color::Cyan);
+    }
+
     // -----------------------------------------------------------------------
     // Cycle option tests
     // -----------------------------------------------------------------------
@@ -4698,7 +4804,7 @@ mod tests {
             status_msg: None,
             show_detail: false,
             show_done: false,
-            split_percent: 52,
+            split_percent: 40,
             detail_scroll: 0,
             list_area: Rect::default(),
             detail_area: Rect::default(),
@@ -4710,6 +4816,7 @@ mod tests {
             note_modal: None,
             help_query: String::new(),
             help_cursor: 0,
+            needs_terminal_refresh: false,
         };
         view.apply_filter_and_sort();
         view
@@ -4803,7 +4910,7 @@ mod tests {
             status_msg: None,
             show_detail: false,
             show_done: false,
-            split_percent: 52,
+            split_percent: 40,
             detail_scroll: 0,
             list_area: Rect::default(),
             detail_area: Rect::default(),
@@ -4815,6 +4922,7 @@ mod tests {
             note_modal: None,
             help_query: String::new(),
             help_cursor: 0,
+            needs_terminal_refresh: false,
         };
         view.apply_filter_and_sort();
         assert_eq!(view.table_state.selected(), None);
