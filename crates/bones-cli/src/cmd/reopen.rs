@@ -245,10 +245,7 @@ pub fn run_reopen(
     let payload = ReopenBatchOutput { results };
 
     render(output, &payload, |r, w| {
-        writeln!(w, "Reopen results")?;
-        writeln!(w, "{:-<88}", "")?;
         writeln!(w, "{:<4}  {:<16}  TRANSITION", "OK", "ID")?;
-        writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
                 writeln!(
