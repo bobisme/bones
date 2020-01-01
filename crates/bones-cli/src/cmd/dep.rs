@@ -177,6 +177,7 @@ fn emit_event(
 // Command runners
 // ---------------------------------------------------------------------------
 
+#[tracing::instrument(skip_all, name = "cmd.dep")]
 pub fn run_dep(
     args: &DepArgs,
     agent_flag: Option<&str>,

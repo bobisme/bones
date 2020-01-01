@@ -33,6 +33,7 @@ struct TriageRow {
 /// - Quick Wins
 /// - Needs Decomposition (L/XL tasks with no children)
 /// - Cycles
+#[tracing::instrument(skip_all, name = "cmd.triage")]
 pub fn run_triage(
     _args: &TriageArgs,
     output: OutputMode,

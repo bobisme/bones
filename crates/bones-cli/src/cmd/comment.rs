@@ -135,6 +135,7 @@ fn timeline_rows(mut comments: Vec<query::QueryComment>) -> Vec<CommentRow> {
         .collect()
 }
 
+#[tracing::instrument(skip_all, name = "cmd.comment")]
 pub fn run_comment(
     args: &CommentArgs,
     agent_flag: Option<&str>,

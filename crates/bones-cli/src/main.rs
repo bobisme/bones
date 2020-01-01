@@ -34,18 +34,17 @@ mod cmd;
 mod git;
 mod itc_state;
 mod output;
+mod telemetry;
 mod tui;
 mod validate;
 
 use bones_core::timing;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use output::{OutputMode, resolve_output_mode};
-use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -923,28 +922,11 @@ enum HookCommand {
     Install,
 }
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_env("BONES_LOG").unwrap_or_else(|_| {
-        EnvFilter::new(if env::var("DEBUG").is_ok() {
-            "bones=debug,info"
-        } else {
-            "bones=info,warn"
-        })
-    });
-
-    let format = env::var("BONES_LOG_FORMAT").unwrap_or_else(|_| "compact".to_string());
-
-    let registry = tracing_subscriber::registry().with(filter);
-
-    match format.as_str() {
-        "json" => {
-            registry.with(fmt::layer().json().with_ansi(false)).init();
-        }
-        _ => {
-            registry.with(fmt::layer().compact()).init();
-        }
-    }
-}
+// Telemetry initialization is now handled by the `telemetry` module.
+// See `telemetry::init()` which supports:
+// - OTEL_EXPORTER_OTLP_ENDPOINT for OTLP export
+// - TRACEPARENT for W3C distributed tracing
+// - "stderr" mode for JSON debug output
 
 /// Count the number of lines in a file
 fn count_lines(path: &PathBuf) -> anyhow::Result<usize> {
@@ -1033,7 +1015,7 @@ fn setup_merge_tool() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    init_tracing();
+    let _telemetry_guard = telemetry::init();
 
     let cli = Cli::parse();
     let timing_enabled = cli.timing || timing::timing_enabled_from_env();

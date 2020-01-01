@@ -156,6 +156,7 @@ fn read_description(desc: &Option<String>) -> anyhow::Result<Option<String>> {
     }
 }
 
+#[tracing::instrument(skip_all, name = "cmd.create")]
 pub fn run_create(
     args: &CreateArgs,
     agent_flag: Option<&str>,

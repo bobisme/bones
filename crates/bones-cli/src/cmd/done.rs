@@ -303,6 +303,7 @@ fn item_ids(args: &DoneArgs) -> impl Iterator<Item = &str> {
     std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
 }
 
+#[tracing::instrument(skip_all, name = "cmd.done")]
 pub fn run_done(
     args: &DoneArgs,
     agent_flag: Option<&str>,

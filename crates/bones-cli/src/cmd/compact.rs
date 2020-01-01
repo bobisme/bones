@@ -111,11 +111,11 @@ pub fn run_compact(args: &CompactArgs, output: OutputMode, project_root: &Path) 
                     Ok(true) => {}
                     Ok(false) => {
                         all_ok = false;
-                        eprintln!("WARN: verification failed for {item_id}: state mismatch");
+                        tracing::warn!(item_id, "verification failed: state mismatch");
                     }
                     Err(e) => {
                         all_ok = false;
-                        eprintln!("WARN: verification error for {item_id}: {e}");
+                        tracing::warn!(item_id, error = %e, "verification error");
                     }
                 }
             }
@@ -147,7 +147,7 @@ pub fn run_compact(args: &CompactArgs, output: OutputMode, project_root: &Path) 
                     .context("append snapshot to shard")?;
             }
         } else {
-            eprintln!("Skipping write: verification failures detected");
+            tracing::warn!("skipping write: verification failures detected");
         }
     }
 

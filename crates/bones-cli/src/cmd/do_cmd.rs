@@ -175,6 +175,7 @@ fn item_ids(args: &DoArgs) -> impl Iterator<Item = &str> {
     std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
 }
 
+#[tracing::instrument(skip_all, name = "cmd.do")]
 pub fn run_do(
     args: &DoArgs,
     agent_flag: Option<&str>,

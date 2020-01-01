@@ -72,6 +72,7 @@ struct EmptyNext {
 ///
 /// - default: returns top-1 ready bone with explanation
 /// - `bn next N`: returns up to `N` ranked assignments (one per slot)
+#[tracing::instrument(skip_all, name = "cmd.next")]
 pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     let agent_slots = match parse_assignment_count(args.count) {
         Ok(slots) => slots,

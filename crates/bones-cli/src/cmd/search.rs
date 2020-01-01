@@ -88,6 +88,7 @@ pub struct SearchOutput {
 ///
 /// Returns an error if the projection database is missing, the FTS5 query
 /// is malformed, or output rendering fails.
+#[tracing::instrument(skip_all, name = "cmd.search")]
 pub fn run_search(
     args: &SearchArgs,
     output: OutputMode,
