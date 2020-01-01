@@ -173,15 +173,24 @@ fn next_returns_unblocked_item() {
     let dir = TempDir::new().unwrap();
     let graph = setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
 
-    // Must be a single-item object with required fields.
-    assert!(next["id"].is_string(), "next --json must have 'id'");
-    assert!(next["title"].is_string(), "next --json must have 'title'");
-    assert!(next["score"].is_number(), "next --json must have 'score'");
+    // Must be NextAssignments: { mode, assignments: [...] }
+    let assignments = json["assignments"]
+        .as_array()
+        .expect("next --json must have 'assignments' array");
+    assert!(
+        !assignments.is_empty(),
+        "assignments should be non-empty for a project with items"
+    );
+
+    let next = &assignments[0];
+    assert!(next["id"].is_string(), "assignment must have 'id'");
+    assert!(next["title"].is_string(), "assignment must have 'title'");
+    assert!(next["score"].is_number(), "assignment must have 'score'");
     assert!(
         next["explanation"].is_string(),
-        "next --json must have 'explanation'"
+        "assignment must have 'explanation'"
     );
 
     // The recommended item must NOT be one of the blocked items.
@@ -240,7 +249,8 @@ fn next_json_score_is_non_negative() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let score = next["score"].as_f64().expect("score must be a number");
     assert!(score >= 0.0, "score must be non-negative, got {score}");
 }
@@ -250,7 +260,8 @@ fn next_json_explanation_is_non_empty() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let explanation = next["explanation"].as_str().unwrap_or("");
     assert!(
         !explanation.is_empty(),
@@ -311,8 +322,11 @@ fn next_deterministic_for_stable_graph() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let first = run_json(dir.path(), &["next"]);
-    let second = run_json(dir.path(), &["next"]);
+    let first_json = run_json(dir.path(), &["next"]);
+    let second_json = run_json(dir.path(), &["next"]);
+
+    let first = &first_json["assignments"].as_array().expect("must have assignments")[0];
+    let second = &second_json["assignments"].as_array().expect("must have assignments")[0];
 
     assert_eq!(
         first["id"], second["id"],
@@ -827,7 +841,8 @@ fn did_records_feedback_and_returns_json() {
     setup_triage_graph(dir.path());
 
     // Use one of the unblocked items.
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     let output = bn_cmd(dir.path())
@@ -859,7 +874,8 @@ fn skip_records_feedback_and_returns_json() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     let output = bn_cmd(dir.path())
@@ -888,7 +904,8 @@ fn did_human_output_is_non_empty() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_human_cmd(dir.path())
@@ -903,7 +920,8 @@ fn skip_human_output_is_non_empty() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_human_cmd(dir.path())
@@ -941,7 +959,8 @@ fn did_then_skip_both_succeed() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_cmd(dir.path()).args(["did", id]).assert().success();
@@ -958,7 +977,8 @@ fn skip_feedback_does_not_crash_next_invocation() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let first_next = run_json(dir.path(), &["next"]);
+    let first_json = run_json(dir.path(), &["next"]);
+    let first_next = &first_json["assignments"].as_array().expect("must have assignments")[0];
     let id = first_next["id"].as_str().unwrap();
 
     bn_cmd(dir.path()).args(["skip", id]).assert().success();
@@ -1033,7 +1053,8 @@ fn next_json_id_matches_known_schema() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    let next = run_json(dir.path(), &["next"]);
+    let json = run_json(dir.path(), &["next"]);
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("id must be a string");
     assert!(
         id.starts_with("bn-"),

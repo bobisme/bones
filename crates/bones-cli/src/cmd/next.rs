@@ -41,14 +41,6 @@ pub struct NextArgs {
 }
 
 #[derive(Debug, Serialize)]
-struct NextPick {
-    id: String,
-    title: String,
-    score: f64,
-    explanation: String,
-}
-
-#[derive(Debug, Serialize)]
 struct NextAssignments {
     mode: ScheduleMode,
     assignments: Vec<NextAssignment>,
@@ -154,20 +146,39 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             });
         };
 
-        let next = NextPick {
+        // Build consistent NextAssignments structure (same shape as multi-slot)
+        let assignment = NextAssignment {
+            agent_slot: 1,
             id: top.id.clone(),
             title: top.title.clone(),
             score: top.score,
             explanation: top.explanation.clone(),
         };
+        let payload = NextAssignments {
+            mode: args.mode,
+            assignments: vec![assignment],
+        };
 
         let (min_score, max_score) = score_bounds(&snapshot.unblocked_ranked);
 
+        // JSON uses consistent NextAssignments format; text/pretty use card rendering
         return render_mode(
             output,
-            &next,
-            |item, w| render_next_text(item, w),
-            |item, w| render_next_card(item, w, min_score, max_score),
+            &payload,
+            |p, w| {
+                if let Some(a) = p.assignments.first() {
+                    render_next_text_from_assignment(a, w)
+                } else {
+                    Ok(())
+                }
+            },
+            |p, w| {
+                if let Some(a) = p.assignments.first() {
+                    render_next_card_from_assignment(a, w, min_score, max_score)
+                } else {
+                    Ok(())
+                }
+            },
         );
     }
 
@@ -408,8 +419,8 @@ fn display_score(score: f64) -> String {
     }
 }
 
-fn render_next_card(
-    item: &NextPick,
+fn render_next_card_from_assignment(
+    item: &NextAssignment,
     w: &mut dyn Write,
     min_score: f64,
     max_score: f64,
@@ -448,7 +459,7 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
     Ok(())
 }
 
-fn render_next_text(item: &NextPick, w: &mut dyn Write) -> std::io::Result<()> {
+fn render_next_text_from_assignment(item: &NextAssignment, w: &mut dyn Write) -> std::io::Result<()> {
     let score = display_score(item.score);
     writeln!(
         w,
