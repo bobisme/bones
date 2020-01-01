@@ -4,8 +4,11 @@ use std::path::Path;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 
+use bones_core::db;
+use bones_core::db::project;
 use bones_core::db::query::{self, ItemFilter, SortOrder};
 use bones_core::model::item::Urgency;
+use bones_core::shard::ShardManager;
 use bones_triage::graph::RawGraph;
 use bones_triage::schedule::{
     WhittleConfig, assign_fallback, check_indexability, compute_whittle_indices,
@@ -14,6 +17,8 @@ use bones_triage::schedule::{
 
 use std::collections::{HashMap, HashSet};
 
+use crate::agent;
+use crate::cmd::do_cmd;
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
 use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 
@@ -38,6 +43,16 @@ pub struct NextArgs {
     /// Scheduling mode for multi-slot assignments.
     #[arg(long, value_enum, default_value_t = ScheduleMode::Balanced)]
     pub mode: ScheduleMode,
+
+    /// Atomically claim the next bone(s) for yourself (open -> doing).
+    /// Resolves agent from --agent flag, BONES_AGENT, or AGENT env.
+    #[arg(long, conflicts_with = "assign_to")]
+    pub take: bool,
+
+    /// Atomically assign the next bone(s) to specific agent(s) (open -> doing).
+    /// May be repeated; each agent gets one slot. Overrides count.
+    #[arg(long = "assign-to", conflicts_with = "take")]
+    pub assign_to: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +68,10 @@ struct NextAssignment {
     title: String,
     score: f64,
     explanation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_state: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,9 +83,45 @@ struct EmptyNext {
 ///
 /// - default: returns top-1 ready bone with explanation
 /// - `bn next N`: returns up to `N` ranked assignments (one per slot)
+/// - `bn next --take`: atomically pick next and transition to doing
+/// - `bn next --assign-to a1 --assign-to a2`: assign next N bones to specific agents
 #[tracing::instrument(skip_all, name = "cmd.next")]
-pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
-    let agent_slots = match parse_assignment_count(args.count) {
+pub fn run_next(
+    args: &NextArgs,
+    agent_flag: Option<&str>,
+    output: OutputMode,
+    project_root: &Path,
+) -> anyhow::Result<()> {
+    // Resolve assignment agents (if any)
+    let assign_agents: Vec<String> = if args.take {
+        let agent = match agent::require_agent(agent_flag) {
+            Ok(a) => a,
+            Err(e) => {
+                render_error(
+                    output,
+                    &CliError::with_details(
+                        &e.message,
+                        "Set --agent, BONES_AGENT, or AGENT env for --take",
+                        e.code,
+                    ),
+                )?;
+                anyhow::bail!("{}", e.message);
+            }
+        };
+        vec![agent]
+    } else if !args.assign_to.is_empty() {
+        args.assign_to.clone()
+    } else {
+        vec![]
+    };
+
+    let effective_count = if !assign_agents.is_empty() && !args.take {
+        assign_agents.len()
+    } else {
+        args.count
+    };
+
+    let agent_slots = match parse_assignment_count(effective_count) {
         Ok(slots) => slots,
         Err(cli_err) => {
             render_error(output, &cli_err)?;
@@ -151,13 +206,42 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         };
 
         // Build consistent NextAssignments structure (same shape as multi-slot)
-        let assignment = NextAssignment {
+        let mut assignment = NextAssignment {
             agent_slot: 1,
             id: top.id.clone(),
             title: top.title.clone(),
             score: top.score,
             explanation: top.explanation.clone(),
+            agent: None,
+            previous_state: None,
         };
+
+        // Atomic claim if requested
+        if !assign_agents.is_empty() {
+            let claim_agent = if args.take {
+                assign_agents[0].clone()
+            } else {
+                assign_agents[0].clone()
+            };
+            match claim_assignment(&assignment.id, &claim_agent, project_root) {
+                Ok(prev) => {
+                    assignment.agent = Some(claim_agent);
+                    assignment.previous_state = Some(prev);
+                }
+                Err(e) => {
+                    render_error(
+                        output,
+                        &CliError::with_details(
+                            &format!("failed to claim {}: {e}", assignment.id),
+                            "the bone may already be in progress",
+                            "claim_failed",
+                        ),
+                    )?;
+                    anyhow::bail!("failed to claim {}: {e}", assignment.id);
+                }
+            }
+        }
+
         let payload = NextAssignments {
             mode: args.mode,
             assignments: vec![assignment],
@@ -186,8 +270,32 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         );
     }
 
-    let assignments =
+    let mut assignments =
         multi_agent_assignments(&conn, &snapshot, agent_slots, args.mode, &needs_decomp)?;
+
+    // Atomic claim if requested
+    if !assign_agents.is_empty() {
+        for (i, assignment) in assignments.iter_mut().enumerate() {
+            let claim_agent = if args.take {
+                assign_agents[0].clone()
+            } else {
+                assign_agents
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| assign_agents.last().unwrap().clone())
+            };
+            match claim_assignment(&assignment.id, &claim_agent, project_root) {
+                Ok(prev) => {
+                    assignment.agent = Some(claim_agent);
+                    assignment.previous_state = Some(prev);
+                }
+                Err(e) => {
+                    // Log failure but continue with remaining assignments
+                    tracing::warn!("failed to claim {}: {e}", assignment.id);
+                }
+            }
+        }
+    }
 
     let payload = NextAssignments {
         mode: args.mode,
@@ -276,6 +384,8 @@ fn multi_agent_assignments(
                         "{} (urgent-chain: prerequisite of blocked urgent item)",
                         base.explanation
                     ),
+                    agent: None,
+                    previous_state: None,
                 });
                 assigned_ids.insert(base.id.clone());
             }
@@ -317,6 +427,8 @@ fn multi_agent_assignments(
                 title: base.title.clone(),
                 score: base.score,
                 explanation: format!("{} (whittle={:.4})", base.explanation, item.index),
+                agent: None,
+                previous_state: None,
             });
             assigned_ids.insert(base.id.clone());
             if assignments.len() >= agent_slots {
@@ -348,6 +460,8 @@ fn multi_agent_assignments(
             title: item.title.clone(),
             score: item.score,
             explanation: format!("{} (fallback-scheduler)", item.explanation),
+            agent: None,
+            previous_state: None,
         });
         assigned_ids.insert(item.id.clone());
         if assignments.len() >= agent_slots {
@@ -356,6 +470,23 @@ fn multi_agent_assignments(
     }
 
     Ok(assignments)
+}
+
+/// Atomically transition a bone to "doing" state, returning the previous state.
+fn claim_assignment(
+    item_id: &str,
+    claim_agent: &str,
+    project_root: &Path,
+) -> anyhow::Result<String> {
+    let bones_dir = do_cmd::find_bones_dir(project_root)
+        .ok_or_else(|| anyhow::anyhow!(".bones directory not found"))?;
+    let db_path = bones_dir.join("bones.db");
+    let conn = db::open_projection(&db_path)?;
+    let _ = project::ensure_tracking_table(&conn);
+    let shard_mgr = ShardManager::new(&bones_dir);
+
+    let result = do_cmd::run_do_single(project_root, &conn, &shard_mgr, claim_agent, item_id)?;
+    Ok(result.previous_state)
 }
 
 fn parse_assignment_count(count: usize) -> Result<usize, CliError> {
@@ -437,7 +568,15 @@ fn render_next_card_from_assignment(
     writeln!(w, "ID:    {}", item.id)?;
     writeln!(w, "Title: {}", item.title)?;
     writeln!(w, "Score: [{bar}] {score}")?;
-    writeln!(w, "Why:   {}", item.explanation)
+    writeln!(w, "Why:   {}", item.explanation)?;
+    if let Some(ref agent) = item.agent {
+        writeln!(
+            w,
+            "State: {} -> doing (assigned to {agent})",
+            item.previous_state.as_deref().unwrap_or("?"),
+        )?;
+    }
+    Ok(())
 }
 
 fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std::io::Result<()> {
@@ -445,18 +584,43 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
         return writeln!(w, "No assignments available.");
     }
 
+    let has_agents = payload.assignments.iter().any(|a| a.agent.is_some());
+
     writeln!(w, "Assignments")?;
     writeln!(w, "{:-<96}", "")?;
-    writeln!(w, "{:>4}  {:<16}  {:>8}  TITLE", "SLOT", "ID", "SCORE")?;
+    if has_agents {
+        writeln!(
+            w,
+            "{:>4}  {:<16}  {:>8}  {:<16}  TITLE",
+            "SLOT", "ID", "SCORE", "AGENT"
+        )?;
+    } else {
+        writeln!(w, "{:>4}  {:<16}  {:>8}  TITLE", "SLOT", "ID", "SCORE")?;
+    }
     writeln!(w, "{:-<96}", "")?;
 
     for assignment in &payload.assignments {
         let score = display_score(assignment.score);
-        writeln!(
-            w,
-            "{:>4}  {:<16}  {:>8}  {}",
-            assignment.agent_slot, assignment.id, score, assignment.title
-        )?;
+        if has_agents {
+            writeln!(
+                w,
+                "{:>4}  {:<16}  {:>8}  {:<16}  {}",
+                assignment.agent_slot,
+                assignment.id,
+                score,
+                assignment.agent.as_deref().unwrap_or("-"),
+                assignment.title,
+            )?;
+            if let Some(ref prev) = assignment.previous_state {
+                writeln!(w, "      state: {prev} -> doing")?;
+            }
+        } else {
+            writeln!(
+                w,
+                "{:>4}  {:<16}  {:>8}  {}",
+                assignment.agent_slot, assignment.id, score, assignment.title
+            )?;
+        }
         writeln!(w, "      why: {}", assignment.explanation)?;
     }
 
@@ -468,12 +632,27 @@ fn render_next_text_from_assignment(
     w: &mut dyn Write,
 ) -> std::io::Result<()> {
     let score = display_score(item.score);
-    writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
-    writeln!(
-        w,
-        "{}\t{}\t{}\t{}\t{}",
-        item.agent_slot, item.id, score, item.title, item.explanation
-    )
+    if item.agent.is_some() {
+        writeln!(w, "SLOT\tID\tSCORE\tTITLE\tAGENT\tSTATE\tREASON")?;
+        writeln!(
+            w,
+            "{}\t{}\t{}\t{}\t{}\t{} -> doing\t{}",
+            item.agent_slot,
+            item.id,
+            score,
+            item.title,
+            item.agent.as_deref().unwrap_or(""),
+            item.previous_state.as_deref().unwrap_or("?"),
+            item.explanation,
+        )
+    } else {
+        writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
+        writeln!(
+            w,
+            "{}\t{}\t{}\t{}\t{}",
+            item.agent_slot, item.id, score, item.title, item.explanation
+        )
+    }
 }
 
 fn render_assignments_text(payload: &NextAssignments, w: &mut dyn Write) -> std::io::Result<()> {
@@ -482,14 +661,37 @@ fn render_assignments_text(payload: &NextAssignments, w: &mut dyn Write) -> std:
         return Ok(());
     }
 
-    writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
-    for assignment in &payload.assignments {
-        let score = display_score(assignment.score);
-        writeln!(
-            w,
-            "{}\t{}\t{}\t{}\t{}",
-            assignment.agent_slot, assignment.id, score, assignment.title, assignment.explanation
-        )?;
+    let has_agents = payload.assignments.iter().any(|a| a.agent.is_some());
+    if has_agents {
+        writeln!(w, "SLOT\tID\tSCORE\tTITLE\tAGENT\tSTATE\tREASON")?;
+        for assignment in &payload.assignments {
+            let score = display_score(assignment.score);
+            writeln!(
+                w,
+                "{}\t{}\t{}\t{}\t{}\t{} -> doing\t{}",
+                assignment.agent_slot,
+                assignment.id,
+                score,
+                assignment.title,
+                assignment.agent.as_deref().unwrap_or(""),
+                assignment.previous_state.as_deref().unwrap_or("?"),
+                assignment.explanation,
+            )?;
+        }
+    } else {
+        writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
+        for assignment in &payload.assignments {
+            let score = display_score(assignment.score);
+            writeln!(
+                w,
+                "{}\t{}\t{}\t{}\t{}",
+                assignment.agent_slot,
+                assignment.id,
+                score,
+                assignment.title,
+                assignment.explanation
+            )?;
+        }
     }
 
     Ok(())

@@ -1145,7 +1145,7 @@ fn main() -> anyhow::Result<()> {
             cmd::graph::run_graph(args, output, &project_root)
         }),
         Commands::Next(ref args) => timing::timed("cmd.next", || {
-            cmd::next::run_next(args, output, &project_root)
+            cmd::next::run_next(args, cli.agent_flag(), output, &project_root)
         }),
         Commands::Triage(ref args) => timing::timed("cmd.triage", || match &args.command {
             None => {

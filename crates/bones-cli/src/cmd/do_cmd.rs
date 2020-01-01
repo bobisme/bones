@@ -38,9 +38,9 @@ pub struct DoArgs {
 
 /// JSON output for a successful `bn do` transition.
 #[derive(Debug, Serialize)]
-struct DoOutput {
+pub(crate) struct DoOutput {
     id: String,
-    previous_state: String,
+    pub(crate) previous_state: String,
     new_state: String,
     agent: String,
     event_hash: String,
@@ -66,7 +66,7 @@ struct DoBatchOutput {
 }
 
 /// Find the `.bones` directory by walking up from `start`.
-fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
+pub(crate) fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     let mut current = start.to_path_buf();
     loop {
         let candidate = current.join(".bones");
@@ -79,7 +79,7 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
-fn run_do_single(
+pub(crate) fn run_do_single(
     project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
