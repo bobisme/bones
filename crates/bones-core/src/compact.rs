@@ -143,7 +143,7 @@ impl WorkItemState {
     ///
     /// This captures per-field clock metadata needed for correct lattice
     /// merge when the snapshot is applied on another replica.
-    #[must_use]
+    #[must_use] 
     pub fn to_snapshot_payload(
         &self,
         item_id: &str,
@@ -179,7 +179,7 @@ impl WorkItemState {
     /// The resulting state can be merged with other states via the normal
     /// `WorkItemState::merge` — this is how snapshots participate in the
     /// lattice.
-    #[must_use]
+    #[must_use] 
     pub fn from_snapshot_payload(payload: &SnapshotPayload) -> Self {
         Self {
             title: LwwRegister::from(&payload.title),
@@ -333,7 +333,7 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
 /// * `state` — The current CRDT state of the item.
 /// * `min_age_days` — Minimum days in done/archived before compaction.
 /// * `now_us` — Current wall-clock time in microseconds.
-#[must_use]
+#[must_use] 
 pub fn is_eligible(state: &WorkItemState, min_age_days: u32, now_us: i64) -> bool {
     // Must be in a terminal phase.
     let phase = state.phase();

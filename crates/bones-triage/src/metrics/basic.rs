@@ -206,10 +206,9 @@ pub fn source_items(ng: &NormalizedGraph) -> Vec<String> {
             .neighbors_directed(idx, Direction::Incoming)
             .next()
             .is_none()
-            && let Some(scc) = ng.condensed.node_weight(idx)
-        {
-            sources.extend(scc.members.iter().cloned());
-        }
+            && let Some(scc) = ng.condensed.node_weight(idx) {
+                sources.extend(scc.members.iter().cloned());
+            }
     }
     sources.sort_unstable();
     sources
@@ -227,10 +226,9 @@ pub fn sink_items(ng: &NormalizedGraph) -> Vec<String> {
             .neighbors_directed(idx, Direction::Outgoing)
             .next()
             .is_none()
-            && let Some(scc) = ng.condensed.node_weight(idx)
-        {
-            sinks.extend(scc.members.iter().cloned());
-        }
+            && let Some(scc) = ng.condensed.node_weight(idx) {
+                sinks.extend(scc.members.iter().cloned());
+            }
     }
     sinks.sort_unstable();
     sinks

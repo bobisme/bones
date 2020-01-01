@@ -216,7 +216,9 @@ pub fn run_create(
     // 4. Parse urgency (optional, defaults to "default")
     let urgency: Urgency = match &args.urgency {
         Some(u) => u.parse().map_err(|_| {
-            let msg = format!("invalid urgency '{u}': expected one of urgent, default, punt");
+            let msg = format!(
+                "invalid urgency '{u}': expected one of urgent, default, punt"
+            );
             render_error(
                 output,
                 &CliError::with_details(
@@ -280,19 +282,18 @@ pub fn run_create(
         }
         if db_path.exists()
             && let Some(conn) = db::query::try_open_projection(&db_path)?
-            && !db::query::item_exists(&conn, parent_id)?
-        {
-            let msg = format!("parent item '{parent_id}' not found");
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID and ensure it exists",
-                    "parent_not_found",
-                ),
-            )?;
-            anyhow::bail!("{msg}");
-        }
+                && !db::query::item_exists(&conn, parent_id)? {
+                    let msg = format!("parent item '{parent_id}' not found");
+                    render_error(
+                        output,
+                        &CliError::with_details(
+                            &msg,
+                            "Check the item ID and ensure it exists",
+                            "parent_not_found",
+                        ),
+                    )?;
+                    anyhow::bail!("{msg}");
+                }
     }
 
     // 10. Validate --blocks targets exist
@@ -303,109 +304,108 @@ pub fn run_create(
         }
         if db_path.exists()
             && let Some(conn) = db::query::try_open_projection(&db_path)?
-            && !db::query::item_exists(&conn, block_target)?
-        {
-            let msg = format!("blocks target '{block_target}' not found");
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID and ensure it exists",
-                    "blocks_target_not_found",
-                ),
-            )?;
-            anyhow::bail!("{msg}");
-        }
+                && !db::query::item_exists(&conn, block_target)? {
+                    let msg = format!("blocks target '{block_target}' not found");
+                    render_error(
+                        output,
+                        &CliError::with_details(
+                            &msg,
+                            "Check the item ID and ensure it exists",
+                            "blocks_target_not_found",
+                        ),
+                    )?;
+                    anyhow::bail!("{msg}");
+                }
     }
 
     // 11. Check for duplicate items (unless --force is set)
     let mut duplicate_matches: Vec<DuplicateMatch> = Vec::new();
-    if !args.force
-        && db_path.exists()
-        && let Some(conn) = db::query::try_open_projection(&db_path)?
-    {
-        // Load project config to get search configuration
-        let project_config = load_project_config(project_root).unwrap_or_default();
+    if !args.force && db_path.exists()
+        && let Some(conn) = db::query::try_open_projection(&db_path)? {
+            // Load project config to get search configuration
+            let project_config = load_project_config(project_root).unwrap_or_default();
 
-        // Build search config from project config
-        let search_config = SearchConfig {
-            rrf_k: 60,
-            likely_duplicate_threshold: project_config.search.duplicate_threshold as f32,
-            possibly_related_threshold: 0.70,
-            maybe_related_threshold: 0.50,
-        };
-        let semantic_model = if project_config.search.semantic {
-            match SemanticModel::load() {
-                Ok(model) => Some(model),
-                Err(err) => {
-                    tracing::warn!(
-                        "semantic model unavailable during duplicate check; using lexical+structural only: {err}"
-                    );
-                    None
+            // Build search config from project config
+            let search_config = SearchConfig {
+                rrf_k: 60,
+                likely_duplicate_threshold: project_config.search.duplicate_threshold as f32,
+                possibly_related_threshold: 0.70,
+                maybe_related_threshold: 0.50,
+            };
+            let semantic_model = if project_config.search.semantic {
+                match SemanticModel::load() {
+                    Ok(model) => Some(model),
+                    Err(err) => {
+                        tracing::warn!(
+                            "semantic model unavailable during duplicate check; using lexical+structural only: {err}"
+                        );
+                        None
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
-        let dependency_graph = RawGraph::from_sqlite(&conn)
-            .map(|raw| raw.graph)
-            .unwrap_or_else(|err| {
-                tracing::warn!("unable to load dependency graph for duplicate detection: {err}");
-                petgraph::graph::DiGraph::new()
-            });
+            let dependency_graph = RawGraph::from_sqlite(&conn)
+                .map(|raw| raw.graph)
+                .unwrap_or_else(|err| {
+                    tracing::warn!(
+                        "unable to load dependency graph for duplicate detection: {err}"
+                    );
+                    petgraph::graph::DiGraph::new()
+                });
 
-        let duplicate_query = build_fts_query(&args.title, description.as_deref());
-        if duplicate_query.is_empty() {
-            tracing::debug!(
-                "duplicate check skipped: no usable lexical tokens from title/description"
-            );
-        } else {
-            // Run duplicate detection
-            match find_duplicates_with_model(
-                &duplicate_query,
-                &conn,
-                &dependency_graph,
-                &search_config,
-                semantic_model.as_ref(),
-                10,
-            ) {
-                Ok(candidates) => {
-                    if !candidates.is_empty() {
-                        // Convert to DuplicateMatch for output
-                        for candidate in &candidates {
-                            duplicate_matches.push(DuplicateMatch {
-                                item_id: candidate.item_id.clone(),
-                                score: candidate.composite_score,
-                                classification: format!("{:?}", candidate.risk),
-                            });
-                        }
+            let duplicate_query = build_fts_query(&args.title, description.as_deref());
+            if duplicate_query.is_empty() {
+                tracing::debug!(
+                    "duplicate check skipped: no usable lexical tokens from title/description"
+                );
+            } else {
+                // Run duplicate detection
+                match find_duplicates_with_model(
+                    &duplicate_query,
+                    &conn,
+                    &dependency_graph,
+                    &search_config,
+                    semantic_model.as_ref(),
+                    10,
+                ) {
+                    Ok(candidates) => {
+                        if !candidates.is_empty() {
+                            // Convert to DuplicateMatch for output
+                            for candidate in &candidates {
+                                duplicate_matches.push(DuplicateMatch {
+                                    item_id: candidate.item_id.clone(),
+                                    score: candidate.composite_score,
+                                    classification: format!("{:?}", candidate.risk),
+                                });
+                            }
 
-                        // In interactive mode, warn user
-                        if output == OutputMode::Human {
-                            eprintln!(
-                                "⚠ Warning: {} potential duplicate(s) found",
-                                candidates.len()
-                            );
-                            for (i, cand) in candidates.iter().enumerate().take(3) {
+                            // In interactive mode, warn user
+                            if output == OutputMode::Human {
                                 eprintln!(
-                                    "  {}. {} (score: {:.2}, {})",
-                                    i + 1,
-                                    cand.item_id,
-                                    cand.composite_score,
-                                    format!("{:?}", cand.risk)
+                                    "⚠ Warning: {} potential duplicate(s) found",
+                                    candidates.len()
                                 );
+                                for (i, cand) in candidates.iter().enumerate().take(3) {
+                                    eprintln!(
+                                        "  {}. {} (score: {:.2}, {})",
+                                        i + 1,
+                                        cand.item_id,
+                                        cand.composite_score,
+                                        format!("{:?}", cand.risk)
+                                    );
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    // Log error but don't block creation
-                    tracing::warn!("duplicate check failed: {}", e);
+                    Err(e) => {
+                        // Log error but don't block creation
+                        tracing::warn!("duplicate check failed: {}", e);
+                    }
                 }
             }
         }
-    }
 
     // 12. Generate item ID
     let item_id = generate_item_id(&args.title, item_count, |candidate| {

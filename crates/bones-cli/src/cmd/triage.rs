@@ -40,9 +40,7 @@ pub fn run_triage(
     project_root: &Path,
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
         render_error(
             output,
             &CliError::with_details(
@@ -227,11 +225,7 @@ fn render_triage_human(
             writeln!(
                 w,
                 "    {}",
-                style_if(
-                    color,
-                    &format!("ready; unblocks {}", item.unblocks_active),
-                    DIM
-                )
+                style_if(color, &format!("ready; unblocks {}", item.unblocks_active), DIM)
             )?;
         }
     }
@@ -330,7 +324,11 @@ fn write_section_heading(w: &mut dyn Write, title: &str, color: bool) -> std::io
     }
 }
 
-fn write_item_line(w: &mut dyn Write, item: &RankedItem, color: bool) -> std::io::Result<()> {
+fn write_item_line(
+    w: &mut dyn Write,
+    item: &RankedItem,
+    color: bool,
+) -> std::io::Result<()> {
     use crossterm::style::Stylize;
     if color {
         writeln!(
@@ -456,7 +454,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
             score,
@@ -471,7 +468,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
             score,
@@ -486,7 +482,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            kind: "task".to_string(),
             size: Some(size.to_string()),
             urgency: Urgency::Default,
             score,

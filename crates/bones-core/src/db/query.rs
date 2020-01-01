@@ -887,6 +887,25 @@ fn row_to_query_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueryItem> {
 ///
 /// Returns an error only for unexpected I/O failures (not missing/corrupt DB).
 pub fn try_open_projection(path: &std::path::Path) -> Result<Option<Connection>> {
+    // Derive the .bones/ directory from the db path (e.g. .bones/bones.db → .bones/).
+    // If we can locate it, delegate to ensure_projection which auto-rebuilds
+    // a stale or missing projection from the event log.
+    if let Some(bones_dir) = path.parent() {
+        if bones_dir.join("events").is_dir() {
+            return super::ensure_projection(bones_dir);
+        }
+    }
+
+    // Fallback: no events directory found — open without auto-rebuild.
+    try_open_projection_raw(path)
+}
+
+/// Open the projection without triggering an auto-rebuild.
+///
+/// Used internally by [`ensure_projection`](super::ensure_projection) to
+/// avoid infinite recursion, and as a fallback when the events directory
+/// is not discoverable from the db path.
+pub fn try_open_projection_raw(path: &std::path::Path) -> Result<Option<Connection>> {
     if !path.exists() {
         return Ok(None);
     }

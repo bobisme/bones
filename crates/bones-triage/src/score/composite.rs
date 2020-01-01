@@ -58,15 +58,7 @@ pub fn composite_score(inputs: &MetricInputs, weights: &CompositeWeights) -> f64
     let u = urgency_component(inputs.urgency);
     let d = decay_component(inputs.decay_days);
 
-    weights.epsilon.mul_add(
-        d,
-        weights.delta.mul_add(
-            u,
-            weights
-                .gamma
-                .mul_add(bc, weights.alpha.mul_add(cp, weights.beta * pr)),
-        ),
-    )
+    weights.epsilon.mul_add(d, weights.delta.mul_add(u, weights.gamma.mul_add(bc, weights.alpha.mul_add(cp, weights.beta * pr))))
 }
 
 /// Min-max normalization that maps raw metric values to `[0, 1]`.

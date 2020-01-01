@@ -5,6 +5,34 @@
 //!
 //! The protocol is transport-agnostic: any type implementing [`SyncTransport`]
 //! can be used (TCP, HTTP, MCP, USB drive via file exchange, etc.).
+//!
+//! This is a **library module** — bones does not own transport. External tools
+//! implement [`SyncTransport`] for their chosen medium and call [`sync`] /
+//! [`serve_sync`] to run the 3-round protocol.
+//!
+//! # Protocol rounds
+//!
+//! 1. **Root hash exchange** — if hashes match, replicas are identical (fast path).
+//! 2. **Event hash exchange** — each side sends its full event hash list.
+//! 3. **Event transfer** — each side sends events the other is missing.
+//!
+//! # Example (in-memory, for testing)
+//!
+//! ```rust
+//! use bones_core::sync::protocol::sync_in_memory;
+//! # use bones_core::event::{Event, EventType};
+//! # use bones_core::event::data::{CreateData, EventData};
+//! # use bones_core::model::item::{Kind, Urgency};
+//! # use bones_core::model::item_id::ItemId;
+//! # use std::collections::BTreeMap;
+//! # let local_events: Vec<Event> = vec![];
+//! # let remote_events: Vec<Event> = vec![];
+//!
+//! let result = sync_in_memory(&local_events, &remote_events).unwrap();
+//! // result.local_received  — events the local side was missing
+//! // result.remote_received — events the remote side was missing
+//! // result.local_report    — sync statistics
+//! ```
 
 use std::collections::HashSet;
 
@@ -86,7 +114,7 @@ pub struct SyncReport {
 
 impl SyncReport {
     /// Returns `true` if the sync was a no-op (replicas already identical).
-    #[must_use]
+    #[must_use] 
     pub const fn is_noop(&self) -> bool {
         self.events_sent == 0 && self.events_received == 0
     }
@@ -146,14 +174,8 @@ pub fn sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute what's missing on each side.
-    let local_set: HashSet<&str> = local_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
-    let remote_set: HashSet<&str> = remote_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     // Event hashes the remote has that we don't.
     let need_from_remote: HashSet<&str> = remote_hashes
@@ -227,14 +249,8 @@ pub fn serve_sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
-    let remote_set: HashSet<&str> = remote_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     let need_from_remote: HashSet<&str> = remote_hashes
         .iter()
@@ -452,14 +468,8 @@ pub fn sync_in_memory(
     rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
-    let remote_set: HashSet<&str> = remote_hashes
-        .iter()
-        .map(std::string::String::as_str)
-        .collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     let local_to_send: Vec<Event> = local_events
         .iter()

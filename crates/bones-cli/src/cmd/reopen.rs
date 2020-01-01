@@ -106,7 +106,9 @@ fn run_reopen_single(
 
     match current_state {
         State::Open => anyhow::bail!("cannot reopen '{resolved_id}': item is already open"),
-        State::Doing => anyhow::bail!("cannot reopen '{resolved_id}': item is in progress (doing)"),
+        State::Doing => anyhow::bail!(
+            "cannot reopen '{resolved_id}': item is in progress (doing)"
+        ),
         State::Done | State::Archived => {}
     }
 

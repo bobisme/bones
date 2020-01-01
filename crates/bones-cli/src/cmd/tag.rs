@@ -234,8 +234,8 @@ fn run_tag_single(
     raw_id: &str,
     normalized_labels: &[String],
 ) -> anyhow::Result<serde_json::Value> {
-    let item_id =
-        ItemId::parse(raw_id).map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
+    let item_id = ItemId::parse(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
 
     let conn = open_db(project_root)?;
 
@@ -409,8 +409,8 @@ fn run_untag_single(
     raw_id: &str,
     normalized_labels: &[String],
 ) -> anyhow::Result<serde_json::Value> {
-    let item_id =
-        ItemId::parse(raw_id).map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
+    let item_id = ItemId::parse(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
 
     let conn = open_db(project_root)?;
 

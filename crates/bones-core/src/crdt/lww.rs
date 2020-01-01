@@ -49,13 +49,7 @@ pub struct LwwRegister<T> {
 
 impl<T> LwwRegister<T> {
     /// Create a new LWW register with the given value and metadata.
-    pub const fn new(
-        value: T,
-        stamp: Stamp,
-        wall_ts: u64,
-        agent_id: String,
-        event_hash: String,
-    ) -> Self {
+    pub const fn new(value: T, stamp: Stamp, wall_ts: u64, agent_id: String, event_hash: String) -> Self {
         Self {
             value,
             stamp,

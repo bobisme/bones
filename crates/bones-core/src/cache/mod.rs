@@ -166,9 +166,7 @@ impl CacheHeader {
             column_count: {
                 const { assert!(COLUMN_COUNT <= u8::MAX as usize) };
                 #[allow(clippy::cast_possible_truncation)]
-                {
-                    COLUMN_COUNT as u8
-                }
+                { COLUMN_COUNT as u8 }
             },
             row_count,
             created_at_us,
@@ -316,7 +314,8 @@ impl CacheHeader {
 
         // Helper: get column data slice given offset index
         let col_slice = |col_idx: usize| -> Result<&[u8], CacheError> {
-            let start = usize::try_from(offsets[col_idx]).map_err(|_| CacheError::UnexpectedEof)?;
+            let start =
+                usize::try_from(offsets[col_idx]).map_err(|_| CacheError::UnexpectedEof)?;
             if start > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }

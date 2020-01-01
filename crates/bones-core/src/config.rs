@@ -4,7 +4,8 @@ use std::env;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ProjectConfig {
     #[serde(default)]
     pub goals: GoalConfig,
@@ -15,6 +16,7 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub done: DoneConfig,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoalConfig {
@@ -70,11 +72,13 @@ impl Default for TriageConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DoneConfig {
     #[serde(default)]
     pub require_reason: bool,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoConfig {
@@ -137,7 +141,7 @@ pub fn load_user_config() -> Result<UserConfig> {
         .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
-#[must_use]
+#[must_use] 
 pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
     config
         .repos
@@ -267,19 +271,19 @@ mod tests {
 
     #[test]
     fn cli_json_overrides_env_and_config() {
-        let output =
-            resolve_output(true, Some("pretty"), Some("text")).expect("resolve should succeed");
+        let output = resolve_output(true, Some("pretty"), Some("text"))
+            .expect("resolve should succeed");
         assert_eq!(output, "json");
     }
 
     #[test]
     fn legacy_aliases_are_normalized() {
-        let pretty =
-            resolve_output(false, Some("table"), Some("human")).expect("resolve should succeed");
+        let pretty = resolve_output(false, Some("table"), Some("human"))
+            .expect("resolve should succeed");
         assert_eq!(pretty, "pretty");
 
-        let text =
-            resolve_output(false, Some("human"), Some("table")).expect("resolve should succeed");
+        let text = resolve_output(false, Some("human"), Some("table"))
+            .expect("resolve should succeed");
         assert_eq!(text, "text");
     }
 

@@ -344,7 +344,9 @@ pub fn move_item_state(
 
     if reopen {
         if !matches!(current_state, State::Done | State::Archived) {
-            anyhow::bail!("cannot reopen '{item_id}': item is in '{current_state}'");
+            anyhow::bail!(
+                "cannot reopen '{item_id}': item is in '{current_state}'"
+            );
         }
     } else {
         current_state

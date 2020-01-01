@@ -46,6 +46,61 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Ensure the projection database exists and is up-to-date.
+///
+/// If the database is missing, corrupt, or behind the event log, an
+/// incremental apply is triggered automatically. Returns `None` only if
+/// the events directory itself does not exist (no bones project).
+///
+/// This is the recommended entry point for read commands — it eliminates
+/// the need for users to run `bn admin rebuild` manually.
+///
+/// # Arguments
+///
+/// * `bones_dir` — Path to the `.bones/` directory.
+///
+/// # Errors
+///
+/// Returns an error if the rebuild or database open fails.
+pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
+    let events_dir = bones_dir.join("events");
+    if !events_dir.is_dir() {
+        return Ok(None);
+    }
+
+    let db_path = bones_dir.join("bones.db");
+
+    // Try opening existing projection (raw to avoid recursion).
+    let needs_rebuild = match query::try_open_projection_raw(&db_path)? {
+        Some(conn) => {
+            // Check if projection is current by comparing cursor against
+            // shard content. If cursor is at 0 with no hash, the DB was
+            // freshly created and needs a full rebuild.
+            let (offset, hash) =
+                query::get_projection_cursor(&conn).unwrap_or((0, None));
+            if offset == 0 && hash.is_none() {
+                true
+            } else {
+                // Check if there are events beyond the cursor.
+                let mgr = crate::shard::ShardManager::new(bones_dir);
+                let total_bytes = mgr.total_content_len().unwrap_or(0);
+                let cursor = usize::try_from(offset).unwrap_or(0);
+                total_bytes > cursor
+            }
+        }
+        None => true,
+    };
+
+    if needs_rebuild {
+        debug!("projection stale or missing, running incremental rebuild");
+        incremental::incremental_apply(&events_dir, &db_path, false)
+            .context("auto-rebuild projection")?;
+    }
+
+    // Re-open after potential rebuild (raw to avoid recursion).
+    query::try_open_projection_raw(&db_path)
+}
+
 fn configure_connection(conn: &Connection) -> anyhow::Result<()> {
     conn.pragma_update(None, "foreign_keys", "ON")
         .context("PRAGMA foreign_keys = ON")?;

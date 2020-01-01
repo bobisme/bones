@@ -141,7 +141,7 @@ impl SemanticModel {
     }
 
     /// Check if cached model matches expected SHA256.
-    #[must_use]
+    #[must_use] 
     pub fn is_cached_valid(path: &Path) -> bool {
         let expected_sha256 = expected_model_sha256();
         if expected_sha256.is_none() {
@@ -296,7 +296,8 @@ impl SemanticModel {
         {
             let encoded = self.encode_text(text)?;
             let mut out = self.run_model_batch(&[encoded])?;
-            out.pop()
+            out
+                .pop()
                 .ok_or_else(|| anyhow!("semantic model returned no embedding"))
         }
 

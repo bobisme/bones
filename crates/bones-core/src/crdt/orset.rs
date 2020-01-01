@@ -270,22 +270,12 @@ fn dispatch_event(
     match field {
         OrSetField::Assignees => handle_assignee(event, tag, dag, tag_map, current_set),
         OrSetField::Labels => handle_label(event, tag, dag, tag_map, current_set),
-        OrSetField::BlockedBy => handle_link(
-            event,
-            tag,
-            dag,
-            tag_map,
-            current_set,
-            &["blocks", "blocked_by"],
-        ),
-        OrSetField::RelatedTo => handle_link(
-            event,
-            tag,
-            dag,
-            tag_map,
-            current_set,
-            &["related_to", "related"],
-        ),
+        OrSetField::BlockedBy => {
+            handle_link(event, tag, dag, tag_map, current_set, &["blocks", "blocked_by"])
+        }
+        OrSetField::RelatedTo => {
+            handle_link(event, tag, dag, tag_map, current_set, &["related_to", "related"])
+        }
     }
 }
 
@@ -340,13 +330,9 @@ fn handle_assignee(
     if let EventData::Assign(data) = &event.data {
         return match data.action {
             AssignAction::Assign => Some(record_add(data.agent.clone(), tag, current_set)),
-            AssignAction::Unassign => Some(record_remove(
-                data.agent.clone(),
-                event,
-                dag,
-                tag_map,
-                current_set,
-            )),
+            AssignAction::Unassign => {
+                Some(record_remove(data.agent.clone(), event, dag, tag_map, current_set))
+            }
         };
     }
     None
@@ -390,10 +376,9 @@ fn handle_link(
     match event.event_type {
         EventType::Link => {
             if let EventData::Link(data) = &event.data
-                && link_types.contains(&data.link_type.as_str())
-            {
-                return Some(record_add(data.target.clone(), tag, current_set));
-            }
+                && link_types.contains(&data.link_type.as_str()) {
+                    return Some(record_add(data.target.clone(), tag, current_set));
+                }
         }
         EventType::Unlink => {
             if let EventData::Unlink(data) = &event.data {
@@ -421,7 +406,7 @@ fn handle_link(
 ///
 /// Replays the given events in order, applying add/remove operations
 /// to build the final OR-Set state.
-#[must_use]
+#[must_use] 
 pub fn materialize_from_events(events: &[Event], field: &OrSetField) -> OrSet<String> {
     let ops = ops_from_events(events, field, None, None);
     let mut set = OrSet::new();
@@ -465,7 +450,7 @@ pub fn materialize_from_replay(
 ///
 /// The merged events from the replay are applied in deterministic order
 /// on top of the base state.
-#[must_use]
+#[must_use] 
 pub fn apply_replay(
     base_state: &OrSet<String>,
     replay: &DivergentReplay,

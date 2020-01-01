@@ -199,9 +199,7 @@ fn run_comment_add(
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
         let msg = format!(
             "projection database not found or corrupt at {}",
             db_path.display()
@@ -217,9 +215,7 @@ fn run_comment_add(
         anyhow::bail!("{msg}");
     };
 
-    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? {
-        id
-    } else {
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
         let msg = format!("item '{}' not found", args.id);
         render_error(
             output,
@@ -316,9 +312,7 @@ pub fn run_comments(
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
         let msg = format!(
             "projection database not found or corrupt at {}",
             db_path.display()
@@ -334,9 +328,7 @@ pub fn run_comments(
         anyhow::bail!("{msg}");
     };
 
-    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? {
-        id
-    } else {
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
         let msg = format!("item '{}' not found", args.id);
         render_error(
             output,

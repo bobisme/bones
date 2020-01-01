@@ -74,9 +74,7 @@ fn resolve_existing_item_id(
     raw_id: &str,
     output: OutputMode,
 ) -> anyhow::Result<String> {
-    if let Some(id) = resolve_item_id(conn, raw_id)? {
-        Ok(id)
-    } else {
+    if let Some(id) = resolve_item_id(conn, raw_id)? { Ok(id) } else {
         let msg = format!("item '{raw_id}' not found");
         render_error(
             output,

@@ -150,9 +150,7 @@ fn run_delete_single(
     validate::validate_item_id(raw_id)
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
-    let resolved_id = if let Some(id) = resolve_item_id(conn, raw_id)? {
-        id
-    } else {
+    let resolved_id = if let Some(id) = resolve_item_id(conn, raw_id)? { id } else {
         if let Some(any_id) = resolve_any_item_id(conn, raw_id)?
             && let Some(item) = query::get_item(conn, &any_id, true)?
             && item.is_deleted

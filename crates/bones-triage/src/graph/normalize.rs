@@ -189,7 +189,7 @@ impl NormalizedGraph {
 /// # Panics
 ///
 /// Panics if `g` contains a cycle (input must be a DAG).
-#[must_use]
+#[must_use] 
 pub fn transitive_reduction<N: Clone>(g: &DiGraph<N, ()>) -> DiGraph<N, ()> {
     use petgraph::algo::toposort;
 

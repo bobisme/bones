@@ -438,9 +438,7 @@ pub fn run_undo(
     // Mode 1: undo by event hash
     // ---------------------------------------------------------------------------
     if let Some(ref hash) = args.event_hash {
-        let (target_event, all_events) = if let Some(pair) = find_event_by_hash(&shard_mgr, hash)? {
-            pair
-        } else {
+        let (target_event, all_events) = if let Some(pair) = find_event_by_hash(&shard_mgr, hash)? { pair } else {
             let msg = format!("event '{hash}' not found in event log");
             render_error(output, &CliError::with_details(&msg, "", "not_found"))?;
             anyhow::bail!("{msg}");

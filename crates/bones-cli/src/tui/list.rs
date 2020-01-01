@@ -93,25 +93,21 @@ impl FilterState {
     /// Returns true if the item satisfies all active filter criteria.
     pub fn matches(&self, item: &WorkItem) -> bool {
         if let Some(ref state) = self.state
-            && item.state != *state
-        {
-            return false;
-        }
+            && item.state != *state {
+                return false;
+            }
         if let Some(ref kind) = self.kind
-            && item.kind != *kind
-        {
-            return false;
-        }
+            && item.kind != *kind {
+                return false;
+            }
         if let Some(ref urgency) = self.urgency
-            && item.urgency != *urgency
-        {
-            return false;
-        }
+            && item.urgency != *urgency {
+                return false;
+            }
         if let Some(ref label) = self.label
-            && !item.labels.iter().any(|l| l.contains(label.as_str()))
-        {
-            return false;
-        }
+            && !item.labels.iter().any(|l| l.contains(label.as_str())) {
+                return false;
+            }
         if !self.search_query.is_empty() {
             let q = self.search_query.to_ascii_lowercase();
             if !item.title.to_ascii_lowercase().contains(&q)
@@ -493,14 +489,13 @@ fn build_dependency_order(
     let mut has_hierarchy_parent: HashSet<String> = HashSet::new();
     for item_id in &sorted_ids {
         if let Some(Some(pid)) = parent_map.get(item_id)
-            && id_set.contains(pid)
-        {
-            hierarchy_children
-                .entry(pid.clone())
-                .or_default()
-                .push(item_id.clone());
-            has_hierarchy_parent.insert(item_id.clone());
-        }
+            && id_set.contains(pid) {
+                hierarchy_children
+                    .entry(pid.clone())
+                    .or_default()
+                    .push(item_id.clone());
+                has_hierarchy_parent.insert(item_id.clone());
+            }
     }
     // Sort hierarchy children by their execution rank so they appear in
     // the right relative order under their parent.
@@ -512,10 +507,9 @@ fn build_dependency_order(
     let mut item_parent: HashMap<String, String> = HashMap::new();
     for item_id in &sorted_ids {
         if let Some(Some(pid)) = parent_map.get(item_id)
-            && id_set.contains(pid)
-        {
-            item_parent.insert(item_id.clone(), pid.clone());
-        }
+            && id_set.contains(pid) {
+                item_parent.insert(item_id.clone(), pid.clone());
+            }
     }
 
     // Build dependency nesting.  Items with a hierarchy parent can still nest
@@ -819,11 +813,7 @@ impl CreateModalState {
         modal.description = detail
             .description
             .as_deref()
-            .map(|d| {
-                d.lines()
-                    .map(std::string::ToString::to_string)
-                    .collect::<Vec<_>>()
-            })
+            .map(|d| d.lines().map(std::string::ToString::to_string).collect::<Vec<_>>())
             .filter(|lines| !lines.is_empty())
             .unwrap_or_else(|| vec![String::new()]);
         modal.desc_row = modal.description.len().saturating_sub(1);
@@ -1064,11 +1054,7 @@ impl CreateModalState {
 /// re-enters raw-mode/alt-screen.  Returns the edited text on success,
 /// or `None` if the editor exited with a non-zero status.
 fn open_in_editor(initial: &str) -> anyhow::Result<Option<String>> {
-    use crossterm::{
-        event::{DisableMouseCapture, EnableMouseCapture},
-        execute,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-    };
+    use crossterm::{event::{DisableMouseCapture, EnableMouseCapture}, execute, terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode}};
 
     let editor = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
@@ -1650,8 +1636,7 @@ impl ListView {
     pub fn new(db_path: PathBuf) -> Result<Self> {
         let project_root = db_path
             .parent()
-            .and_then(Path::parent)
-            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
+            .and_then(Path::parent).map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
         let agent = agent::require_agent(None).unwrap_or_else(|_| "tui".to_string());
 
         let semantic_enabled = db_path
@@ -1722,9 +1707,7 @@ impl ListView {
 
     /// Load (or reload) all items from the projection database.
     pub fn reload(&mut self) -> Result<()> {
-        let conn = if let Some(c) = query::try_open_projection(&self.db_path)? {
-            c
-        } else {
+        let conn = if let Some(c) = query::try_open_projection(&self.db_path)? { c } else {
             self.all_items.clear();
             self.visible_items.clear();
             self.visible_depths.clear();
@@ -2281,11 +2264,7 @@ impl ListView {
                                 modal.description.push(String::new());
                             }
                             modal.desc_row = modal.description.len().saturating_sub(1);
-                            modal.desc_col = modal
-                                .description
-                                .last()
-                                .map(|l| l.chars().count())
-                                .unwrap_or(0);
+                            modal.desc_col = modal.description.last().map(|l| l.chars().count()).unwrap_or(0);
                         }
                         _ => {}
                     }
@@ -3141,7 +3120,9 @@ fn detail_lines(detail: &DetailItem) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(""));
-        lines.extend(super::markdown::markdown_to_lines(description));
+        for line in description.lines() {
+            lines.push(Line::from(line.to_string()));
+        }
     }
     if !detail.comments.is_empty() {
         lines.push(Line::from(""));
@@ -3161,7 +3142,9 @@ fn detail_lines(detail: &DetailItem) -> Vec<Line<'static>> {
                     Style::default().fg(Color::DarkGray),
                 ),
             ]));
-            lines.extend(super::markdown::markdown_to_lines(&comment.body));
+            for line in comment.body.lines() {
+                lines.push(Line::from(line.to_string()));
+            }
         }
     }
 
@@ -3736,13 +3719,12 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
 fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
     // Show a transient status message if recent (< 3 seconds).
     if let Some((ref msg, at)) = app.status_msg
-        && at.elapsed() < Duration::from_secs(3)
-    {
-        return Line::from(vec![Span::styled(
-            msg.clone(),
-            Style::default().fg(Color::Cyan),
-        )]);
-    }
+        && at.elapsed() < Duration::from_secs(3) {
+            return Line::from(vec![Span::styled(
+                msg.clone(),
+                Style::default().fg(Color::Cyan),
+            )]);
+        }
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 

@@ -46,10 +46,9 @@ impl EnvReader for RealEnv {
 fn resolve_agent_with(cli_flag: Option<&str>, env: &dyn EnvReader) -> Option<String> {
     // Step 1: explicit --agent flag
     if let Some(agent) = cli_flag
-        && !agent.is_empty()
-    {
-        return Some(agent.to_string());
-    }
+        && !agent.is_empty() {
+            return Some(agent.to_string());
+        }
 
     // Step 2: BONES_AGENT env
     if let Some(val) = env.get("BONES_AGENT") {
@@ -63,10 +62,9 @@ fn resolve_agent_with(cli_flag: Option<&str>, env: &dyn EnvReader) -> Option<Str
 
     // Step 4: USER env, but only if stdin is a TTY
     if env.is_tty()
-        && let Some(val) = env.get("USER")
-    {
-        return Some(val);
-    }
+        && let Some(val) = env.get("USER") {
+            return Some(val);
+        }
 
     None
 }

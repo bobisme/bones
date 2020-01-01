@@ -90,13 +90,12 @@ pub fn topological_layers(graph: &DiGraph, scope: Option<&str>) -> Vec<Vec<Strin
             for edge in condensed.edges_directed(idx, Direction::Outgoing) {
                 let target = edge.target();
                 if let Some(entry) = indegree.get_mut(&target)
-                    && *entry > 0
-                {
-                    *entry -= 1;
-                    if *entry == 0 {
-                        next_ready.push(target);
+                    && *entry > 0 {
+                        *entry -= 1;
+                        if *entry == 0 {
+                            next_ready.push(target);
+                        }
                     }
-                }
             }
 
             indegree.remove(&idx);

@@ -208,7 +208,7 @@ impl DbWriteLock {
     }
 
     /// Return the lock file path.
-    #[must_use]
+    #[must_use] 
     pub fn path(&self) -> &Path {
         self.guard.path()
     }

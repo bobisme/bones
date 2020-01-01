@@ -45,16 +45,13 @@ struct PlanScheduleRegime {
 /// Execute `bn plan`.
 pub fn run_plan(args: &PlanArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     if let Some(goal_id) = &args.goal_id
-        && let Err(e) = validate::validate_item_id(goal_id)
-    {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
+        && let Err(e) = validate::validate_item_id(goal_id) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
 
     let db_path = project_root.join(".bones/bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
         render_error(
             output,
             &CliError::with_details(
@@ -292,12 +289,13 @@ fn render_plan_human(
         return Ok(());
     }
 
-    if explain && let Some(regime) = &payload.schedule_regime {
-        writeln!(w, "\nScheduler regime: {}", regime.detail)?;
-        for violation in &regime.violations {
-            writeln!(w, "  note: {violation}")?;
+    if explain
+        && let Some(regime) = &payload.schedule_regime {
+            writeln!(w, "\nScheduler regime: {}", regime.detail)?;
+            for violation in &regime.violations {
+                writeln!(w, "  note: {violation}")?;
+            }
         }
-    }
 
     for (idx, layer) in payload.layers.iter().enumerate() {
         let noun = if layer.len() == 1 { "item" } else { "items" };

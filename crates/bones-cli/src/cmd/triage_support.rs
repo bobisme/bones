@@ -34,7 +34,6 @@ const PAGERANK_CACHE_FILE: &str = "triage_pagerank.json";
 pub struct RankedItem {
     pub id: String,
     pub title: String,
-    pub kind: String,
     pub size: Option<String>,
     pub urgency: Urgency,
     pub score: f64,
@@ -167,7 +166,11 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
     let eigen_norm = normalize_metric(&eigen_raw);
     let urgent_chain_raw: Vec<f64> = ids
         .iter()
-        .map(|id| urgent_chain_pressure.get(id).map_or(0.0, |r| r.pressure))
+        .map(|id| {
+            urgent_chain_pressure
+                .get(id)
+                .map_or(0.0, |r| r.pressure)
+        })
         .collect();
     let urgent_chain_norm = normalize_metric(&urgent_chain_raw);
     let weights = sampled_weights_from_feedback(seed_from_graph(normalized.content_hash()));
@@ -282,7 +285,6 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
             RankedItem {
                 id: item.item_id.clone(),
                 title: item.title.clone(),
-                kind: item.kind.clone(),
                 size: item.size.clone(),
                 urgency,
                 score,
@@ -304,9 +306,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
 
     let unblocked_ranked = ranked
         .iter()
-        .filter(|item| {
-            item.blocked_by_active == 0 && item.urgency != Urgency::Punt && item.kind != "goal"
-        })
+        .filter(|item| item.blocked_by_active == 0 && item.urgency != Urgency::Punt)
         .cloned()
         .collect();
 
@@ -1243,11 +1243,10 @@ mod tests {
             .map(|item| item.id.as_str())
             .collect();
 
-        // Phase I goal is unblocked but filtered from unblocked_ranked (goals
-        // are not actionable work). Its child task should be unblocked.
+        // Phase I goal and its task should be unblocked
         assert!(
-            !unblocked_ids.contains(&"bn-phase1"),
-            "Phase I goal should be excluded from unblocked_ranked (goals filtered)"
+            unblocked_ids.contains(&"bn-phase1"),
+            "Phase I goal should be unblocked"
         );
         assert!(
             unblocked_ids.contains(&"bn-task1"),

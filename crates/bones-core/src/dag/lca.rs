@@ -94,12 +94,16 @@ pub fn find_lca(dag: &EventDag, tip_a: &str, tip_b: &str) -> Result<Option<Strin
         }
 
         // Step walk A.
-        if !a_done && let Some(lca) = bfs_step(dag, &mut queue_a, &mut visited_a, &visited_b) {
+        if !a_done
+            && let Some(lca) = bfs_step(dag, &mut queue_a, &mut visited_a, &visited_b)
+        {
             return Ok(Some(lca));
         }
 
         // Step walk B.
-        if !b_done && let Some(lca) = bfs_step(dag, &mut queue_b, &mut visited_b, &visited_a) {
+        if !b_done
+            && let Some(lca) = bfs_step(dag, &mut queue_b, &mut visited_b, &visited_a)
+        {
             return Ok(Some(lca));
         }
     }

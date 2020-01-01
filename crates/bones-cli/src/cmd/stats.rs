@@ -43,9 +43,7 @@ struct ProjectStats {
 /// Execute `bn stats`.
 pub fn run_stats(_args: &StatsArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
         render_error(
             output,
             &CliError::with_details(

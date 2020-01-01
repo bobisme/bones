@@ -51,7 +51,8 @@ impl Renderable for FailureRow<'_> {
     }
 
     fn render_json(&self, w: &mut dyn Write) -> io::Result<()> {
-        let val = serde_json::to_string(&self.0).map_err(io::Error::other)?;
+        let val =
+            serde_json::to_string(&self.0).map_err(io::Error::other)?;
         write!(w, "{val}")
     }
 
@@ -115,7 +116,8 @@ impl Renderable for ReportSummary<'_> {
     }
 
     fn render_json(&self, w: &mut dyn Write) -> io::Result<()> {
-        let val = serde_json::to_string_pretty(self.0).map_err(io::Error::other)?;
+        let val = serde_json::to_string_pretty(self.0)
+            .map_err(io::Error::other)?;
         write!(w, "{val}")
     }
 
@@ -145,9 +147,7 @@ pub fn run_redact_verify(
     let events_dir = bones_dir.join("events");
 
     // Open projection DB
-    let conn = if let Some(conn) = try_open_projection(&db_path)? {
-        conn
-    } else {
+    let conn = if let Some(conn) = try_open_projection(&db_path)? { conn } else {
         render_error(
             output,
             &CliError::with_details(

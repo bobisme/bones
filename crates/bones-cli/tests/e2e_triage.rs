@@ -250,9 +250,7 @@ fn next_json_score_is_non_negative() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let score = next["score"].as_f64().expect("score must be a number");
     assert!(score >= 0.0, "score must be non-negative, got {score}");
 }
@@ -263,9 +261,7 @@ fn next_json_explanation_is_non_empty() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let explanation = next["explanation"].as_str().unwrap_or("");
     assert!(
         !explanation.is_empty(),
@@ -329,12 +325,8 @@ fn next_deterministic_for_stable_graph() {
     let first_json = run_json(dir.path(), &["next"]);
     let second_json = run_json(dir.path(), &["next"]);
 
-    let first = &first_json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
-    let second = &second_json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let first = &first_json["assignments"].as_array().expect("must have assignments")[0];
+    let second = &second_json["assignments"].as_array().expect("must have assignments")[0];
 
     assert_eq!(
         first["id"], second["id"],
@@ -850,9 +842,7 @@ fn did_records_feedback_and_returns_json() {
 
     // Use one of the unblocked items.
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     let output = bn_cmd(dir.path())
@@ -885,9 +875,7 @@ fn skip_records_feedback_and_returns_json() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     let output = bn_cmd(dir.path())
@@ -917,9 +905,7 @@ fn did_human_output_is_non_empty() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_human_cmd(dir.path())
@@ -935,9 +921,7 @@ fn skip_human_output_is_non_empty() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_human_cmd(dir.path())
@@ -976,9 +960,7 @@ fn did_then_skip_both_succeed() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("next must return an id");
 
     bn_cmd(dir.path()).args(["did", id]).assert().success();
@@ -996,9 +978,7 @@ fn skip_feedback_does_not_crash_next_invocation() {
     setup_triage_graph(dir.path());
 
     let first_json = run_json(dir.path(), &["next"]);
-    let first_next = &first_json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let first_next = &first_json["assignments"].as_array().expect("must have assignments")[0];
     let id = first_next["id"].as_str().unwrap();
 
     bn_cmd(dir.path()).args(["skip", id]).assert().success();
@@ -1074,9 +1054,7 @@ fn next_json_id_matches_known_schema() {
     setup_triage_graph(dir.path());
 
     let json = run_json(dir.path(), &["next"]);
-    let next = &json["assignments"]
-        .as_array()
-        .expect("must have assignments")[0];
+    let next = &json["assignments"].as_array().expect("must have assignments")[0];
     let id = next["id"].as_str().expect("id must be a string");
     assert!(
         id.starts_with("bn-"),
