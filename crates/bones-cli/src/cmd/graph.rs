@@ -28,6 +28,18 @@ use crate::validate;
 // Clap types
 // ---------------------------------------------------------------------------
 
+/// Output format for graph rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraphFormat {
+    /// Default ASCII tree / layered output.
+    #[default]
+    Ascii,
+    /// Mermaid diagram syntax.
+    Mermaid,
+    /// Graphviz DOT syntax.
+    Dot,
+}
+
 /// Arguments for `bn graph`.
 #[derive(Args, Debug)]
 pub struct GraphArgs {
@@ -45,6 +57,27 @@ pub struct GraphArgs {
     /// Maximum traversal depth (default: unlimited).
     #[arg(long)]
     pub depth: Option<usize>,
+
+    /// Output as a Mermaid diagram.
+    #[arg(long, conflicts_with = "dot")]
+    pub mermaid: bool,
+
+    /// Output as a Graphviz DOT diagram.
+    #[arg(long, conflicts_with = "mermaid")]
+    pub dot: bool,
+}
+
+impl GraphArgs {
+    /// Resolve the requested graph format from CLI flags.
+    const fn format(&self) -> GraphFormat {
+        if self.mermaid {
+            GraphFormat::Mermaid
+        } else if self.dot {
+            GraphFormat::Dot
+        } else {
+            GraphFormat::Ascii
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +262,283 @@ fn render_tree_nodes(
 }
 
 // ---------------------------------------------------------------------------
+// Mermaid rendering
+// ---------------------------------------------------------------------------
+
+/// Escape a label for Mermaid node text (inside quotes).
+fn mermaid_escape(s: &str) -> String {
+    s.replace('"', "#quot;")
+}
+
+/// Sanitize an ID for use as a Mermaid node identifier (alphanumeric + dash/underscore).
+fn mermaid_node_id(id: &str) -> String {
+    id.replace('.', "_")
+}
+
+/// Collect the subgraph reachable from `root_id` in the given `direction`,
+/// respecting an optional `depth_limit`, and return the set of visited node
+/// IDs plus the directed edges found.
+fn collect_subgraph(
+    raw: &RawGraph,
+    root_id: &str,
+    direction: petgraph::Direction,
+    depth_limit: Option<usize>,
+) -> (HashSet<String>, Vec<(String, String)>) {
+    let mut visited = HashSet::new();
+    let mut edges = Vec::new();
+
+    let root_idx = match raw.node_index(root_id) {
+        Some(idx) => idx,
+        None => return (visited, edges),
+    };
+    visited.insert(root_id.to_string());
+
+    let mut frontier = vec![(root_idx, root_id.to_string(), 0usize)];
+    while let Some((idx, id, depth)) = frontier.pop() {
+        if depth_limit.is_some_and(|d| depth >= d) {
+            continue;
+        }
+        for neighbor_idx in raw.graph.neighbors_directed(idx, direction) {
+            if let Some(neighbor_id) = raw.graph.node_weight(neighbor_idx) {
+                // Always record the edge (in blocker→blocked direction)
+                match direction {
+                    petgraph::Direction::Outgoing => {
+                        edges.push((id.clone(), neighbor_id.clone()));
+                    }
+                    petgraph::Direction::Incoming => {
+                        edges.push((neighbor_id.clone(), id.clone()));
+                    }
+                }
+                if visited.insert(neighbor_id.clone()) {
+                    frontier.push((neighbor_idx, neighbor_id.clone(), depth + 1));
+                }
+            }
+        }
+    }
+    (visited, edges)
+}
+
+/// Render a Mermaid diagram for a single item's dependency subgraph.
+fn render_mermaid_item(
+    raw: &RawGraph,
+    meta: &HashMap<String, ItemMeta>,
+    id: &str,
+    args: &GraphArgs,
+) -> String {
+    let show_up = !args.down;
+    let show_down = !args.up;
+
+    let mut all_nodes = HashSet::new();
+    let mut all_edges = Vec::new();
+    all_nodes.insert(id.to_string());
+
+    if show_down {
+        let (nodes, edges) =
+            collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
+        all_nodes.extend(nodes);
+        all_edges.extend(edges);
+    }
+    if show_up {
+        let (nodes, edges) =
+            collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
+        all_nodes.extend(nodes);
+        all_edges.extend(edges);
+    }
+
+    // Deduplicate edges
+    all_edges.sort();
+    all_edges.dedup();
+
+    let mut out = String::from("graph TD\n");
+    // Node declarations
+    let mut sorted_nodes: Vec<&String> = all_nodes.iter().collect();
+    sorted_nodes.sort();
+    for node_id in &sorted_nodes {
+        let label = meta
+            .get(*node_id)
+            .map(|m| format!("{node_id} — {}", mermaid_escape(&truncate(&m.title, 40))))
+            .unwrap_or_else(|| (*node_id).clone());
+        let mid = mermaid_node_id(node_id);
+        let _ = writeln!(out, "    {mid}[\"{label}\"]");
+    }
+    // Style the root node
+    let mid = mermaid_node_id(id);
+    let _ = writeln!(out, "    style {mid} stroke-width:3px");
+    // State-based styling
+    for node_id in &sorted_nodes {
+        if let Some(m) = meta.get(*node_id) {
+            let mid = mermaid_node_id(node_id);
+            match m.state.as_str() {
+                "done" | "archived" => {
+                    let _ = writeln!(out, "    style {mid} fill:#d4edda,stroke:#28a745");
+                }
+                "doing" => {
+                    let _ = writeln!(out, "    style {mid} fill:#fff3cd,stroke:#ffc107");
+                }
+                _ => {}
+            }
+        }
+    }
+    // Edges: blocker --> blocked
+    for (src, tgt) in &all_edges {
+        let s = mermaid_node_id(src);
+        let t = mermaid_node_id(tgt);
+        let _ = writeln!(out, "    {s} --> {t}");
+    }
+    out
+}
+
+/// Render a Mermaid diagram for the full project dependency graph (open items only).
+fn render_mermaid_summary(
+    _raw: &RawGraph,
+    meta: &HashMap<String, ItemMeta>,
+    open_connected: &HashSet<String>,
+    open_edges: &[(String, String)],
+) -> String {
+    let mut out = String::from("graph TD\n");
+    let mut sorted_nodes: Vec<&String> = open_connected.iter().collect();
+    sorted_nodes.sort();
+    for node_id in &sorted_nodes {
+        let label = meta
+            .get(*node_id)
+            .map(|m| format!("{node_id} — {}", mermaid_escape(&truncate(&m.title, 40))))
+            .unwrap_or_else(|| (*node_id).clone());
+        let mid = mermaid_node_id(node_id);
+        let _ = writeln!(out, "    {mid}[\"{label}\"]");
+    }
+    // State-based styling
+    for node_id in &sorted_nodes {
+        if let Some(m) = meta.get(*node_id) {
+            let mid = mermaid_node_id(node_id);
+            match m.state.as_str() {
+                "done" | "archived" => {
+                    let _ = writeln!(out, "    style {mid} fill:#d4edda,stroke:#28a745");
+                }
+                "doing" => {
+                    let _ = writeln!(out, "    style {mid} fill:#fff3cd,stroke:#ffc107");
+                }
+                _ => {}
+            }
+        }
+    }
+    for (src, tgt) in open_edges {
+        let s = mermaid_node_id(src);
+        let t = mermaid_node_id(tgt);
+        let _ = writeln!(out, "    {s} --> {t}");
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// DOT rendering
+// ---------------------------------------------------------------------------
+
+/// Escape a label for DOT (inside double quotes).
+fn dot_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+/// Map item state to a DOT fill color.
+fn dot_fill_color(state: &str) -> &'static str {
+    match state {
+        "done" | "archived" => "#d4edda",
+        "doing" => "#fff3cd",
+        _ => "#ffffff",
+    }
+}
+
+/// Render a DOT digraph for a single item's dependency subgraph.
+fn render_dot_item(
+    raw: &RawGraph,
+    meta: &HashMap<String, ItemMeta>,
+    id: &str,
+    args: &GraphArgs,
+) -> String {
+    let show_up = !args.down;
+    let show_down = !args.up;
+
+    let mut all_nodes = HashSet::new();
+    let mut all_edges = Vec::new();
+    all_nodes.insert(id.to_string());
+
+    if show_down {
+        let (nodes, edges) =
+            collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
+        all_nodes.extend(nodes);
+        all_edges.extend(edges);
+    }
+    if show_up {
+        let (nodes, edges) =
+            collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
+        all_nodes.extend(nodes);
+        all_edges.extend(edges);
+    }
+
+    all_edges.sort();
+    all_edges.dedup();
+
+    let mut out = String::from("digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n");
+
+    let mut sorted_nodes: Vec<&String> = all_nodes.iter().collect();
+    sorted_nodes.sort();
+    for node_id in &sorted_nodes {
+        let label = meta
+            .get(*node_id)
+            .map(|m| format!("{node_id}\\n{}", dot_escape(&truncate(&m.title, 40))))
+            .unwrap_or_else(|| (*node_id).clone());
+        let fill = meta
+            .get(*node_id)
+            .map(|m| dot_fill_color(&m.state))
+            .unwrap_or("#ffffff");
+        let penwidth = if *node_id == id { "3.0" } else { "1.0" };
+        let _ = writeln!(
+            out,
+            "    \"{node_id}\" [label=\"{label}\", fillcolor=\"{fill}\", penwidth={penwidth}];"
+        );
+    }
+    let _ = writeln!(out);
+    for (src, tgt) in &all_edges {
+        let _ = writeln!(out, "    \"{src}\" -> \"{tgt}\";");
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// Render a DOT digraph for the full project dependency graph (open items only).
+fn render_dot_summary(
+    meta: &HashMap<String, ItemMeta>,
+    open_connected: &HashSet<String>,
+    open_edges: &[(String, String)],
+) -> String {
+    let mut out = String::from("digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n");
+
+    let mut sorted_nodes: Vec<&String> = open_connected.iter().collect();
+    sorted_nodes.sort();
+    for node_id in &sorted_nodes {
+        let label = meta
+            .get(*node_id)
+            .map(|m| format!("{node_id}\\n{}", dot_escape(&truncate(&m.title, 40))))
+            .unwrap_or_else(|| (*node_id).clone());
+        let fill = meta
+            .get(*node_id)
+            .map(|m| dot_fill_color(&m.state))
+            .unwrap_or("#ffffff");
+        let _ = writeln!(
+            out,
+            "    \"{node_id}\" [label=\"{label}\", fillcolor=\"{fill}\"];"
+        );
+    }
+    let _ = writeln!(out);
+    for (src, tgt) in open_edges {
+        let _ = writeln!(out, "    \"{src}\" -> \"{tgt}\";");
+    }
+    out.push_str("}\n");
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Command runner
 // ---------------------------------------------------------------------------
 
@@ -341,43 +651,53 @@ fn run_graph_item(
         return Ok(());
     }
 
-    // Human output
-    let root_meta = meta.get(id);
-    let title_str = root_meta
-        .map(|m| format!(" — {}", m.title))
-        .unwrap_or_default();
-    let state_str = root_meta
-        .map(|m| format!("[{}]", m.state))
-        .unwrap_or_default();
+    // Mermaid / DOT / ASCII output
+    match args.format() {
+        GraphFormat::Mermaid => {
+            print!("{}", render_mermaid_item(raw, &meta, id, args));
+        }
+        GraphFormat::Dot => {
+            print!("{}", render_dot_item(raw, &meta, id, args));
+        }
+        GraphFormat::Ascii => {
+            let root_meta = meta.get(id);
+            let title_str = root_meta
+                .map(|m| format!(" — {}", m.title))
+                .unwrap_or_default();
+            let state_str = root_meta
+                .map(|m| format!("[{}]", m.state))
+                .unwrap_or_default();
 
-    let mut out = String::new();
-    let _ = writeln!(out, "{id}{title_str} {state_str}");
+            let mut out = String::new();
+            let _ = writeln!(out, "{id}{title_str} {state_str}");
 
-    if show_up {
-        let _ = writeln!(out, "\nblocked by (must complete first):");
-        render_tree(
-            raw,
-            &meta,
-            id,
-            petgraph::Direction::Incoming,
-            args.depth,
-            &mut out,
-        );
+            if show_up {
+                let _ = writeln!(out, "\nblocked by (must complete first):");
+                render_tree(
+                    raw,
+                    &meta,
+                    id,
+                    petgraph::Direction::Incoming,
+                    args.depth,
+                    &mut out,
+                );
+            }
+
+            if show_down {
+                let _ = writeln!(out, "\nblocks (waiting for this):");
+                render_tree(
+                    raw,
+                    &meta,
+                    id,
+                    petgraph::Direction::Outgoing,
+                    args.depth,
+                    &mut out,
+                );
+            }
+
+            print!("{out}");
+        }
     }
-
-    if show_down {
-        let _ = writeln!(out, "\nblocks (waiting for this):");
-        render_tree(
-            raw,
-            &meta,
-            id,
-            petgraph::Direction::Outgoing,
-            args.depth,
-            &mut out,
-        );
-    }
-
-    print!("{out}");
     Ok(())
 }
 
@@ -414,7 +734,7 @@ fn truncate(s: &str, max_len: usize) -> String {
 fn run_graph_summary(
     raw: &RawGraph,
     conn: &rusqlite::Connection,
-    _args: &GraphArgs,
+    args: &GraphArgs,
     output: OutputMode,
 ) -> anyhow::Result<()> {
     let ng = NormalizedGraph::from_raw(RawGraph::from_sqlite(conn)?);
@@ -513,87 +833,111 @@ fn run_graph_summary(
         return Ok(());
     }
 
-    // Human output: directed dependency graph
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "Dependency graph  ({} items, {} edges, {} components)",
-        stats.node_count, stats.edge_count, stats.weakly_connected_component_count
-    );
+    // Owned edges for mermaid/dot renderers (they need &[(String, String)])
+    let open_edges_owned: Vec<(String, String)> = open_edges
+        .iter()
+        .map(|(src, tgt)| (src.clone(), tgt.clone()))
+        .collect();
 
-    if !cycles.is_empty() {
-        let _ = writeln!(out);
-        let _ = writeln!(out, "  ⚠ cycles:");
-        for cycle in &cycles {
-            let _ = writeln!(out, "    {}", cycle.join(" → "));
+    // Mermaid / DOT / ASCII output
+    match args.format() {
+        GraphFormat::Mermaid => {
+            print!(
+                "{}",
+                render_mermaid_summary(raw, &meta, &open_connected, &open_edges_owned)
+            );
         }
-    }
+        GraphFormat::Dot => {
+            print!(
+                "{}",
+                render_dot_summary(&meta, &open_connected, &open_edges_owned)
+            );
+        }
+        GraphFormat::Ascii => {
+            let mut out = String::new();
+            let _ = writeln!(
+                out,
+                "Dependency graph  ({} items, {} edges, {} components)",
+                stats.node_count, stats.edge_count, stats.weakly_connected_component_count
+            );
 
-    if open_edges.is_empty() {
-        let _ = writeln!(out, "\n  (no blocking dependencies among open items)");
-        print!("{out}");
-        return Ok(());
-    }
-
-    // Render layered graph
-    let _ = writeln!(out);
-    for (layer_idx, layer) in filtered_layers.iter().enumerate() {
-        let _ = writeln!(out, "  layer {layer_idx}:");
-        for id in layer {
-            let state_mark = meta.get(id).map_or(" ", ItemMeta::display_state);
-            let title = meta
-                .get(id)
-                .map(|m| truncate(&m.title, 50))
-                .unwrap_or_default();
-
-            // Show outgoing edges inline
-            let mut targets: Vec<&str> = open_edges
-                .iter()
-                .filter(|(src, _)| src == id)
-                .map(|(_, tgt)| tgt.as_str())
-                .collect();
-            targets.sort_unstable();
-
-            if targets.is_empty() {
-                let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
-            } else {
-                let arrow_str = targets.join(", ");
-                let _ = writeln!(out, "    [{state_mark}] {id} -- {title}  --> {arrow_str}");
+            if !cycles.is_empty() {
+                let _ = writeln!(out);
+                let _ = writeln!(out, "  ⚠ cycles:");
+                for cycle in &cycles {
+                    let _ = writeln!(out, "    {}", cycle.join(" → "));
+                }
             }
+
+            if open_edges.is_empty() {
+                let _ = writeln!(out, "\n  (no blocking dependencies among open items)");
+                print!("{out}");
+                return Ok(());
+            }
+
+            // Render layered graph
+            let _ = writeln!(out);
+            for (layer_idx, layer) in filtered_layers.iter().enumerate() {
+                let _ = writeln!(out, "  layer {layer_idx}:");
+                for id in layer {
+                    let state_mark = meta.get(id).map_or(" ", ItemMeta::display_state);
+                    let title = meta
+                        .get(id)
+                        .map(|m| truncate(&m.title, 50))
+                        .unwrap_or_default();
+
+                    // Show outgoing edges inline
+                    let mut targets: Vec<&str> = open_edges
+                        .iter()
+                        .filter(|(src, _)| src == id)
+                        .map(|(_, tgt)| tgt.as_str())
+                        .collect();
+                    targets.sort_unstable();
+
+                    if targets.is_empty() {
+                        let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
+                    } else {
+                        let arrow_str = targets.join(", ");
+                        let _ = writeln!(
+                            out,
+                            "    [{state_mark}] {id} -- {title}  --> {arrow_str}"
+                        );
+                    }
+                }
+            }
+
+            // Also list any open connected items not in any layer
+            let layered_ids: HashSet<String> = filtered_layers
+                .iter()
+                .flat_map(|layer| layer.iter().cloned())
+                .collect();
+            let mut unlayered: Vec<&String> = open_connected
+                .iter()
+                .filter(|id| !layered_ids.contains(*id))
+                .collect();
+            unlayered.sort();
+            if !unlayered.is_empty() {
+                let _ = writeln!(out, "  unlayered (cycle members):");
+                for id in &unlayered {
+                    let state_mark = meta.get(*id).map_or(" ", ItemMeta::display_state);
+                    let title = meta
+                        .get(*id)
+                        .map(|m| truncate(&m.title, 50))
+                        .unwrap_or_default();
+                    let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
+                }
+            }
+
+            // Edge list for completeness
+            let _ = writeln!(out);
+            let _ = writeln!(out, "  edges:");
+            for (src, tgt) in &open_edges {
+                let _ = writeln!(out, "    {src} --> {tgt}");
+            }
+
+            print!("{out}");
         }
     }
-
-    // Also list any open connected items not in any layer (should be rare,
-    // happens with isolated cycles not reached by topological sort)
-    let layered_ids: HashSet<String> = filtered_layers
-        .iter()
-        .flat_map(|layer| layer.iter().cloned())
-        .collect();
-    let mut unlayered: Vec<&String> = open_connected
-        .iter()
-        .filter(|id| !layered_ids.contains(*id))
-        .collect();
-    unlayered.sort();
-    if !unlayered.is_empty() {
-        let _ = writeln!(out, "  unlayered (cycle members):");
-        for id in &unlayered {
-            let state_mark = meta.get(*id).map_or(" ", ItemMeta::display_state);
-            let title = meta
-                .get(*id)
-                .map(|m| truncate(&m.title, 50))
-                .unwrap_or_default();
-            let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
-        }
-    }
-
-    // Edge list for completeness
-    let _ = writeln!(out);
-    let _ = writeln!(out, "  edges:");
-    for (src, tgt) in &open_edges {
-        let _ = writeln!(out, "    {src} --> {tgt}");
-    }
-
-    print!("{out}");
     Ok(())
 }
 
@@ -761,6 +1105,8 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            mermaid: false,
+            dot: false,
         };
 
         // Just check it doesn't panic/error
@@ -804,6 +1150,8 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            mermaid: false,
+            dot: false,
         };
 
         let result = run_graph_summary(&raw, &conn, &args, OutputMode::Human);
@@ -931,8 +1279,291 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            mermaid: false,
+            dot: false,
         };
         let result = run_graph(&args, OutputMode::Human, &root);
         assert!(result.is_ok(), "run_graph failed: {:?}", result.err());
+    }
+
+    // --- Mermaid / DOT unit tests ---
+
+    #[test]
+    fn mermaid_item_renders_graph_td() {
+        use petgraph::graph::DiGraph;
+        use std::collections::HashMap as HM;
+
+        let mut graph = DiGraph::<String, ()>::new();
+        let a = graph.add_node("bn-aaa".into());
+        let b = graph.add_node("bn-bbb".into());
+        graph.add_edge(a, b, ()); // a blocks b
+
+        let mut node_map = HM::new();
+        node_map.insert("bn-aaa".into(), a);
+        node_map.insert("bn-bbb".into(), b);
+
+        let raw = RawGraph {
+            graph,
+            node_map,
+            content_hash: "blake3:test".into(),
+        };
+
+        let mut meta = HashMap::new();
+        meta.insert(
+            "bn-aaa".into(),
+            ItemMeta { title: "Alpha".into(), state: "open".into() },
+        );
+        meta.insert(
+            "bn-bbb".into(),
+            ItemMeta { title: "Beta".into(), state: "doing".into() },
+        );
+
+        let args = GraphArgs {
+            id: Some("bn-aaa".into()),
+            down: false,
+            up: false,
+            depth: None,
+            mermaid: true,
+            dot: false,
+        };
+
+        let out = render_mermaid_item(&raw, &meta, "bn-aaa", &args);
+        assert!(out.starts_with("graph TD\n"), "should start with mermaid header: {out}");
+        assert!(out.contains("bn-aaa"), "should contain root node: {out}");
+        assert!(out.contains("bn-bbb"), "should contain downstream node: {out}");
+        assert!(out.contains("-->"), "should contain edge arrow: {out}");
+        assert!(out.contains("Alpha"), "should contain title: {out}");
+        // Doing state should get yellow styling
+        assert!(out.contains("#fff3cd"), "should style doing node: {out}");
+    }
+
+    #[test]
+    fn mermaid_item_respects_direction_flags() {
+        use petgraph::graph::DiGraph;
+        use std::collections::HashMap as HM;
+
+        // A → B → C
+        let mut graph = DiGraph::<String, ()>::new();
+        let a = graph.add_node("bn-aaa".into());
+        let b = graph.add_node("bn-bbb".into());
+        let c = graph.add_node("bn-ccc".into());
+        graph.add_edge(a, b, ());
+        graph.add_edge(b, c, ());
+
+        let mut node_map = HM::new();
+        node_map.insert("bn-aaa".into(), a);
+        node_map.insert("bn-bbb".into(), b);
+        node_map.insert("bn-ccc".into(), c);
+
+        let raw = RawGraph {
+            graph,
+            node_map,
+            content_hash: "blake3:test".into(),
+        };
+        let meta = HashMap::new();
+
+        // --down only from B: should show C but not A
+        let args_down = GraphArgs {
+            id: Some("bn-bbb".into()),
+            down: true,
+            up: false,
+            depth: None,
+            mermaid: true,
+            dot: false,
+        };
+        let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_down);
+        assert!(out.contains("bn-ccc"), "downstream should show C: {out}");
+        assert!(!out.contains("bn-aaa"), "downstream-only should NOT show A: {out}");
+
+        // --up only from B: should show A but not C
+        let args_up = GraphArgs {
+            id: Some("bn-bbb".into()),
+            down: false,
+            up: true,
+            depth: None,
+            mermaid: true,
+            dot: false,
+        };
+        let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_up);
+        assert!(out.contains("bn-aaa"), "upstream should show A: {out}");
+        assert!(!out.contains("bn-ccc"), "upstream-only should NOT show C: {out}");
+    }
+
+    #[test]
+    fn dot_item_renders_digraph() {
+        use petgraph::graph::DiGraph;
+        use std::collections::HashMap as HM;
+
+        let mut graph = DiGraph::<String, ()>::new();
+        let a = graph.add_node("bn-aaa".into());
+        let b = graph.add_node("bn-bbb".into());
+        graph.add_edge(a, b, ());
+
+        let mut node_map = HM::new();
+        node_map.insert("bn-aaa".into(), a);
+        node_map.insert("bn-bbb".into(), b);
+
+        let raw = RawGraph {
+            graph,
+            node_map,
+            content_hash: "blake3:test".into(),
+        };
+
+        let mut meta = HashMap::new();
+        meta.insert(
+            "bn-aaa".into(),
+            ItemMeta { title: "Alpha".into(), state: "open".into() },
+        );
+        meta.insert(
+            "bn-bbb".into(),
+            ItemMeta { title: "Beta".into(), state: "done".into() },
+        );
+
+        let args = GraphArgs {
+            id: Some("bn-aaa".into()),
+            down: false,
+            up: false,
+            depth: None,
+            mermaid: false,
+            dot: true,
+        };
+
+        let out = render_dot_item(&raw, &meta, "bn-aaa", &args);
+        assert!(out.starts_with("digraph bones {"), "should start with digraph: {out}");
+        assert!(out.contains("\"bn-aaa\""), "should contain root node: {out}");
+        assert!(out.contains("\"bn-bbb\""), "should contain downstream node: {out}");
+        assert!(out.contains("->"), "should contain edge arrow: {out}");
+        assert!(out.contains("Alpha"), "should contain title: {out}");
+        assert!(out.contains("penwidth=3.0"), "root should have thick border: {out}");
+        // Done state should get green fill
+        assert!(out.contains("#d4edda"), "should style done node: {out}");
+        assert!(out.ends_with("}\n"), "should end with closing brace: {out}");
+    }
+
+    #[test]
+    fn mermaid_summary_renders_all_open_edges() {
+        let mut open_connected = HashSet::new();
+        open_connected.insert("bn-001".into());
+        open_connected.insert("bn-002".into());
+
+        let open_edges = vec![("bn-001".to_string(), "bn-002".to_string())];
+
+        let mut meta = HashMap::new();
+        meta.insert(
+            "bn-001".into(),
+            ItemMeta { title: "First".into(), state: "open".into() },
+        );
+        meta.insert(
+            "bn-002".into(),
+            ItemMeta { title: "Second".into(), state: "doing".into() },
+        );
+
+        // We need a dummy RawGraph for the signature
+        let raw = RawGraph {
+            graph: petgraph::graph::DiGraph::new(),
+            node_map: std::collections::HashMap::new(),
+            content_hash: "blake3:test".into(),
+        };
+
+        let out = render_mermaid_summary(&raw, &meta, &open_connected, &open_edges);
+        assert!(out.starts_with("graph TD\n"), "mermaid header: {out}");
+        assert!(out.contains("bn-001"), "should contain first node: {out}");
+        assert!(out.contains("bn-002"), "should contain second node: {out}");
+        assert!(out.contains("bn-001 --> bn-002"), "should contain edge: {out}");
+    }
+
+    #[test]
+    fn dot_summary_renders_all_open_edges() {
+        let mut open_connected = HashSet::new();
+        open_connected.insert("bn-001".into());
+        open_connected.insert("bn-002".into());
+
+        let open_edges = vec![("bn-001".to_string(), "bn-002".to_string())];
+
+        let mut meta = HashMap::new();
+        meta.insert(
+            "bn-001".into(),
+            ItemMeta { title: "First".into(), state: "open".into() },
+        );
+        meta.insert(
+            "bn-002".into(),
+            ItemMeta { title: "Second".into(), state: "open".into() },
+        );
+
+        let out = render_dot_summary(&meta, &open_connected, &open_edges);
+        assert!(out.starts_with("digraph bones {"), "dot header: {out}");
+        assert!(out.contains("\"bn-001\""), "should contain first node: {out}");
+        assert!(out.contains("\"bn-002\""), "should contain second node: {out}");
+        assert!(out.contains("\"bn-001\" -> \"bn-002\""), "should contain edge: {out}");
+        assert!(out.ends_with("}\n"), "should end properly: {out}");
+    }
+
+    #[test]
+    fn mermaid_escapes_quotes() {
+        assert_eq!(mermaid_escape("hello \"world\""), "hello #quot;world#quot;");
+    }
+
+    #[test]
+    fn dot_escapes_special_chars() {
+        assert_eq!(dot_escape("hello \"world\""), "hello \\\"world\\\"");
+        assert_eq!(dot_escape("line\nnewline"), "line\\nnewline");
+        assert_eq!(dot_escape("back\\slash"), "back\\\\slash");
+    }
+
+    #[test]
+    fn mermaid_node_id_sanitizes_dots() {
+        assert_eq!(mermaid_node_id("bn-1st.3"), "bn-1st_3");
+        assert_eq!(mermaid_node_id("bn-abc"), "bn-abc");
+    }
+
+    #[test]
+    fn graph_format_from_args() {
+        let args = GraphArgs {
+            id: None, down: false, up: false, depth: None,
+            mermaid: false, dot: false,
+        };
+        assert_eq!(args.format(), GraphFormat::Ascii);
+
+        let args = GraphArgs {
+            id: None, down: false, up: false, depth: None,
+            mermaid: true, dot: false,
+        };
+        assert_eq!(args.format(), GraphFormat::Mermaid);
+
+        let args = GraphArgs {
+            id: None, down: false, up: false, depth: None,
+            mermaid: false, dot: true,
+        };
+        assert_eq!(args.format(), GraphFormat::Dot);
+    }
+
+    #[test]
+    fn clap_parses_mermaid_flag() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: GraphArgs,
+        }
+
+        let w = Wrapper::parse_from(["test", "bn-abc", "--mermaid"]);
+        assert!(w.args.mermaid);
+        assert!(!w.args.dot);
+    }
+
+    #[test]
+    fn clap_parses_dot_flag() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: GraphArgs,
+        }
+
+        let w = Wrapper::parse_from(["test", "--dot"]);
+        assert!(!w.args.mermaid);
+        assert!(w.args.dot);
     }
 }

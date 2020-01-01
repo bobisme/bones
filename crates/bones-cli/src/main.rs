@@ -53,7 +53,7 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
     version,
     about = "bones: pile-first tracker for humans and agents",
     long_about = None,
-    after_help = "QUICK REFERENCE:\n    bn create --title \"...\" --kind goal  # create a goal bone\n    bn create --title \"...\" --parent <id> # create child of a goal\n    bn bone move <id> --parent <goal>    # reparent an existing bone\n    bn bone move <id> --parent none      # detach from parent\n    bn triage                # triage report (default)\n    bn triage dup <id>       # duplicate check for one bone\n    bn triage plan           # parallel execution layers\n    bn bone log <id>         # bone event timeline\n    bn bone assign <id> <a>  # assign bone to agent\n    bn bone comment add <id> <text>\n    bn admin verify          # verify event/manifests\n    bn data export --output events.jsonl\n    bn dev sim run --seeds 100\n    bn ui                    # open interactive UI"
+    after_help = "QUICK REFERENCE:\n    bn triage                # triage report (default)\n    bn triage dup <id>       # duplicate check for one bone\n    bn triage plan           # parallel execution layers\n    bn bone log <id>         # bone event timeline\n    bn bone assign <id> <a>  # assign bone to agent\n    bn bone comment add <id> <text>\n    bn admin verify          # verify event/manifests\n    bn data export --output events.jsonl\n    bn dev sim run --seeds 100\n    bn ui                    # open interactive UI"
 )]
 struct Cli {
     /// Enable verbose logging.
@@ -411,7 +411,7 @@ enum Commands {
         next_help_heading = "Dependencies",
         about = "Visualize the dependency graph",
         long_about = "Show the dependency graph for a bone or the whole project.\n\nWith a bone ID: show upstream (blocked-by) and downstream (blocks) dependencies.\nWithout an ID: show project-level statistics and structural analysis.",
-        after_help = "EXAMPLES:\n    # Show full graph for a bone\n    bn triage graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn triage graph bn-abc --down\n\n    # Project summary\n    bn triage graph\n\n    # Machine-readable output\n    bn triage graph bn-abc --format json"
+        after_help = "EXAMPLES:\n    # Show full graph for a bone\n    bn triage graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn triage graph bn-abc --down\n\n    # Project summary\n    bn triage graph\n\n    # Mermaid diagram output\n    bn triage graph --mermaid\n    bn triage graph bn-abc --mermaid\n\n    # Graphviz DOT output\n    bn triage graph --dot\n    bn triage graph bn-abc --dot\n\n    # Machine-readable output\n    bn triage graph bn-abc --format json"
     )]
     Graph(cmd::graph::GraphArgs),
 
@@ -604,7 +604,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Bone-scoped operations",
         long_about = "Grouped bone operations including history, metadata, assignment, comments, and lifecycle detail.",
-        after_help = "QUICK REFERENCE:\n    bn bone move <id> --parent <goal>  # reparent under a goal\n    bn bone move <id> --parent none    # detach from parent\n    bn bone log <id>                   # bone event timeline\n    bn bone assign <id> <agent>        # assign\n    bn bone comment add <id> <text>    # add comment\n    bn bone tag <id> <label...>        # add labels\n    bn bone punt <id>                  # set urgency=punt\n    bn bone escalate <id>              # set urgency=urgent\n    bn bone normalize <id>             # set urgency=default\n    bn bone close <id>                 # close bone\n    bn bone reopen <id>                # reopen bone\n\nEXAMPLES:\n    # Create a goal with children\n    bn create --title \"Launch v2\" --kind goal\n    bn create --title \"Migrate DB\" --parent bn-a7x\n    bn bone move bn-b8y --parent bn-a7x\n\n    # Show bone event timeline\n    bn bone log bn-abc\n\n    # Assign a bone\n    bn bone assign bn-abc alice\n\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating\""
+        after_help = "QUICK REFERENCE:\n    bn bone log <id>                 # bone event timeline\n    bn bone assign <id> <agent>      # assign\n    bn bone comment add <id> <text>  # add comment\n    bn bone tag <id> <label...>      # add labels\n    bn bone punt <id>                # set urgency=punt\n    bn bone escalate <id>            # set urgency=urgent\n    bn bone normalize <id>           # set urgency=default\n    bn bone close <id>               # close bone\n    bn bone reopen <id>              # reopen bone\n\nEXAMPLES:\n    # Show bone event timeline\n    bn bone log bn-abc\n\n    # Assign a bone\n    bn bone assign bn-abc alice\n\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating\""
     )]
     Bone {
         #[command(subcommand)]
