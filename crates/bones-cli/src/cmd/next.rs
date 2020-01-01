@@ -468,10 +468,11 @@ fn render_next_text_from_assignment(
     w: &mut dyn Write,
 ) -> std::io::Result<()> {
     let score = display_score(item.score);
+    writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
     writeln!(
         w,
-        "{}  next  score={}  {}  why={}",
-        item.id, score, item.title, item.explanation
+        "{}\t{}\t{}\t{}\t{}",
+        item.agent_slot, item.id, score, item.title, item.explanation
     )
 }
 
@@ -481,11 +482,12 @@ fn render_assignments_text(payload: &NextAssignments, w: &mut dyn Write) -> std:
         return Ok(());
     }
 
+    writeln!(w, "SLOT\tID\tSCORE\tTITLE\tREASON")?;
     for assignment in &payload.assignments {
         let score = display_score(assignment.score);
         writeln!(
             w,
-            "slot={}  {}  score={}  {}  why={}",
+            "{}\t{}\t{}\t{}\t{}",
             assignment.agent_slot, assignment.id, score, assignment.title, assignment.explanation
         )?;
     }
