@@ -223,7 +223,7 @@ item.redact     — Replace event payload with [redacted] in projection (secret 
 │   ├── 2026-02.events     # Active shard, append-only
 │   └── current.events     # Symlink to active shard
 ├── bones.db               # Gitignored — SQLite projection + FTS5 + vectors
-├── config.yaml            # Committed — project config
+├── config.toml            # Committed — project config
 ├── feedback.jsonl          # Gitignored — local triage feedback
 └── cache/
     ├── events.bin          # Gitignored — binary columnar cache
@@ -473,7 +473,7 @@ Thresholds:
 - 0.50–0.69 → `maybe_related`
 - < 0.50 → no warning
 
-All thresholds configurable in `.bones/config.yaml`.
+All thresholds configurable in `.bones/config.toml`.
 
 ---
 
@@ -559,11 +559,13 @@ bn plan --json
 Every mutating command requires an agent for attribution. Resolution order:
 
 1. `--agent <name>` flag (highest priority, per-command override)
-2. `AGENT` environment variable (set by agent launchers / hooks)
-3. `BONES_AGENT` environment variable (bones-specific fallback)
-4. `agent` in `~/.config/bones/config.toml` (user default)
+2. `BONES_AGENT` environment variable (bones-specific, set by launchers/hooks)
+3. `AGENT` environment variable (generic agent env, e.g. from botbox)
+4. `USER` environment variable — **only** if stdin is a TTY (interactive human session)
 
 If none are set, mutating commands **error** with a clear message explaining how to set one. Read-only commands (`list`, `show`, `search`, etc.) do not require an agent.
+
+The TTY guard on `USER` prevents scripts, CI, cron, and agent subprocesses from silently attributing events to a Unix username. Config files do not participate in agent resolution.
 
 The agent string is free-form (e.g., `bones-dev`, `claude-abc`, `gemini-xyz`). It is recorded in every event's `agent` field and is the permanent audit trail for who did what.
 
@@ -669,21 +671,22 @@ Utility to import an existing beads database into Bones:
 
 ## Configuration
 
-```yaml
-# .bones/config.yaml
-goals:
-  auto_complete: true          # Auto-close goals when all children done
+```toml
+# .bones/config.toml
 
-search:
-  semantic: true               # Enable semantic search (requires model)
-  model: "minilm-l6-v2-int8"  # Embedding model
-  duplicate_threshold: 0.85    # >= this = likely duplicate
-  related_threshold: 0.65      # >= this = possibly related
-  warn_on_create: true         # Show duplicate warnings during creation
-  block_on_create: false       # Block creation if duplicate found (strict)
+[goals]
+auto_complete = true          # Auto-close goals when all children done
 
-triage:
-  feedback_learning: true      # Adjust weights from bn did/skip feedback
+[search]
+semantic = true               # Enable semantic search (requires model)
+model = "minilm-l6-v2-int8"  # Embedding model
+duplicate_threshold = 0.85    # >= this = likely duplicate
+related_threshold = 0.65      # >= this = possibly related
+warn_on_create = true         # Show duplicate warnings during creation
+block_on_create = false       # Block creation if duplicate found (strict)
+
+[triage]
+feedback_learning = true      # Adjust weights from bn did/skip feedback
 ```
 
 ---
