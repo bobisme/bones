@@ -1,0 +1,55 @@
+{
+  "version": "1.0.16",
+  "project": {
+    "name": "bones",
+    "type": [
+      "cli",
+      "tui"
+    ],
+    "languages": [
+      "rust"
+    ],
+    "defaultAgent": "bones-dev",
+    "channel": "bones",
+    "installCommand": "just install",
+    "criticalApprovers": null
+  },
+  "tools": {
+    "beads": true,
+    "maw": true,
+    "crit": true,
+    "botbus": true,
+    "botty": true
+  },
+  "review": {
+    "enabled": false,
+    "reviewers": []
+  },
+  "pushMain": false,
+  "agents": {
+    "dev": {
+      "model": "opus",
+      "maxLoops": 20,
+      "pause": 2,
+      "timeout": 900,
+      "missions": {
+        "enabled": true,
+        "maxWorkers": 4,
+        "maxChildren": 12,
+        "checkpointIntervalSec": 30
+      },
+      "multiLead": null
+    },
+    "worker": {
+      "model": "haiku",
+      "timeout": 600
+    },
+    "reviewer": {
+      "model": "opus",
+      "maxLoops": 20,
+      "pause": 2,
+      "timeout": 600
+    },
+    "responder": null
+  }
+}

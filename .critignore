@@ -1,0 +1,10 @@
+# Ignore botbox-managed files (prompts, scripts, hooks, journals)
+.agents/botbox/
+
+# Ignore tool config and data files
+.beads/
+.crit/
+.maw.toml
+.botbox.json
+.claude/
+opencode.json

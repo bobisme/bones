@@ -1,0 +1,120 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "check-bus-inbox",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          },
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "claim-agent",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "init-agent",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          },
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "check-jj",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "claim-agent",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "init-agent",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          },
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "check-jj",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          },
+          {
+            "command": [
+              "botbox",
+              "hooks",
+              "run",
+              "claim-agent",
+              "--project-root",
+              "/home/bob/src/bones/ws/default"
+            ],
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}
