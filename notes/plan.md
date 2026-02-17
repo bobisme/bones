@@ -181,22 +181,62 @@ The canonical event log format is **TSJSON** — tab-separated fixed fields with
 
 ```
 # bones event log v1
-# fields: timestamp \t agent \t type \t item_id \t data
-1708012200	claude-abc	item.create	bn-a3f8	{"title":"Fix auth retry","kind":"task","effort":"m","labels":["backend"]}
-1708012201	claude-abc	item.move	bn-a3f8	{"state":"doing"}
-1708012202	gemini-xyz	item.create	bn-c7d2	{"title":"Payment schema migration","kind":"task","effort":"l"}
-1708012215	claude-abc	item.link	bn-a3f8	{"blocks":"bn-c7d2"}
-1708012230	claude-abc	item.comment	bn-a3f8	{"body":"Root cause is a race in token refresh."}
-1708012300	claude-abc	item.move	bn-a3f8	{"state":"done","reason":"Shipped in commit 9f3a2b1"}
+# fields: wall_ts_us \t agent \t itc \t parents \t type \t item_id \t data \t event_hash
+1708012200123456	claude-abc	itc:AQ	 	item.create	bn-a3f8	{"kind":"task","labels":["backend"],"size":"m","title":"Fix auth retry"}	blake3:a1b2c3...
+1708012201000000	claude-abc	itc:AQ.1	blake3:a1b2c3...	item.move	bn-a3f8	{"state":"doing"}	blake3:d4e5f6...
+1708012202000000	gemini-xyz	itc:BQ	 	item.create	bn-c7d2	{"kind":"task","size":"l","title":"Payment schema migration"}	blake3:789abc...
+1708012215000000	claude-abc	itc:AQ.2	blake3:d4e5f6...	item.link	bn-a3f8	{"blocks":"bn-c7d2"}	blake3:def012...
+1708012230000000	claude-abc	itc:AQ.3	blake3:def012...	item.comment	bn-a3f8	{"body":"Root cause is a race in token refresh."}	blake3:345678...
+1708012300000000	claude-abc	itc:AQ.4	blake3:345678...	item.move	bn-a3f8	{"reason":"Shipped in commit 9f3a2b1","state":"done"}	blake3:9abcde...
 ```
+
+### TSJSON Field Definitions
+
+| # | Field | Type | Description |
+|---|-------|------|-------------|
+| 1 | `wall_ts_us` | i64 | Wall-clock microseconds since Unix epoch. Monotonic per-repo (see Timestamp Semantics). |
+| 2 | `agent` | String | Agent identifier (free-form, e.g., `claude-abc`, `bob`). |
+| 3 | `itc` | String | Interval Tree Clock stamp, canonical text encoding. |
+| 4 | `parents` | String | Comma-separated parent event hashes (sorted lexicographically). Empty for root events. |
+| 5 | `type` | String | Event type from the catalog (e.g., `item.create`). |
+| 6 | `item_id` | String | Target item ID (e.g., `bn-a3f8`). |
+| 7 | `data` | JSON | Compact JSON payload with keys sorted lexicographically (recursive). No whitespace padding. |
+| 8 | `event_hash` | String | BLAKE3 hash of fields 1-7 (see Event Hashing). |
+
+### Event Hashing (Normative)
+
+The event hash provides content-addressing for the Merkle-DAG. The hash input is the UTF-8 bytes of fields 1-7 joined by tabs, terminated by a newline:
+
+```
+"{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{type}\t{item_id}\t{data_json}\n"
+```
+
+- Hash function: **BLAKE3**
+- Encoding: `blake3:<hex>` (lowercase hex)
+- `parents` field uses `,` separator and **must be sorted lexicographically** before hashing
+- `data_json` must use **canonical JSON**: compact (no whitespace), object keys sorted lexicographically (recursive)
+
+This hash is the event's identity in the Merkle-DAG. Parent references, shard manifests, `item.redact` targets, and sync diffing all use this hash.
+
+### Timestamp Semantics
+
+Timestamps use **microsecond resolution** (`wall_ts_us`: i64, microseconds since Unix epoch).
+
+**Per-repo monotonicity** is guaranteed by maintaining a local clock file (`.bones/cache/clock`, gitignored):
+
+1. `now = system_time_us()`
+2. `wall_ts_us = max(now, last_ts + 1)`
+3. Persist `wall_ts_us` to clock file
+
+This ensures logs are readable and ordered, eliminates tie-breaking collisions in practice, and prevents "time went backwards" anomalies. The clock file is protected by the repo write lock (see Cross-Process Locking).
 
 ### Why TSJSON
 
-- ~40% more compact than JSONL (positional fixed fields eliminate repeated key names)
 - Git diffs are clean — each added line is a self-contained event
 - Grep/awk/sort work natively on the positional fields without a JSON parser
 - Partial parse: can extract timestamp/agent/type/item_id without touching JSON payload
 - One event = one line invariant preserved
+- Content-addressed: every event carries its own hash, enabling Merkle-DAG integrity
 
 ### Event Type Catalog
 
@@ -219,26 +259,116 @@ item.redact     — Replace event payload with [redacted] in projection (secret 
 ```
 .bones/
 ├── events/
-│   ├── 2026-01.events     # Frozen, never modified
+│   ├── 2026-01.events     # Sealed shard, never modified
+│   ├── 2026-01.manifest   # Committed — sealed shard manifest
 │   ├── 2026-02.events     # Active shard, append-only
 │   └── current.events     # Symlink to active shard
 ├── bones.db               # Gitignored — SQLite projection + FTS5 + vectors
 ├── config.toml            # Committed — project config
 ├── feedback.jsonl          # Gitignored — local triage feedback
+├── lock                   # Gitignored — advisory write lock
 └── cache/
     ├── events.bin          # Gitignored — binary columnar cache
-    └── triage.json         # Gitignored — cached graph metrics
+    ├── triage.json         # Gitignored — cached graph metrics
+    ├── clock              # Gitignored — monotonic timestamp state
+    └── projection.cursor  # Gitignored — incremental projection cursor
 ```
 
-Frozen shards are immutable. Git stores them once and never diffs them again. Only the active shard appears in diffs.
+Sealed shards are immutable. Git stores them once and never diffs them again. Only the active shard appears in diffs.
 
-### Shard Manifests
+### Shard Manifests (Seal-Only)
 
-Each shard has a companion manifest (committed to git) recording event count, root Merkle hash, and byte length. On startup, Bones verifies the manifest before replaying events. Corruption is detected before it reaches the projection layer. `bn verify` checks all shard manifests and reports integrity status.
+Manifests are committed to git **only for sealed (frozen) shards**. The active shard has no committed manifest — this avoids constant churn and prevents verification failures during normal operation.
+
+**Sealed shard manifest** (e.g., `2026-01.manifest`):
+```json
+{
+  "version": 1,
+  "shard": "2026-01",
+  "event_count": 12345,
+  "byte_len": 987654,
+  "file_hash": "blake3:..."
+}
+```
+
+Shards are sealed automatically on month rotation (new month = new active shard, old shard gets a manifest). `bn verify` validates sealed shard manifests and runs parse sanity checks on the active shard.
+
+### Cross-Process Locking
+
+Multiple `bn` processes (TUI + CLI + agents) may run concurrently. A single advisory lock file (`.bones/lock`) serializes all mutating operations.
+
+**Lock tiers:**
+- **Write lock** (exclusive): required for any mutating command (`create`, `do`, `done`, `link`, etc.), `rebuild`, and projection updates. Acquired via `flock(LOCK_EX)`.
+- **Read operations**: no lock required. Readers tolerate momentary lag via SQLite WAL mode.
+
+**SQLite rules:**
+- WAL mode enabled (`.bones/bones.db` creates `-wal` and `-shm` files, both gitignored).
+- Projection updates happen under the write lock to prevent "events appended but projection behind" races.
+
+The write lock also protects the monotonic clock file and the active shard append. Critical sections are kept short (single event append + projection update).
+
+### Crash-Consistent Append Protocol
+
+"Append-only" requires explicit crash semantics. The protocol ensures no data loss on power failure or `kill -9`.
+
+**Invariants:**
+- An event is exactly one newline-terminated line.
+- Files must always end with `\n` after a successful append.
+
+**Append algorithm:**
+1. Acquire the repo write lock.
+2. Open active shard with `O_APPEND`.
+3. Write the full line bytes in one `write_all`.
+4. `flush()` (default) or `sync_data()` (with `--durable` flag).
+5. Release the write lock.
+
+**Recovery on startup (before replay):**
+1. Scan active shard from end to find last `\n`.
+2. If last line is incomplete (no trailing newline) or fails parse, truncate back to last complete newline.
+3. Emit diagnostic warning: "torn write repaired, N bytes truncated."
+
+This makes durability an explicit knob and prevents "one bad line kills the repo."
 
 ### Interoperability
 
 `bn export --jsonl` produces standard JSONL from the event log. `bn log --json` outputs structured JSON to stdout. The event log format is internal; the public API is the CLI with `--json` output.
+
+### Event Validation Layer
+
+Every event passes through validation before being accepted into the projection. This is the firewall against corrupted, malicious, or buggy events.
+
+**Three levels of validation:**
+
+1. **Line syntax** — TSJSON shape: correct number of tab-separated fields, valid UTF-8, event hash matches recomputed hash.
+2. **Schema validation** — Typed payload deserialization per event type. Unknown fields are preserved (forward-compatible via `#[serde(flatten)] extra: BTreeMap<String, Value>`). Unknown event types produce warnings, not errors.
+3. **Semantic validation** — State machine rules (valid state transitions), enum constraints (kind, urgency, size), link target validity, item ID format.
+
+**Invalid event behavior (normative):**
+- During **replay/CRDT**: invalid events become **no-ops** (skipped, recorded as warnings). This ensures a single buggy agent cannot poison a repo.
+- During **`bn verify` / `bn validate`**: invalid events are surfaced with line number, shard path, and error category.
+- During **write** (local `bn` commands): validation runs pre-write and rejects invalid events before they reach the log.
+
+### Incremental Projection
+
+SQLite projection tracks the event log incrementally via a cursor (`.bones/cache/projection.cursor`, gitignored):
+
+**Cursor state:**
+- Per-shard byte offset
+- Last processed event hash
+
+**On startup / before commands that need the projection:**
+1. For sealed shards with valid manifests: skip entirely (already projected).
+2. For the active shard: seek to cursor offset, process only new lines.
+3. Apply events to SQLite in batches within transactions.
+4. Update cursor after successful commit.
+
+**Invalidation triggers (fall back to full rebuild):**
+- Schema version mismatch
+- Cursor event hash not found in shard (shard modified/truncated)
+- Sealed shard manifest mismatch
+- SQLite corruption detected
+
+This makes common commands O(delta) instead of O(all events). Full rebuild (`bn rebuild`) remains the recovery path.
 
 ---
 
@@ -322,7 +452,7 @@ Replace vector clocks with **Interval Tree Clocks** (Almeida et al. 2008). Clock
 To guarantee bit-identical convergence across replicas and implementations, all LWW fields must use this exact total order:
 
 1. Compare ITC causal dominance.
-2. If concurrent, compare `wall_ts`.
+2. If concurrent, compare `wall_ts_us`.
 3. If equal, compare `agent_id` lexicographically.
 4. If equal, compare `event_hash` lexicographically.
 
@@ -350,6 +480,36 @@ The merge operator (S, ⊔) forms a join-semilattice:
 3. **Idempotence**: a ⊔ a = a
 
 These laws guarantee convergence in any asynchronous network with any message ordering, duplication, or delay.
+
+### Snapshot, Delete, and Redact Concurrency Semantics (Normative)
+
+These three operations interact subtly with CRDTs and must have explicit, deterministic behavior under concurrency.
+
+**`item.snapshot` (compaction):**
+
+Snapshots are **lattice elements**, not regular updates. A snapshot event must carry, for every field, the winning clock+value pair (for LWW fields) or the full set state (for OR-Sets/G-Sets). Applying a snapshot means `state = join(state, snapshot_state)` — field-wise lattice join — **not** "overwrite with snapshot event's clock."
+
+This ensures compaction is semantics-preserving: concurrent events not observed at compaction time are not silently dominated. The snapshot's per-field clocks participate in the normal LWW tie-breaking chain, so a concurrent update with a higher clock still wins.
+
+**`item.delete` (soft-delete):**
+
+Delete is a CRDT field: `deleted: LWW<bool>`. Default is `false`. `item.delete` sets it to `true` via normal LWW semantics. A concurrent update to a deleted item's fields is valid — the item retains its updated fields but remains deleted. Default queries hide deleted items; `--include-deleted` shows them. Merge behavior is deterministic via the standard LWW tie-breaking chain.
+
+**`item.redact` (projection-level erasure):**
+
+Redaction targets an event by hash. The original event remains in the log (Merkle integrity preserved). In projections:
+- The targeted event's payload is replaced with `[redacted]`.
+- Embeddings for affected items are deleted and recomputed without the redacted content.
+- Compaction must never reintroduce redacted content — snapshots must check the redaction set before including field values.
+
+**Concurrent interaction matrix:**
+
+| Operation A | Operation B | Resolution |
+|-------------|-------------|------------|
+| delete | update | Both apply via LWW. Item has updated fields but is deleted. |
+| snapshot | update | Lattice join. Concurrent update wins if its clock dominates. |
+| redact | snapshot | Snapshot must not include redacted content. Redaction set checked during snapshot generation. |
+| delete | snapshot | Lattice join on `deleted` field like any other LWW field. |
 
 ---
 
@@ -720,15 +880,23 @@ feedback_learning = true      # Adjust weights from bn did/skip feedback
 
 ### Phase 1: Core (MVP)
 
-- TSJSON event format with time-sharded files
+- TSJSON v1 event format (8 fields: wall_ts_us, agent, itc, parents, type, item_id, data, event_hash)
+- Event hashing: BLAKE3 content-addressed Merkle-DAG
+- Canonical JSON serialization (sorted keys, compact)
+- Microsecond timestamps with per-repo monotonicity
+- Cross-process locking (advisory file lock)
+- Crash-consistent append protocol with torn-write recovery
+- Event validation layer (syntax, schema, semantic)
+- Time-sharded files with seal-only manifests
 - Event engine: append, replay, parse
 - Eg-Walker DAG with ITC clocks
 - CRDT state machine (LWW registers, OR-Sets via DAG replay)
-- SQLite projection (relational tables, FTS5)
+- Snapshot/delete/redact concurrency semantics (normative)
+- SQLite projection (relational tables, FTS5) with incremental cursor
 - Work item model: 3 kinds, 4 states, 3 urgencies, optional 7 sizes
 - Parent-child containment with auto-complete
 - Blocking/relates dependencies
-- Shard manifests and `bn verify`
+- `bn verify` command (sealed shard manifests + active shard parse checks)
 - `item.redact` event type
 - CLI: create, list, show, do, done, search (lexical), tag, link, rebuild, verify
 - `bn migrate-from-beads` utility
@@ -781,6 +949,8 @@ feedback_learning = true      # Adjust weights from bn did/skip feedback
 | `clap` | CLI parsing |
 | `serde`, `serde_json` | Serialization |
 | `rusqlite` | SQLite (bundled) |
+| `blake3` | Event hashing, shard manifest integrity |
+| `fs2` | Cross-platform advisory file locking |
 | `petgraph` | Graph algorithms |
 | `ort` | ONNX Runtime for embeddings |
 | `ratatui`, `crossterm` | TUI |
@@ -791,3 +961,40 @@ feedback_learning = true      # Adjust weights from bn did/skip feedback
 | `quickcheck` / `proptest` | Property testing |
 | `memmap2` | Memory-mapped files |
 | `bumpalo` | Arena allocation |
+
+---
+
+## Appendix: Plan Review (2026-02-17)
+
+External review produced 30 improvement suggestions. After critical evaluation, 6 were accepted and integrated into the plan above. The remainder were rejected as premature, redundant, or out of scope for the current phase.
+
+### Accepted Changes
+
+| # | Suggestion | Disposition | Plan Section Updated |
+|---|-----------|-------------|---------------------|
+| 1 | Self-sufficient event format (ITC, parents, hash in TSJSON) | **Accepted** | Event Format: TSJSON — expanded from 5 to 8 fields, added Event Hashing and TSJSON Field Definitions subsections |
+| 2 | Microsecond timestamps with monotonicity | **Partially accepted** | Timestamp Semantics — adopted µs resolution and per-repo monotonicity via clock file; skipped HLC complexity |
+| 3 | Crash-consistent append protocol | **Accepted** | Crash-Consistent Append Protocol — new subsection with invariants, append algorithm, and recovery procedure |
+| 4 | Cross-process locking | **Accepted** | Cross-Process Locking — new subsection with advisory lock tiers and SQLite WAL rules |
+| 6 | Event validation layer | **Accepted** | Event Validation Layer — new subsection with three validation levels and normative invalid-event behavior |
+| 11 | Incremental projection with replay cursors | **Accepted** | Incremental Projection — new subsection with cursor state, seek-based replay, and invalidation triggers |
+| 18 | Snapshot/delete/redact concurrency semantics | **Accepted** | Snapshot, Delete, and Redact Concurrency Semantics — new normative subsection in CRDT Layer with interaction matrix |
+
+### Rejected Suggestions
+
+| # | Suggestion | Reason |
+|---|-----------|--------|
+| 5 | `bn seal` command for shard manifests | Seal-only manifests adopted but no new command — monthly rotation seals shards automatically |
+| 7 | Versioned JSON API envelope (`api_version`) | Premature on day one. Well-typed Rust structs + golden tests suffice initially |
+| 8 | Triage explainability (`bn next --explain`) | Good product feature but Phase 2 concern — triage engine doesn't exist yet |
+| 9 | Pre-write secret scanning | Regex scanning has poor false-positive rates. Recommend git pre-commit hooks (gitleaks/trufflehog) instead |
+| 10 | Optional event signing (ed25519) | Key management complexity outweighs benefit at current stage |
+| 12 | `bn upgrade` workflow | Defer until format actually changes — rebuildable caches cover the common case |
+| 13 | `bn doctor` diagnostics | Downstream of validation + verify + better errors — not top-tier ROI |
+| 14 | Core vs labs feature flags | Philosophically right but Cargo features add real complexity. Phased implementation already handles this |
+| 15 | Fuzzing harness | Correct but premature — add when the parser exists |
+| 16 | Normative test vectors | Already covered by deterministic simulation + property tests |
+| 17 | Batch/transaction events | Can achieve 80% with shared `txn_id` field later |
+| 19 | Schema evolution policy | Folded into event format versioning (bn-1st.3) |
+| 20 | Earlier compaction strategy | Premature until correct baseline exists |
+| 21-30 | Various (fairness metrics, working-set UX, library API, git linkage, templates, CI lint, remote sync, privacy mode, profiling, threat model) | Out of scope for current phase — revisit when relevant subsystems are built |

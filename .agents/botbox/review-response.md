@@ -37,8 +37,7 @@ Run this when:
 
 3. After handling all threads:
    a. Verify fixes compile: `maw exec $WS -- cargo check` (or equivalent for the project)
-   b. Describe the change: `maw exec $WS -- jj describe -m "fix: address review feedback on <review-id>"`
-   c. Re-request review: `maw exec $WS -- crit reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
+   b. Re-request review: `maw exec $WS -- crit reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
    d. Announce (include workspace name so the reviewer can find the fixed code):
       `bus send --agent $AGENT $BOTBOX_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (ws/$WS/)" -L review-response`
 

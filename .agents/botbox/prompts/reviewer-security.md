@@ -8,7 +8,8 @@ At the end of your work, output exactly one of these completion signals:
 - <promise>COMPLETE</promise> if you completed a review or determined no reviews exist
 - <promise>BLOCKED</promise> if you encountered an error
 
-1. INBOX:
+1. INBOX AND STATUS:
+   Optional: Run `botbox status --agent {{ AGENT }}` for a quick overview of system state and actionable advice.
    Run: bus inbox --agent {{ AGENT }} --mentions --channels {{ PROJECT }} --mark-read
    Note any review-request or review-response messages. Ignore task-claim, task-done, spawn-ack, etc.
 
