@@ -4,25 +4,16 @@
       {
         "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "check-bus-inbox",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run check-bus-inbox --project-root /home/bob/src/bones/ws/default",
             "type": "command"
-          },
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "claim-agent",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run claim-agent --project-root /home/bob/src/bones/ws/default",
             "type": "command"
           }
         ],
@@ -33,25 +24,16 @@
       {
         "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "init-agent",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run init-agent --project-root /home/bob/src/bones/ws/default",
             "type": "command"
-          },
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "check-jj",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run check-jj --project-root /home/bob/src/bones/ws/default",
             "type": "command"
           }
         ],
@@ -62,14 +44,7 @@
       {
         "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "claim-agent",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run claim-agent --project-root /home/bob/src/bones/ws/default",
             "type": "command"
           }
         ],
@@ -80,36 +55,25 @@
       {
         "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "init-agent",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run init-agent --project-root /home/bob/src/bones/ws/default",
             "type": "command"
-          },
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "check-jj",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run check-jj --project-root /home/bob/src/bones/ws/default",
             "type": "command"
-          },
+          }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
           {
-            "command": [
-              "botbox",
-              "hooks",
-              "run",
-              "claim-agent",
-              "--project-root",
-              "/home/bob/src/bones/ws/default"
-            ],
+            "command": "botbox hooks run claim-agent --project-root /home/bob/src/bones/ws/default",
             "type": "command"
           }
         ],

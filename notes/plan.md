@@ -845,6 +845,9 @@ related_threshold = 0.65      # >= this = possibly related
 warn_on_create = true         # Show duplicate warnings during creation
 block_on_create = false       # Block creation if duplicate found (strict)
 
+[done]
+require_reason = false       # Require --reason on bn done (default: false)
+
 [triage]
 feedback_learning = true      # Adjust weights from bn did/skip feedback
 ```
