@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! bones-search library.
 //!
 //! # Conventions

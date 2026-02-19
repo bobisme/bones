@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use clap::Parser;
 use tracing::info;
 

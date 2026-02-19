@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! bones-triage library.
 //!
 //! # Conventions
