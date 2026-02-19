@@ -12,6 +12,7 @@ pub mod lock;
 pub mod model;
 pub mod shard;
 pub mod sync;
+pub mod verify;
 
 use tracing::{info, instrument};
 

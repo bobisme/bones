@@ -195,10 +195,10 @@ pub fn find_all_lcas(dag: &EventDag, tip_a: &str, tip_b: &str) -> Result<Vec<Str
 mod tests {
     use super::*;
     use crate::dag::graph::EventDag;
+    use crate::event::Event;
     use crate::event::data::{CreateData, EventData, MoveData, UpdateData};
     use crate::event::types::EventType;
     use crate::event::writer::write_event;
-    use crate::event::Event;
     use crate::model::item::{Kind, State, Urgency};
     use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
@@ -469,7 +469,7 @@ mod tests {
         //     root
         //    /    \
         //  a1      b1
-        //   |\ /|  
+        //   |\ /|
         //   | X |
         //   |/ \|
         //  ma    mb    (ma merges a1+b1, mb merges a1+b1 independently)

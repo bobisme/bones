@@ -23,7 +23,7 @@ use std::collections::HashSet;
 use crate::event::Event;
 
 use super::graph::EventDag;
-use super::lca::{find_lca, LcaError};
+use super::lca::{LcaError, find_lca};
 
 /// Errors from divergent-branch replay.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -220,10 +220,10 @@ pub fn replay_divergent_for_item(
 mod tests {
     use super::*;
     use crate::dag::graph::EventDag;
+    use crate::event::Event;
     use crate::event::data::{CreateData, EventData, MoveData, UpdateData};
     use crate::event::types::EventType;
     use crate::event::writer::write_event;
-    use crate::event::Event;
     use crate::model::item::{Kind, State, Urgency};
     use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
@@ -461,11 +461,7 @@ mod tests {
         let update_test = make_event_for_item(2_000, &[&root.event_hash], "agent-a", "bn-test");
         let update_other = make_event_for_item(2_100, &[&root.event_hash], "agent-b", "bn-other");
 
-        let dag = EventDag::from_events(&[
-            root.clone(),
-            update_test.clone(),
-            update_other.clone(),
-        ]);
+        let dag = EventDag::from_events(&[root.clone(), update_test.clone(), update_other.clone()]);
 
         let replay = replay_divergent_for_item(
             &dag,
@@ -476,10 +472,12 @@ mod tests {
         .unwrap();
 
         // Only bn-test events should be in the result
-        assert!(replay
-            .merged
-            .iter()
-            .all(|e| e.item_id.as_str() == "bn-test"));
+        assert!(
+            replay
+                .merged
+                .iter()
+                .all(|e| e.item_id.as_str() == "bn-test")
+        );
     }
 
     // ===================================================================
@@ -532,24 +530,16 @@ mod tests {
         assert_eq!(replay.merged.len(), 2);
 
         // Filter for item1
-        let replay_item1 = replay_divergent_for_item(
-            &dag,
-            &left.event_hash,
-            &right.event_hash,
-            "bn-item1",
-        )
-        .unwrap();
+        let replay_item1 =
+            replay_divergent_for_item(&dag, &left.event_hash, &right.event_hash, "bn-item1")
+                .unwrap();
         assert_eq!(replay_item1.merged.len(), 1);
         assert_eq!(replay_item1.merged[0].item_id.as_str(), "bn-item1");
 
         // Filter for item2
-        let replay_item2 = replay_divergent_for_item(
-            &dag,
-            &left.event_hash,
-            &right.event_hash,
-            "bn-item2",
-        )
-        .unwrap();
+        let replay_item2 =
+            replay_divergent_for_item(&dag, &left.event_hash, &right.event_hash, "bn-item2")
+                .unwrap();
         assert_eq!(replay_item2.merged.len(), 1);
         assert_eq!(replay_item2.merged[0].item_id.as_str(), "bn-item2");
     }

@@ -38,11 +38,15 @@ enum Commands {
         command: HookCommand,
     },
 
-    /// Validate staged `.events` files in the current git index.
+    /// Verify shard manifests and event integrity.
     Verify {
         /// Validate only staged files.
         #[arg(long)]
         staged: bool,
+
+        /// Regenerate missing manifests for sealed shards.
+        #[arg(long)]
+        regenerate_missing: bool,
     },
 
     /// Synchronize with remote: git pull → rebuild projection → git push.
@@ -253,9 +257,14 @@ fn main() -> anyhow::Result<()> {
         } => {
             git::hooks::install_hooks(&project_root)?;
         }
-        Commands::Verify { staged } => {
+        Commands::Verify {
+            staged,
+            regenerate_missing,
+        } => {
             if staged {
                 git::hooks::verify_staged_events()?;
+            } else {
+                cmd::verify::run_verify(&project_root, regenerate_missing)?;
             }
         }
         Commands::Rebuild { incremental } => {

@@ -80,7 +80,10 @@ pub struct MergeResult {
 /// ```
 #[must_use]
 pub fn merge_event_sets(local: &[Event], remote: &[Event]) -> MergeResult {
-    let local_hashes: HashSet<&str> = local.iter().map(|event| event.event_hash.as_str()).collect();
+    let local_hashes: HashSet<&str> = local
+        .iter()
+        .map(|event| event.event_hash.as_str())
+        .collect();
     let remote_hashes: HashSet<&str> = remote
         .iter()
         .map(|event| event.event_hash.as_str())
