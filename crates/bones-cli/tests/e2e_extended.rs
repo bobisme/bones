@@ -15,7 +15,7 @@ use tempfile::TempDir;
 
 /// Build a Command targeting the bones-cli binary, rooted in `dir`.
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bones-cli").expect("bones-cli binary must exist");
+    let mut cmd = Command::cargo_bin("bn").expect("bones-cli binary must exist");
     cmd.current_dir(dir);
     cmd.env("AGENT", "test-agent");
     cmd.env("BONES_LOG", "error");
@@ -48,18 +48,12 @@ fn create_item(dir: &Path, title: &str) -> String {
 
 /// Transition item to 'doing'.
 fn do_item(dir: &Path, id: &str) {
-    bn_cmd(dir)
-        .args(["do", id])
-        .assert()
-        .success();
+    bn_cmd(dir).args(["do", id]).assert().success();
 }
 
 /// Transition item to 'done'.
 fn done_item(dir: &Path, id: &str) {
-    bn_cmd(dir)
-        .args(["done", id])
-        .assert()
-        .success();
+    bn_cmd(dir).args(["done", id]).assert().success();
 }
 
 /// Get item state as a string via `bn show --json`.
@@ -115,7 +109,11 @@ fn update_title_json_output() {
         .output()
         .expect("update should not crash");
 
-    assert!(output.status.success(), "update failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "update failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
     assert!(json["id"].is_string(), "response must have 'id'");
@@ -133,7 +131,16 @@ fn update_multiple_fields_in_one_invocation() {
     let id = create_item(dir.path(), "A task");
 
     bn_cmd(dir.path())
-        .args(["update", &id, "--title", "Fixed title", "--size", "l", "--urgency", "urgent"])
+        .args([
+            "update",
+            &id,
+            "--title",
+            "Fixed title",
+            "--size",
+            "l",
+            "--urgency",
+            "urgent",
+        ])
         .assert()
         .success();
 
@@ -141,7 +148,17 @@ fn update_multiple_fields_in_one_invocation() {
     assert_eq!(title, "Fixed title");
 
     let output = bn_cmd(dir.path())
-        .args(["update", &id, "--title", "Fixed title", "--size", "l", "--urgency", "urgent", "--json"])
+        .args([
+            "update",
+            &id,
+            "--title",
+            "Fixed title",
+            "--size",
+            "l",
+            "--urgency",
+            "urgent",
+            "--json",
+        ])
         .output()
         .unwrap();
     // Second invocation also succeeds
@@ -234,7 +251,7 @@ fn update_requires_agent() {
     let id = create_item(dir.path(), "My item");
 
     // No AGENT env
-    let mut cmd = Command::cargo_bin("bones-cli").unwrap();
+    let mut cmd = Command::cargo_bin("bn").unwrap();
     cmd.current_dir(dir.path())
         .env_remove("AGENT")
         .env_remove("BONES_AGENT")
@@ -255,10 +272,7 @@ fn close_open_item_succeeds() {
     init_project(dir.path());
     let id = create_item(dir.path(), "Close me");
 
-    bn_cmd(dir.path())
-        .args(["close", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["close", &id]).assert().success();
 
     assert_eq!(get_item_state(dir.path(), &id), "done");
 }
@@ -270,10 +284,7 @@ fn close_doing_item_succeeds() {
     let id = create_item(dir.path(), "In progress");
     do_item(dir.path(), &id);
 
-    bn_cmd(dir.path())
-        .args(["close", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["close", &id]).assert().success();
 
     assert_eq!(get_item_state(dir.path(), &id), "done");
 }
@@ -302,10 +313,7 @@ fn close_already_done_fails() {
     let id = create_item(dir.path(), "Already done");
     done_item(dir.path(), &id);
 
-    bn_cmd(dir.path())
-        .args(["close", &id])
-        .assert()
-        .failure();
+    bn_cmd(dir.path()).args(["close", &id]).assert().failure();
 }
 
 #[test]
@@ -348,10 +356,7 @@ fn reopen_done_item_succeeds() {
     let id = create_item(dir.path(), "Reopen me");
     done_item(dir.path(), &id);
 
-    bn_cmd(dir.path())
-        .args(["reopen", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["reopen", &id]).assert().success();
 
     assert_eq!(get_item_state(dir.path(), &id), "open");
 }
@@ -369,7 +374,9 @@ fn reopen_already_open_fails() {
         .args(["reopen", &id])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("already open").or(predicate::str::contains("cannot reopen")));
+        .stderr(
+            predicate::str::contains("already open").or(predicate::str::contains("cannot reopen")),
+        );
 }
 
 #[test]
@@ -379,10 +386,7 @@ fn reopen_doing_item_fails() {
     let id = create_item(dir.path(), "In progress");
     do_item(dir.path(), &id);
 
-    bn_cmd(dir.path())
-        .args(["reopen", &id])
-        .assert()
-        .failure();
+    bn_cmd(dir.path()).args(["reopen", &id]).assert().failure();
 }
 
 #[test]
@@ -447,7 +451,14 @@ fn full_update_close_reopen_lifecycle() {
 
     // Update title and urgency
     bn_cmd(dir.path())
-        .args(["update", &id, "--title", "Updated lifecycle", "--urgency", "urgent"])
+        .args([
+            "update",
+            &id,
+            "--title",
+            "Updated lifecycle",
+            "--urgency",
+            "urgent",
+        ])
         .assert()
         .success();
 

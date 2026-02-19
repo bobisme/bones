@@ -26,7 +26,10 @@ const CONFIG_TOML: &str = "[goals]\n\
     warn_on_create = true\n\
     \n\
     [triage]\n\
-    feedback_learning = true\n";
+    feedback_learning = true\n\
+    \n\
+    [archive]\n\
+    auto_days = 30\n";
 
 const GITIGNORE: &str = "bones.db\nfeedback.jsonl\ncache/\n";
 
@@ -235,6 +238,11 @@ mod tests {
         assert!(
             content.contains("feedback_learning = true"),
             "missing feedback_learning"
+        );
+        assert!(content.contains("[archive]"), "missing [archive]");
+        assert!(
+            content.contains("auto_days = 30"),
+            "missing archive auto_days"
         );
 
         let _ = fs::remove_dir_all(&root);

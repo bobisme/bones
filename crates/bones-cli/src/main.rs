@@ -116,6 +116,14 @@ enum Commands {
 
     #[command(
         next_help_heading = "Lifecycle",
+        about = "Archive done items",
+        long_about = "Archive a done work item, or bulk-archive stale done items.",
+        after_help = "EXAMPLES:\n    # Archive one done item\n    bn archive bn-abc\n\n    # Bulk-archive done items older than 30 days\n    bn archive --auto\n\n    # Use a custom staleness window\n    bn archive --auto --days 14\n\n    # Emit machine-readable output\n    bn archive bn-abc --json"
+    )]
+    Archive(cmd::archive::ArchiveArgs),
+
+    #[command(
+        next_help_heading = "Lifecycle",
         about = "Update fields on a work item",
         long_about = "Update one or more fields on an existing work item. Each field change emits a separate item.update event.",
         after_help = "EXAMPLES:\n    # Update title\n    bn update bn-abc --title \"New title\"\n\n    # Update multiple fields\n    bn update bn-abc --title \"Fix\" --urgency urgent\n\n    # Emit machine-readable output\n    bn update bn-abc --title \"Fix\" --json"
@@ -170,7 +178,10 @@ enum Commands {
     )]
     Completions(cmd::completions::CompletionsArgs),
 
-    #[command(next_help_heading = "Project Maintenance", about = "Manage optional git hooks")]
+    #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Manage optional git hooks"
+    )]
     Hooks {
         #[command(subcommand)]
         command: HookCommand,
@@ -417,17 +428,20 @@ fn main() -> anyhow::Result<()> {
         Commands::Create(ref args) => timing::timed("cmd.create", || {
             cmd::create::run_create(args, cli.agent_flag(), output, &project_root)
         }),
-        Commands::List(ref args) => {
-            timing::timed("cmd.list", || cmd::list::run_list(args, output, &project_root))
-        }
-        Commands::Show(ref args) => {
-            timing::timed("cmd.show", || cmd::show::run_show(args, output, &project_root))
-        }
+        Commands::List(ref args) => timing::timed("cmd.list", || {
+            cmd::list::run_list(args, output, &project_root)
+        }),
+        Commands::Show(ref args) => timing::timed("cmd.show", || {
+            cmd::show::run_show(args, output, &project_root)
+        }),
         Commands::Do(ref args) => timing::timed("cmd.do", || {
             cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)
         }),
         Commands::Done(ref args) => timing::timed("cmd.done", || {
             cmd::done::run_done(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Archive(ref args) => timing::timed("cmd.archive", || {
+            cmd::archive::run_archive(args, cli.agent_flag(), output, &project_root)
         }),
         Commands::Update(ref args) => timing::timed("cmd.update", || {
             cmd::update::run_update(args, cli.agent_flag(), output, &project_root)
@@ -614,6 +628,12 @@ mod tests {
     }
 
     #[test]
+    fn archive_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "archive", "item-123"]);
+        assert!(matches!(cli.command, Commands::Archive(_)));
+    }
+
+    #[test]
     fn tag_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "tag", "item-123", "bug", "urgent"]);
         assert!(matches!(cli.command, Commands::Tag(_)));
@@ -652,6 +672,7 @@ mod tests {
             vec!["bn", "show", "x"],
             vec!["bn", "do", "x"],
             vec!["bn", "done", "x"],
+            vec!["bn", "archive", "x"],
             vec!["bn", "update", "x", "--title", "t"],
             vec!["bn", "close", "x"],
             vec!["bn", "reopen", "x"],
@@ -680,7 +701,15 @@ mod tests {
     #[test]
     fn update_subcommand_parses_multiple_flags() {
         let cli = Cli::parse_from([
-            "bn", "update", "item-1", "--title", "X", "--size", "m", "--urgency", "urgent",
+            "bn",
+            "update",
+            "item-1",
+            "--title",
+            "X",
+            "--size",
+            "m",
+            "--urgency",
+            "urgent",
         ]);
         assert!(matches!(cli.command, Commands::Update(_)));
         if let Commands::Update(ref args) = cli.command {
@@ -733,6 +762,9 @@ mod tests {
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "done", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "archive", "x"]);
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "update", "x", "--title", "t"]);
