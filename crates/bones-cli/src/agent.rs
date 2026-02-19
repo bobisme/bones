@@ -210,27 +210,18 @@ mod tests {
         );
 
         // No flag — BONES_AGENT wins
-        assert_eq!(
-            resolve_agent_with(None, &env).as_deref(),
-            Some("bones")
-        );
+        assert_eq!(resolve_agent_with(None, &env).as_deref(), Some("bones"));
 
         // No flag, no BONES_AGENT — AGENT wins
         let env = MockEnv::new()
             .var("AGENT", "agent")
             .var("USER", "user")
             .tty();
-        assert_eq!(
-            resolve_agent_with(None, &env).as_deref(),
-            Some("agent")
-        );
+        assert_eq!(resolve_agent_with(None, &env).as_deref(), Some("agent"));
 
         // No flag, no BONES_AGENT, no AGENT — USER (TTY only) wins
         let env = MockEnv::new().var("USER", "user").tty();
-        assert_eq!(
-            resolve_agent_with(None, &env).as_deref(),
-            Some("user")
-        );
+        assert_eq!(resolve_agent_with(None, &env).as_deref(), Some("user"));
     }
 
     #[test]

@@ -4,6 +4,7 @@ mod agent;
 mod cmd;
 mod git;
 mod output;
+mod validate;
 
 use bones_core::timing;
 use clap::{Parser, Subcommand};

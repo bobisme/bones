@@ -5,6 +5,7 @@
 
 use crate::agent;
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use clap::Args;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -13,10 +14,10 @@ use std::time::Duration;
 
 use bones_core::db;
 use bones_core::db::project;
+use bones_core::event::Event;
 use bones_core::event::data::{CreateData, EventData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
-use bones_core::event::Event;
 use bones_core::model::item::Kind;
 use bones_core::model::item::Size;
 use bones_core::model::item::Urgency;
@@ -129,32 +130,40 @@ pub fn run_create(
         }
     };
 
-    // 2. Parse kind
-    let kind: Kind = args.kind.parse().map_err(|_| {
-        let msg = format!(
-            "invalid kind '{}': expected one of task, goal, bug",
-            args.kind
-        );
-        render_error(
-            output,
-            &CliError::with_details(&msg, "Use --kind task, --kind goal, or --kind bug", "invalid_kind"),
-        ).ok();
-        anyhow::anyhow!("{}", msg)
-    })?;
+    // 2. Validate simple input fields early
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    if let Err(e) = validate::validate_title(&args.title) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    for label in &args.label {
+        if let Err(e) = validate::validate_label(label) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
 
-    // 3. Parse size (optional)
+    // 3. Parse/validate kind
+    let kind: Kind = match validate::validate_kind(&args.kind) {
+        Ok(k) => k,
+        Err(e) => {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    };
+
+    // 4. Parse/validate size (optional)
     let size: Option<Size> = match &args.size {
-        Some(s) => Some(s.parse().map_err(|_| {
-            let msg = format!(
-                "invalid size '{}': expected one of xxs, xs, s, m, l, xl, xxl",
-                s
-            );
-            render_error(
-                output,
-                &CliError::with_details(&msg, "Use --size s, --size m, etc.", "invalid_size"),
-            ).ok();
-            anyhow::anyhow!("{}", msg)
-        })?),
+        Some(s) => Some(match validate::validate_size(s) {
+            Ok(size) => size,
+            Err(e) => {
+                render_error(output, &e.to_cli_error())?;
+                anyhow::bail!("{}", e.reason);
+            }
+        }),
         None => None,
     };
 
@@ -167,8 +176,13 @@ pub fn run_create(
             );
             render_error(
                 output,
-                &CliError::with_details(&msg, "Use --urgency urgent, --urgency punt, etc.", "invalid_urgency"),
-            ).ok();
+                &CliError::with_details(
+                    &msg,
+                    "Use --urgency urgent, --urgency punt, etc.",
+                    "invalid_urgency",
+                ),
+            )
+            .ok();
             anyhow::anyhow!("{}", msg)
         })?,
         None => Urgency::Default,
@@ -182,14 +196,21 @@ pub fn run_create(
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new bones project", "not_a_project"),
-        ).ok();
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new bones project",
+                "not_a_project",
+            ),
+        )
+        .ok();
         anyhow::anyhow!("{}", msg)
     })?;
 
     // 7. Set up shard manager
     let shard_mgr = ShardManager::new(&bones_dir);
-    shard_mgr.ensure_dirs().map_err(|e| anyhow::anyhow!("shard setup failed: {e}"))?;
+    shard_mgr
+        .ensure_dirs()
+        .map_err(|e| anyhow::anyhow!("shard setup failed: {e}"))?;
 
     // 8. Count existing items to drive adaptive ID length
     let db_path = bones_dir.join("bones.db");
@@ -210,6 +231,10 @@ pub fn run_create(
 
     // 9. Validate parent exists (if specified)
     if let Some(ref parent_id) = args.parent {
+        if let Err(e) = validate::validate_item_id(parent_id) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
         if db_path.exists() {
             if let Some(conn) = db::query::try_open_projection(&db_path)? {
                 if !db::query::item_exists(&conn, parent_id)? {
@@ -230,6 +255,10 @@ pub fn run_create(
 
     // 10. Validate --blocks targets exist
     for block_target in &args.blocks {
+        if let Err(e) = validate::validate_item_id(block_target) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
         if db_path.exists() {
             if let Some(conn) = db::query::try_open_projection(&db_path)? {
                 if !db::query::item_exists(&conn, block_target)? {
@@ -639,7 +668,12 @@ mod tests {
                 blocks: vec![],
             };
             let result = run_create(&args, Some("agent"), OutputMode::Json, root);
-            assert!(result.is_ok(), "create '{}' failed: {:?}", title, result.err());
+            assert!(
+                result.is_ok(),
+                "create '{}' failed: {:?}",
+                title,
+                result.err()
+            );
         }
 
         // Verify two distinct events

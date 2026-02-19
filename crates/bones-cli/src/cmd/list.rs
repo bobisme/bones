@@ -4,6 +4,7 @@
 //! combined. Supports both human-readable table and JSON array output.
 
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use bones_core::db::query::{self, ItemFilter, SortOrder};
 use clap::Args;
 use serde::Serialize;
@@ -83,10 +84,7 @@ pub fn run_list(
         None => {
             let items: Vec<ListItem> = Vec::new();
             return render(output, &items, |_, w| {
-                writeln!(
-                    w,
-                    "(projection not found — run `bn rebuild` to initialize)"
-                )
+                writeln!(w, "(projection not found — run `bn rebuild` to initialize)")
             });
         }
     };
@@ -106,6 +104,31 @@ pub fn run_list(
             anyhow::bail!("invalid sort order: {e}");
         }
     };
+
+    if let Some(ref state) = args.state {
+        if let Err(e) = validate::validate_state(state) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
+    if let Some(ref kind) = args.kind {
+        if let Err(e) = validate::validate_kind(kind) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
+    for label in &args.label {
+        if let Err(e) = validate::validate_label(label) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
+    if let Some(ref parent) = args.parent {
+        if let Err(e) = validate::validate_item_id(parent) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
 
     // Default to showing open items unless any filter is explicitly set
     let has_any_filter = args.state.is_some()

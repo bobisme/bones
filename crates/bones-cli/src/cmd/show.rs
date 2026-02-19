@@ -4,6 +4,7 @@
 //! when an exact match is not found.
 
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use bones_core::db::query;
 use clap::Args;
 use rusqlite::params;
@@ -62,6 +63,11 @@ pub fn run_show(
     output: OutputMode,
     project_root: &std::path::Path,
 ) -> anyhow::Result<()> {
+    if let Err(e) = validate::validate_item_id(&args.id) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+
     let db_path = project_root.join(".bones/bones.db");
 
     // Gracefully handle missing / corrupt projection
@@ -160,14 +166,16 @@ pub fn run_show(
         updated_at_us: item.updated_at_us,
     };
 
-    render(output, &show_item, |item, w| {
-        render_show_human(item, w)
-    })
+    render(output, &show_item, |item, w| render_show_human(item, w))
 }
 
 /// Render full item details in human-readable format.
 fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(w, "┌─ {} ─────────────────────────────────────────", item.id)?;
+    writeln!(
+        w,
+        "┌─ {} ─────────────────────────────────────────",
+        item.id
+    )?;
     writeln!(w, "│  {}", item.title)?;
     writeln!(w, "├─────────────────────────────────────────────────")?;
     writeln!(w, "│  kind:    {}", item.kind)?;
@@ -200,7 +208,11 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
     }
 
     if !item.comments.is_empty() {
-        writeln!(w, "├─ comments ({}) ──────────────────────────────────", item.comments.len())?;
+        writeln!(
+            w,
+            "├─ comments ({}) ──────────────────────────────────",
+            item.comments.len()
+        )?;
         for (i, comment) in item.comments.iter().enumerate() {
             if i > 0 {
                 writeln!(w, "│")?;
@@ -225,10 +237,7 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
 /// # Errors
 ///
 /// Returns an error if the database query fails.
-pub fn resolve_item_id(
-    conn: &rusqlite::Connection,
-    input: &str,
-) -> anyhow::Result<Option<String>> {
+pub fn resolve_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Result<Option<String>> {
     let input = input.trim();
 
     // 1. Exact match
@@ -512,7 +521,9 @@ mod tests {
     #[test]
     fn run_show_exact_id() {
         let (_dir, root) = setup_test_db();
-        let args = ShowArgs { id: "bn-xyz789".into() };
+        let args = ShowArgs {
+            id: "bn-xyz789".into(),
+        };
         run_show(&args, OutputMode::Human, &root).unwrap();
     }
 
@@ -520,7 +531,9 @@ mod tests {
     fn run_show_partial_id() {
         let (_dir, root) = setup_test_db();
         // "xyz789" → "bn-xyz789"
-        let args = ShowArgs { id: "xyz789".into() };
+        let args = ShowArgs {
+            id: "xyz789".into(),
+        };
         run_show(&args, OutputMode::Human, &root).unwrap();
     }
 
@@ -535,21 +548,27 @@ mod tests {
     #[test]
     fn run_show_json_output() {
         let (_dir, root) = setup_test_db();
-        let args = ShowArgs { id: "bn-xyz789".into() };
+        let args = ShowArgs {
+            id: "bn-xyz789".into(),
+        };
         run_show(&args, OutputMode::Json, &root).unwrap();
     }
 
     #[test]
     fn run_show_not_found_returns_error() {
         let (_dir, root) = setup_test_db();
-        let args = ShowArgs { id: "nonexistent".into() };
+        let args = ShowArgs {
+            id: "nonexistent".into(),
+        };
         assert!(run_show(&args, OutputMode::Human, &root).is_err());
     }
 
     #[test]
     fn run_show_missing_projection_returns_error() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let args = ShowArgs { id: "bn-001".into() };
+        let args = ShowArgs {
+            id: "bn-001".into(),
+        };
         assert!(run_show(&args, OutputMode::Human, dir.path()).is_err());
     }
 

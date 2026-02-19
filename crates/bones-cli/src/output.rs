@@ -150,7 +150,10 @@ mod tests {
             "missing_agent",
         );
         assert_eq!(err.message, "missing agent");
-        assert_eq!(err.suggestion.as_deref(), Some("Set BONES_AGENT or pass --agent"));
+        assert_eq!(
+            err.suggestion.as_deref(),
+            Some("Set BONES_AGENT or pass --agent")
+        );
         assert_eq!(err.error_code.as_deref(), Some("missing_agent"));
     }
 
@@ -161,7 +164,10 @@ mod tests {
             name: String,
             count: u32,
         }
-        let data = TestData { name: "test".into(), count: 42 };
+        let data = TestData {
+            name: "test".into(),
+            count: 42,
+        };
         // JSON mode should not panic
         let result = render(OutputMode::Json, &data, |_, _| Ok(()));
         assert!(result.is_ok());
@@ -173,7 +179,9 @@ mod tests {
         struct TestData {
             name: String,
         }
-        let data = TestData { name: "test".into() };
+        let data = TestData {
+            name: "test".into(),
+        };
         let result = render(OutputMode::Human, &data, |d, w| {
             writeln!(w, "Name: {}", d.name)
         });

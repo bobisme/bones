@@ -11,6 +11,7 @@
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use clap::Args;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -20,10 +21,10 @@ use std::time::Duration;
 use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
+use bones_core::event::Event;
 use bones_core::event::data::{EventData, MoveData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
-use bones_core::event::Event;
 use bones_core::model::item::State;
 use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
@@ -146,12 +147,25 @@ pub fn run_done(
         }
     };
 
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    if let Err(e) = validate::validate_item_id(&args.id) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+
     // 2. Find .bones directory
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new bones project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new bones project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{}", msg)
@@ -193,11 +207,7 @@ pub fn run_done(
     };
 
     let current_state: State = item.state.parse().map_err(|_| {
-        anyhow::anyhow!(
-            "item '{}' has invalid state '{}'",
-            resolved_id,
-            item.state
-        )
+        anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
     })?;
 
     let target_state = State::Done;
@@ -212,7 +222,10 @@ pub fn run_done(
             State::Archived => {
                 "Item is archived. Use 'bn move --state open' to reopen it first".to_string()
             }
-            _ => format!("Current state is '{}', which cannot transition to 'done'", current_state),
+            _ => format!(
+                "Current state is '{}', which cannot transition to 'done'",
+                current_state
+            ),
         };
         render_error(
             output,
@@ -275,7 +288,10 @@ pub fn run_done(
                 item_id: ItemId::new_unchecked(&parent_id),
                 data: EventData::Move(MoveData {
                     state: State::Done,
-                    reason: Some(format!("auto-completed: all children of {} are done", parent_id)),
+                    reason: Some(format!(
+                        "auto-completed: all children of {} are done",
+                        parent_id
+                    )),
                     extra: BTreeMap::new(),
                 }),
                 event_hash: String::new(),
@@ -384,7 +400,9 @@ mod tests {
         };
 
         let line = writer::write_event(&mut create_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&create_event).unwrap();
 
         if state != "open" {
@@ -412,7 +430,9 @@ mod tests {
                     event_hash: String::new(),
                 };
                 let line = writer::write_event(&mut move_event).unwrap();
-                shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+                shard_mgr
+                    .append(&line, false, Duration::from_secs(5))
+                    .unwrap();
                 projector.project_event(&move_event).unwrap();
             }
         }
@@ -463,7 +483,9 @@ mod tests {
             event_hash: String::new(),
         };
         let line = writer::write_event(&mut goal_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&goal_event).unwrap();
 
         // Create children
@@ -492,7 +514,9 @@ mod tests {
                 event_hash: String::new(),
             };
             let line = writer::write_event(&mut child_event).unwrap();
-            shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+            shard_mgr
+                .append(&line, false, Duration::from_secs(5))
+                .unwrap();
             projector.project_event(&child_event).unwrap();
 
             // Mark some children as done
@@ -514,7 +538,9 @@ mod tests {
                         event_hash: String::new(),
                     };
                     let line = writer::write_event(&mut move_event).unwrap();
-                    shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+                    shard_mgr
+                        .append(&line, false, Duration::from_secs(5))
+                        .unwrap();
                     projector.project_event(&move_event).unwrap();
                 }
             }
@@ -542,7 +568,10 @@ mod tests {
     #[test]
     fn done_from_doing() {
         let (dir, item_id) = setup_project("doing");
-        let args = DoneArgs { id: item_id.clone(), reason: None };
+        let args = DoneArgs {
+            id: item_id.clone(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "done failed: {:?}", result.err());
 
@@ -555,7 +584,10 @@ mod tests {
     #[test]
     fn done_from_open() {
         let (dir, item_id) = setup_project("open");
-        let args = DoneArgs { id: item_id.clone(), reason: None };
+        let args = DoneArgs {
+            id: item_id.clone(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "done from open failed: {:?}", result.err());
 
@@ -573,7 +605,11 @@ mod tests {
             reason: Some("Shipped in commit abc123".to_string()),
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "done with reason failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "done with reason failed: {:?}",
+            result.err()
+        );
 
         // Verify the event has the reason
         let bones_dir = dir.path().join(".bones");
@@ -593,21 +629,33 @@ mod tests {
     #[test]
     fn done_rejects_already_done() {
         let (dir, item_id) = setup_project("done");
-        let args = DoneArgs { id: item_id, reason: None };
+        let args = DoneArgs {
+            id: item_id,
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("cannot transition"), "unexpected error: {err_msg}");
+        assert!(
+            err_msg.contains("cannot transition"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
     fn done_rejects_archived() {
         let (dir, item_id) = setup_project("archived");
-        let args = DoneArgs { id: item_id, reason: None };
+        let args = DoneArgs {
+            id: item_id,
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("cannot transition"), "unexpected error: {err_msg}");
+        assert!(
+            err_msg.contains("cannot transition"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -622,7 +670,10 @@ mod tests {
         let db_path = bones_dir.join("bones.db");
         let _conn = db::open_projection(&db_path).unwrap();
 
-        let args = DoneArgs { id: "bn-nonexistent".to_string(), reason: None };
+        let args = DoneArgs {
+            id: "bn-nonexistent".to_string(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, root);
         assert!(result.is_err());
     }
@@ -630,9 +681,16 @@ mod tests {
     #[test]
     fn done_partial_id_resolution() {
         let (dir, _item_id) = setup_project("doing");
-        let args = DoneArgs { id: "test1".to_string(), reason: None };
+        let args = DoneArgs {
+            id: "test1".to_string(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "partial ID resolution failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "partial ID resolution failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
@@ -648,17 +706,17 @@ mod tests {
         let last_child = &child_ids[1]; // child2, still open
 
         // Move child2 to doing first
-        let args_do = super::super::do_cmd::DoArgs { id: last_child.clone() };
-        super::super::do_cmd::run_do(
-            &args_do,
-            Some("test-agent"),
-            OutputMode::Json,
-            dir.path(),
-        )
-        .unwrap();
+        let args_do = super::super::do_cmd::DoArgs {
+            id: last_child.clone(),
+        };
+        super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
+            .unwrap();
 
         // Now done child2
-        let args = DoneArgs { id: last_child.clone(), reason: None };
+        let args = DoneArgs {
+            id: last_child.clone(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "done failed: {:?}", result.err());
 
@@ -676,16 +734,16 @@ mod tests {
         let second_child = &child_ids[1]; // child2, still open
 
         // Move child2 to doing then done
-        let args_do = super::super::do_cmd::DoArgs { id: second_child.clone() };
-        super::super::do_cmd::run_do(
-            &args_do,
-            Some("test-agent"),
-            OutputMode::Json,
-            dir.path(),
-        )
-        .unwrap();
+        let args_do = super::super::do_cmd::DoArgs {
+            id: second_child.clone(),
+        };
+        super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
+            .unwrap();
 
-        let args = DoneArgs { id: second_child.clone(), reason: None };
+        let args = DoneArgs {
+            id: second_child.clone(),
+            reason: None,
+        };
         run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
         // Goal should still be open (child3 is not done)
@@ -733,7 +791,9 @@ mod tests {
             event_hash: String::new(),
         };
         let line = writer::write_event(&mut parent_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&parent_event).unwrap();
 
         // Create child
@@ -759,11 +819,16 @@ mod tests {
             event_hash: String::new(),
         };
         let line = writer::write_event(&mut child_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&child_event).unwrap();
 
         // Done the child
-        let args = DoneArgs { id: "bn-child1".to_string(), reason: None };
+        let args = DoneArgs {
+            id: "bn-child1".to_string(),
+            reason: None,
+        };
         run_done(&args, Some("test-agent"), OutputMode::Json, root).unwrap();
 
         // Parent should still be open (not a goal)
@@ -774,7 +839,10 @@ mod tests {
     #[test]
     fn done_writes_event_to_shard() {
         let (dir, item_id) = setup_project("doing");
-        let args = DoneArgs { id: item_id.clone(), reason: Some("All done".to_string()) };
+        let args = DoneArgs {
+            id: item_id.clone(),
+            reason: Some("All done".to_string()),
+        };
         run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
         let bones_dir = dir.path().join(".bones");
@@ -786,7 +854,11 @@ mod tests {
             .collect();
 
         // create + do + done = 3 events
-        assert!(lines.len() >= 3, "expected at least 3 events, got {}", lines.len());
+        assert!(
+            lines.len() >= 3,
+            "expected at least 3 events, got {}",
+            lines.len()
+        );
 
         let last_line = lines.last().unwrap();
         let fields: Vec<&str> = last_line.split('\t').collect();
@@ -798,7 +870,10 @@ mod tests {
     #[test]
     fn done_not_bones_project() {
         let dir = TempDir::new().unwrap();
-        let args = DoneArgs { id: "bn-test".to_string(), reason: None };
+        let args = DoneArgs {
+            id: "bn-test".to_string(),
+            reason: None,
+        };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
     }

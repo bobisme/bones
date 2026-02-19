@@ -7,6 +7,7 @@
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use clap::Args;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -16,10 +17,10 @@ use std::time::Duration;
 use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
+use bones_core::event::Event;
 use bones_core::event::data::{EventData, MoveData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
-use bones_core::event::Event;
 use bones_core::model::item::State;
 use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
@@ -72,12 +73,25 @@ pub fn run_do(
         }
     };
 
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    if let Err(e) = validate::validate_item_id(&args.id) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+
     // 2. Find .bones directory
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new bones project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new bones project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{}", msg)
@@ -119,11 +133,7 @@ pub fn run_do(
     };
 
     let current_state: State = item.state.parse().map_err(|_| {
-        anyhow::anyhow!(
-            "item '{}' has invalid state '{}'",
-            resolved_id,
-            item.state
-        )
+        anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
     })?;
 
     let target_state = State::Doing;
@@ -135,11 +145,16 @@ pub fn run_do(
         );
         let suggestion = match current_state {
             State::Doing => "Item is already in 'doing' state".to_string(),
-            State::Done => "Item is done. Use 'bn move --state open' to reopen it first".to_string(),
+            State::Done => {
+                "Item is done. Use 'bn move --state open' to reopen it first".to_string()
+            }
             State::Archived => {
                 "Item is archived. Use 'bn move --state open' to reopen it first".to_string()
             }
-            _ => format!("Current state is '{}', which cannot transition to 'doing'", current_state),
+            _ => format!(
+                "Current state is '{}', which cannot transition to 'doing'",
+                current_state
+            ),
         };
         render_error(
             output,
@@ -267,7 +282,9 @@ mod tests {
         };
 
         let line = writer::write_event(&mut create_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&create_event).unwrap();
 
         // If desired state is not "open", move to it
@@ -298,7 +315,9 @@ mod tests {
                     event_hash: String::new(),
                 };
                 let line = writer::write_event(&mut move_event).unwrap();
-                shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+                shard_mgr
+                    .append(&line, false, Duration::from_secs(5))
+                    .unwrap();
                 projector.project_event(&move_event).unwrap();
             }
         }
@@ -315,7 +334,9 @@ mod tests {
     #[test]
     fn do_open_to_doing() {
         let (dir, item_id) = setup_project("open");
-        let args = DoArgs { id: item_id.clone() };
+        let args = DoArgs {
+            id: item_id.clone(),
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "do failed: {:?}", result.err());
 
@@ -333,7 +354,10 @@ mod tests {
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("cannot transition"), "unexpected error: {err_msg}");
+        assert!(
+            err_msg.contains("cannot transition"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -343,7 +367,10 @@ mod tests {
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("cannot transition"), "unexpected error: {err_msg}");
+        assert!(
+            err_msg.contains("cannot transition"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -353,7 +380,10 @@ mod tests {
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("cannot transition"), "unexpected error: {err_msg}");
+        assert!(
+            err_msg.contains("cannot transition"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -368,7 +398,9 @@ mod tests {
         let db_path = bones_dir.join("bones.db");
         let _conn = db::open_projection(&db_path).unwrap();
 
-        let args = DoArgs { id: "bn-nonexistent".to_string() };
+        let args = DoArgs {
+            id: "bn-nonexistent".to_string(),
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, root);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -388,7 +420,9 @@ mod tests {
     #[test]
     fn do_writes_event_to_shard() {
         let (dir, item_id) = setup_project("open");
-        let args = DoArgs { id: item_id.clone() };
+        let args = DoArgs {
+            id: item_id.clone(),
+        };
         run_do(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
         // Check the shard has the move event
@@ -401,21 +435,34 @@ mod tests {
             .collect();
 
         // Should have create event + move event
-        assert!(lines.len() >= 2, "expected at least 2 events, got {}", lines.len());
+        assert!(
+            lines.len() >= 2,
+            "expected at least 2 events, got {}",
+            lines.len()
+        );
 
         let last_line = lines.last().unwrap();
         let fields: Vec<&str> = last_line.split('\t').collect();
         assert_eq!(fields[4], "item.move", "last event should be item.move");
-        assert!(fields[6].contains("\"doing\""), "should contain doing state");
+        assert!(
+            fields[6].contains("\"doing\""),
+            "should contain doing state"
+        );
     }
 
     #[test]
     fn do_partial_id_resolution() {
         let (dir, _item_id) = setup_project("open");
         // Use partial ID "test1" instead of "bn-test1"
-        let args = DoArgs { id: "test1".to_string() };
+        let args = DoArgs {
+            id: "test1".to_string(),
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "partial ID resolution failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "partial ID resolution failed: {:?}",
+            result.err()
+        );
 
         // Verify state changed
         let db_path = dir.path().join(".bones/bones.db");
@@ -427,7 +474,9 @@ mod tests {
     #[test]
     fn do_not_bones_project() {
         let dir = TempDir::new().unwrap();
-        let args = DoArgs { id: "bn-test".to_string() };
+        let args = DoArgs {
+            id: "bn-test".to_string(),
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();

@@ -2,6 +2,7 @@
 
 use crate::agent;
 use crate::output::{CliError, OutputMode, render, render_error};
+use crate::validate;
 use bones_core::db::query::{get_labels, try_open_projection};
 use bones_core::event::data::UpdateData;
 use bones_core::event::writer::write_event;
@@ -86,8 +87,8 @@ fn emit_labels_event(
         event_hash: String::new(),
     };
 
-    let line = write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+    let line =
+        write_event(&mut event).map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
 
     shard_mgr
         .append(&line, false, Duration::from_secs(5))
@@ -113,10 +114,24 @@ pub fn run_tag(
         }
     };
 
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    if let Err(e) = validate::validate_item_id(&args.id) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    for label in &args.labels {
+        if let Err(e) = validate::validate_label(label) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
+
     // Parse and validate item ID
-    let item_id = ItemId::parse(&args.id).map_err(|e| {
-        anyhow::anyhow!("invalid item ID '{}': {}", args.id, e)
-    })?;
+    let item_id = ItemId::parse(&args.id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.id, e))?;
 
     // Open projection DB and read current labels
     let conn = match open_db(project_root) {
@@ -208,10 +223,24 @@ pub fn run_untag(
         }
     };
 
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    if let Err(e) = validate::validate_item_id(&args.id) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+    for label in &args.labels {
+        if let Err(e) = validate::validate_label(label) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
+
     // Parse and validate item ID
-    let item_id = ItemId::parse(&args.id).map_err(|e| {
-        anyhow::anyhow!("invalid item ID '{}': {}", args.id, e)
-    })?;
+    let item_id = ItemId::parse(&args.id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.id, e))?;
 
     // Open projection DB and read current labels
     let conn = match open_db(project_root) {
@@ -417,8 +446,8 @@ mod tests {
     fn setup_test_project() -> (tempfile::TempDir, std::path::PathBuf, String) {
         use bones_core::db::rebuild;
         use bones_core::event::data::CreateData;
-        use bones_core::event::{Event, EventData, EventType};
         use bones_core::event::writer::write_event;
+        use bones_core::event::{Event, EventData, EventType};
         use bones_core::model::item::Kind;
         use bones_core::model::item_id::ItemId;
         use bones_core::shard::ShardManager;
@@ -496,7 +525,10 @@ mod tests {
         let label_names: Vec<&str> = labels.iter().map(|l| l.label.as_str()).collect();
         assert!(label_names.contains(&"bug"), "should contain 'bug'");
         assert!(label_names.contains(&"urgent"), "should contain 'urgent'");
-        assert!(label_names.contains(&"initial"), "should contain original 'initial' label");
+        assert!(
+            label_names.contains(&"initial"),
+            "should contain original 'initial' label"
+        );
     }
 
     #[test]
@@ -526,7 +558,10 @@ mod tests {
             .expect("db should exist");
         let labels = get_labels(&conn, &item_id).expect("get labels");
         let initial_count = labels.iter().filter(|l| l.label == "initial").count();
-        assert_eq!(initial_count, 1, "label 'initial' should appear exactly once");
+        assert_eq!(
+            initial_count, 1,
+            "label 'initial' should appear exactly once"
+        );
     }
 
     #[test]
@@ -613,6 +648,9 @@ mod tests {
         let result = run_tag(&args, Some("test-agent"), OutputMode::Human, root);
         assert!(result.is_err(), "should fail when item does not exist");
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("not found"), "error should mention item not found");
+        assert!(
+            err_msg.contains("not found"),
+            "error should mention item not found"
+        );
     }
 }
