@@ -41,10 +41,12 @@
 //! ```
 
 pub mod build;
+pub mod cycles;
 pub mod normalize;
 pub mod stats;
 
 // Re-export primary types at module level for convenience.
 pub use build::RawGraph;
+pub use cycles::{find_all_cycles, would_create_cycle};
 pub use normalize::{NormalizedGraph, SccNode};
 pub use stats::GraphStats;
