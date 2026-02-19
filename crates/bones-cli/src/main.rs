@@ -191,6 +191,22 @@ enum Commands {
     Move(cmd::move_cmd::MoveArgs),
 
     #[command(
+        next_help_heading = "Dependencies",
+        about = "Manage dependency links",
+        long_about = "Add or remove dependency links between work items.\n\nUse 'bn dep add <from> --blocks <to>' to establish a blocking dependency.\nUse 'bn dep add <from> --relates <to>' for informational links.\nUse 'bn dep rm <from> <to>' to remove a link.",
+        after_help = "EXAMPLES:\n    # Mark A as a blocker of B\n    bn dep add bn-abc --blocks bn-def\n\n    # Remove the dependency\n    bn dep rm bn-abc bn-def\n\n    # Emit machine-readable output\n    bn dep add bn-abc --blocks bn-def --json"
+    )]
+    Dep(cmd::dep::DepArgs),
+
+    #[command(
+        next_help_heading = "Dependencies",
+        about = "Visualize the dependency graph",
+        long_about = "Show the dependency graph for an item or the whole project.\n\nWith an item ID: show upstream (blocked-by) and downstream (blocks) dependencies.\nWithout an ID: show project-level statistics and structural analysis.",
+        after_help = "EXAMPLES:\n    # Show full graph for an item\n    bn graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn graph bn-abc --down\n\n    # Project summary\n    bn graph\n\n    # Emit machine-readable output\n    bn graph bn-abc --json"
+    )]
+    Graph(cmd::graph::GraphArgs),
+
+    #[command(
         next_help_heading = "Project Maintenance",
         about = "Generate shell completion scripts",
         long_about = "Generate shell completion scripts for supported shells.",
@@ -494,6 +510,12 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Move(ref args) => timing::timed("cmd.move", || {
             cmd::move_cmd::run_move(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Dep(ref args) => timing::timed("cmd.dep", || {
+            cmd::dep::run_dep(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Graph(ref args) => timing::timed("cmd.graph", || {
+            cmd::graph::run_graph(args, output, &project_root)
         }),
         Commands::Sync(args) => {
             timing::timed("cmd.sync", || cmd::sync::run_sync(&args, &project_root))
