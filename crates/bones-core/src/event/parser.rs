@@ -22,6 +22,8 @@
 
 use std::fmt;
 
+use tracing::warn;
+
 use crate::event::Event;
 use crate::event::canonical::canonicalize_json;
 use crate::event::data::EventData;
@@ -37,6 +39,12 @@ pub const SHARD_HEADER: &str = "# bones event log v1";
 
 /// The field comment line that follows the shard header.
 pub const FIELD_COMMENT: &str = "# fields: wall_ts_us \\t agent \\t itc \\t parents \\t type \\t item_id \\t data \\t event_hash";
+
+/// The current event log format version understood by this build of bones.
+pub const CURRENT_VERSION: u32 = 1;
+
+/// The header prefix for detecting format version.
+const HEADER_PREFIX: &str = "# bones event log v";
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -82,6 +90,10 @@ pub enum ParseError {
         /// Computed from fields 1–7.
         computed: String,
     },
+    /// The shard was written by a newer version of bones.
+    ///
+    /// The inner string is a human-readable upgrade message.
+    VersionMismatch(String),
 }
 
 impl fmt::Display for ParseError {
@@ -124,11 +136,71 @@ impl fmt::Display for ParseError {
                     "event_hash mismatch: line has '{expected}', computed '{computed}'"
                 )
             }
+            Self::VersionMismatch(msg) => write!(f, "event log version mismatch: {msg}"),
         }
     }
 }
 
 impl std::error::Error for ParseError {}
+
+// ---------------------------------------------------------------------------
+// Version detection
+// ---------------------------------------------------------------------------
+
+/// Detect the event log format version from the first line of a shard file.
+///
+/// The expected header format is `# bones event log v<N>` where `N` is a
+/// positive integer.
+///
+/// # Returns
+///
+/// - `Ok(version)` if the header is present and the version is ≤
+///   [`CURRENT_VERSION`].
+/// - `Err(message)` with an actionable upgrade instruction if the version
+///   is newer than this build of bones, the header is malformed, or the
+///   version number cannot be parsed.
+///
+/// # Forward compatibility
+///
+/// A version number greater than [`CURRENT_VERSION`] means this file was
+/// written by a newer version of bones and may contain format changes that
+/// this version cannot handle. The error message instructs the user to
+/// upgrade.
+///
+/// # Backward compatibility
+///
+/// All prior format versions are guaranteed to be readable by this version.
+/// Version-specific parsing is dispatched via the returned version number.
+pub fn detect_version(first_line: &str) -> Result<u32, String> {
+    let line = first_line.trim();
+    if !line.starts_with(HEADER_PREFIX) {
+        return Err(format!(
+            "Invalid event log header: expected '{}N', got '{}'.\n\
+             This file may not be a bones event log, or it may be from \
+             a version of bones that predates format versioning.",
+            HEADER_PREFIX, line
+        ));
+    }
+    let version_str = &line[HEADER_PREFIX.len()..];
+    let version: u32 = version_str.parse().map_err(|_| {
+        format!(
+            "Invalid version number '{}' in event log header.\n\
+             Expected a positive integer after '{}'.",
+            version_str, HEADER_PREFIX
+        )
+    })?;
+    if version > CURRENT_VERSION {
+        return Err(format!(
+            "Event log version {} is newer than this version of bones \
+             (supports up to v{}).\n\
+             Please upgrade bones: cargo install bones-cli\n\
+             Or download the latest release from: \
+             https://github.com/bobisme/bones/releases",
+            version, CURRENT_VERSION
+        ));
+    }
+    Ok(version)
+}
 
 // ---------------------------------------------------------------------------
 // Parsed output types
@@ -412,18 +484,52 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
 
 /// Parse multiple TSJSON lines, skipping comments and blanks.
 ///
-/// Returns a `Vec` of successfully parsed events. Stops at the first error.
+/// Returns a `Vec` of successfully parsed events. Stops at the first error,
+/// **except** for unknown event types which are skipped with a [`tracing`]
+/// warning (forward-compatibility policy: new event types may be added
+/// without a format version bump).
+///
+/// If the first non-blank content line looks like a shard header
+/// (`# bones event log v<N>`), the version is checked via [`detect_version`]
+/// and an error is returned immediately if the file was written by a newer
+/// version of bones.
 ///
 /// # Errors
 ///
-/// Returns `(line_number, ParseError)` on the first malformed data line.
+/// Returns `(line_number, ParseError)` on the first malformed data line
+/// (excluding unknown event types, which are warned and skipped).
 /// Line numbers are 1-indexed.
 pub fn parse_lines(input: &str) -> Result<Vec<Event>, (usize, ParseError)> {
     let mut events = Vec::new();
+    let mut version_checked = false;
+
     for (i, line) in input.lines().enumerate() {
-        match parse_line(line).map_err(|e| (i + 1, e))? {
-            ParsedLine::Event(event) => events.push(*event),
-            ParsedLine::Comment(_) | ParsedLine::Blank => {}
+        let line_no = i + 1;
+
+        // Version check: the first comment line that matches the header
+        // pattern triggers version validation.
+        if !version_checked && line.trim_start().starts_with(HEADER_PREFIX) {
+            version_checked = true;
+            if let Err(msg) = detect_version(line) {
+                return Err((line_no, ParseError::VersionMismatch(msg)));
+            }
+            continue; // header line itself is not an event
+        }
+
+        match parse_line(line) {
+            Ok(ParsedLine::Event(event)) => events.push(*event),
+            Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => {}
+            // Forward-compatible: unknown event types are skipped with a
+            // warning.  This allows newer event types to be added without
+            // breaking older readers (no format version bump needed).
+            Err(ParseError::InvalidEventType(raw)) => {
+                warn!(
+                    line = line_no,
+                    event_type = %raw,
+                    "skipping line with unknown event type (forward-compatibility)"
+                );
+            }
+            Err(e) => return Err((line_no, e)),
         }
     }
     Ok(events)
@@ -987,12 +1093,202 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // detect_version
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detect_version_valid_v1() {
+        let version = detect_version("# bones event log v1").expect("should parse");
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn detect_version_with_leading_whitespace() {
+        // trim() handles leading/trailing whitespace
+        let version = detect_version("  # bones event log v1  ").expect("should parse");
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn detect_version_future_version_errors() {
+        let err = detect_version("# bones event log v99").expect_err("should fail");
+        assert!(err.contains("99"), "should mention version in error: {err}");
+        assert!(
+            err.to_lowercase().contains("upgrade")
+                || err.to_lowercase().contains("install")
+                || err.to_lowercase().contains("newer"),
+            "should give upgrade advice: {err}"
+        );
+    }
+
+    #[test]
+    fn detect_version_invalid_header() {
+        let err = detect_version("not a valid header").expect_err("should fail");
+        assert!(err.contains("Invalid") || err.contains("invalid"), "{err}");
+    }
+
+    #[test]
+    fn detect_version_non_numeric_version() {
+        let err = detect_version("# bones event log vX").expect_err("should fail");
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn detect_version_empty_version() {
+        let err = detect_version("# bones event log v").expect_err("should fail");
+        assert!(!err.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_lines — version detection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_lines_version_header_v1_accepted() {
+        let line = make_line(
+            1_000,
+            "agent",
+            "itc:AQ",
+            "",
+            "item.comment",
+            "bn-a7x",
+            &sample_comment_json(),
+        );
+        let input = format!("# bones event log v1\n{line}\n");
+        let events = parse_lines(&input).expect("v1 should be accepted");
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_lines_future_version_rejected() {
+        let line = make_line(
+            1_000,
+            "agent",
+            "itc:AQ",
+            "",
+            "item.comment",
+            "bn-a7x",
+            &sample_comment_json(),
+        );
+        let input = format!("# bones event log v999\n{line}\n");
+        let (line_no, err) = parse_lines(&input).expect_err("future version should fail");
+        assert_eq!(line_no, 1);
+        assert!(
+            matches!(err, ParseError::VersionMismatch(_)),
+            "expected VersionMismatch, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("999"),
+            "error should mention version: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_lines — forward compatibility (unknown event types)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_lines_skips_unknown_event_type() {
+        // An event line with an unknown type should be warned and skipped,
+        // not cause an error.
+        let good_line = make_line(
+            1_000,
+            "agent",
+            "itc:AQ",
+            "",
+            "item.comment",
+            "bn-a7x",
+            &sample_comment_json(),
+        );
+        // Construct a line with an unknown event type (simulating a future
+        // event type).  We build it manually since make_line only handles
+        // known types.
+        let unknown_data = r#"{"body":"future"}"#;
+        let canonical_unknown = serde_json::from_str::<serde_json::Value>(unknown_data)
+            .map(|v| canonicalize_json(&v))
+            .unwrap();
+        let hash_input = format!(
+            "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\n"
+        );
+        let hash = blake3::hash(hash_input.as_bytes());
+        let unknown_line = format!(
+            "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\tblake3:{}",
+            hash.to_hex()
+        );
+
+        let input = format!("# bones event log v1\n{good_line}\n{unknown_line}\n");
+        // Should succeed, skipping the unknown event type
+        let events = parse_lines(&input).expect("unknown event type should be skipped");
+        assert_eq!(events.len(), 1, "only the known event should be returned");
+        assert_eq!(events[0].wall_ts_us, 1_000);
+    }
+
+    #[test]
+    fn parse_lines_unknown_type_does_not_stop_parsing() {
+        // Multiple unknown event types should all be skipped, and known
+        // events following them should still be parsed.
+        let known1 = make_line(
+            1_000,
+            "agent",
+            "itc:AQ",
+            "",
+            "item.comment",
+            "bn-a7x",
+            &sample_comment_json(),
+        );
+        let known2 = make_line(
+            3_000,
+            "agent",
+            "itc:AQ.2",
+            "",
+            "item.comment",
+            "bn-a7x",
+            &sample_comment_json(),
+        );
+
+        // Build two unknown-type lines manually
+        let unknown_data = r#"{"x":1}"#;
+        let canonical_u =
+            canonicalize_json(&serde_json::from_str::<serde_json::Value>(unknown_data).unwrap());
+        let mk_unknown = |ts: i64, et: &str| -> String {
+            let hash_input =
+                format!("{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\n");
+            let hash = blake3::hash(hash_input.as_bytes());
+            format!(
+                "{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\tblake3:{}",
+                hash.to_hex()
+            )
+        };
+        let unknown1 = mk_unknown(2_000, "item.new_future_type");
+        let unknown2 = mk_unknown(2_500, "item.another_future_type");
+
+        let input = format!(
+            "# bones event log v1\n{known1}\n{unknown1}\n{unknown2}\n{known2}\n"
+        );
+        let events = parse_lines(&input).expect("should succeed skipping unknowns");
+        assert_eq!(events.len(), 2, "only known events returned");
+        assert_eq!(events[0].wall_ts_us, 1_000);
+        assert_eq!(events[1].wall_ts_us, 3_000);
+    }
+
+    // -----------------------------------------------------------------------
     // Constants
     // -----------------------------------------------------------------------
 
     #[test]
     fn shard_header_constant() {
         assert_eq!(SHARD_HEADER, "# bones event log v1");
+    }
+
+    #[test]
+    fn current_version_constant() {
+        assert_eq!(CURRENT_VERSION, 1);
+        // The SHARD_HEADER must embed the current version number.
+        assert!(
+            SHARD_HEADER.ends_with(&CURRENT_VERSION.to_string()),
+            "SHARD_HEADER '{SHARD_HEADER}' must end with CURRENT_VERSION {CURRENT_VERSION}"
+        );
     }
 
     #[test]

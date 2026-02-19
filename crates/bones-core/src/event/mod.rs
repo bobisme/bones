@@ -28,8 +28,8 @@ pub use data::{
     EventData, LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
 };
 pub use parser::{
-    FIELD_COMMENT, ParseError, ParsedLine, PartialEvent, PartialParsedLine, SHARD_HEADER,
-    parse_line, parse_line_partial, parse_lines,
+    CURRENT_VERSION, FIELD_COMMENT, ParseError, ParsedLine, PartialEvent, PartialParsedLine,
+    SHARD_HEADER, detect_version, parse_line, parse_line_partial, parse_lines,
 };
 pub use types::{EventType, UnknownEventType};
 

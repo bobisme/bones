@@ -104,6 +104,8 @@ pub enum ValidationErrorKind {
     ManifestCountMismatch,
     /// Shard file byte length does not match manifest.
     ManifestSizeMismatch,
+    /// The shard was written by an unsupported (newer) version of bones.
+    UnsupportedVersion,
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +392,10 @@ fn parse_error_to_validation(err: ParseError, line_num: usize, raw: &str) -> Val
         ParseError::HashMismatch { expected, computed } => (
             ValidationErrorKind::HashChainBroken,
             format!("event_hash mismatch: line has '{expected}', computed '{computed}'"),
+        ),
+        ParseError::VersionMismatch(msg) => (
+            ValidationErrorKind::UnsupportedVersion,
+            format!("unsupported event log version: {msg}"),
         ),
     };
 
