@@ -41,6 +41,12 @@ use crate::event::Event;
 pub struct MergeResult {
     /// Merged events, sorted by `(wall_ts_us, agent, event_hash)`.
     pub events: Vec<Event>,
+    /// Number of unique events present on `remote` but not in `local`.
+    pub new_local: usize,
+    /// Number of unique events present on `local` but not in `remote`.
+    pub new_remote: usize,
+    /// Number of duplicate input events skipped during deduplication.
+    pub duplicates_skipped: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +80,15 @@ pub struct MergeResult {
 /// ```
 #[must_use]
 pub fn merge_event_sets(local: &[Event], remote: &[Event]) -> MergeResult {
+    let local_hashes: HashSet<&str> = local.iter().map(|event| event.event_hash.as_str()).collect();
+    let remote_hashes: HashSet<&str> = remote
+        .iter()
+        .map(|event| event.event_hash.as_str())
+        .collect();
+
+    let new_local = remote_hashes.difference(&local_hashes).count();
+    let new_remote = local_hashes.difference(&remote_hashes).count();
+
     let mut seen: HashSet<String> = HashSet::with_capacity(local.len() + remote.len());
     let mut events: Vec<Event> = Vec::with_capacity(local.len() + remote.len());
 
@@ -83,6 +98,8 @@ pub fn merge_event_sets(local: &[Event], remote: &[Event]) -> MergeResult {
         }
     }
 
+    let duplicates_skipped = local.len() + remote.len() - events.len();
+
     // Sort by (wall_ts_us, agent, event_hash) — deterministic, stable across replicas.
     events.sort_by(|a, b| {
         a.wall_ts_us
@@ -91,7 +108,12 @@ pub fn merge_event_sets(local: &[Event], remote: &[Event]) -> MergeResult {
             .then_with(|| a.event_hash.cmp(&b.event_hash))
     });
 
-    MergeResult { events }
+    MergeResult {
+        events,
+        new_local,
+        new_remote,
+        duplicates_skipped,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +199,9 @@ mod tests {
     fn merge_both_empty() {
         let result = merge_event_sets(&[], &[]);
         assert!(result.events.is_empty());
+        assert_eq!(result.new_local, 0);
+        assert_eq!(result.new_remote, 0);
+        assert_eq!(result.duplicates_skipped, 0);
     }
 
     #[test]
@@ -209,6 +234,9 @@ mod tests {
         let remote = vec![make_event(2000, "bob", "bbb")];
         let result = merge_event_sets(&local, &remote);
         assert_eq!(result.events.len(), 2);
+        assert_eq!(result.new_local, 1);
+        assert_eq!(result.new_remote, 1);
+        assert_eq!(result.duplicates_skipped, 0);
     }
 
     // -----------------------------------------------------------------------
@@ -222,6 +250,9 @@ mod tests {
         let remote = vec![e];
         let result = merge_event_sets(&local, &remote);
         assert_eq!(result.events.len(), 1, "duplicate should be removed");
+        assert_eq!(result.new_local, 0);
+        assert_eq!(result.new_remote, 0);
+        assert_eq!(result.duplicates_skipped, 1);
     }
 
     #[test]

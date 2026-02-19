@@ -99,10 +99,12 @@ pub fn merge_driver_main(base: &Path, ours: &Path, theirs: &Path) -> Result<()> 
     // --- Merge ours + theirs ---
     let merge_result = merge_event_sets(&ours_events, &theirs_events);
     let merged_count = merge_result.events.len();
-    let dedup_count = ours_events.len() + theirs_events.len() - merged_count;
+    let dedup_count = merge_result.duplicates_skipped;
 
     info!(
         merged = merged_count,
+        new_local = merge_result.new_local,
+        new_remote = merge_result.new_remote,
         deduped = dedup_count,
         "merge complete"
     );
