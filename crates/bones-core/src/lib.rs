@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! bones-core library.
 
+pub mod cache;
 pub mod clock;
 pub mod crdt;
 pub mod dag;
