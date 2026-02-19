@@ -1,6 +1,7 @@
 pub mod gset;
 pub mod merge;
 pub mod orset;
+pub mod state;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
