@@ -8,7 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use tracing::info;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -70,9 +70,7 @@ fn init_tracing() {
 
     match format.as_str() {
         "json" => {
-            registry
-                .with(fmt::layer().json().with_ansi(false))
-                .init();
+            registry.with(fmt::layer().json().with_ansi(false)).init();
         }
         _ => {
             registry.with(fmt::layer().compact()).init();

@@ -79,11 +79,15 @@ impl ErrorCode {
             Self::InvalidStateTransition => {
                 Some("Follow valid transitions: open -> doing -> done -> archived.")
             }
-            Self::CycleDetected => Some("Remove/adjust dependency links to keep the graph acyclic."),
+            Self::CycleDetected => {
+                Some("Remove/adjust dependency links to keep the graph acyclic.")
+            }
             Self::AmbiguousId => Some("Use a longer ID prefix to disambiguate."),
             Self::InvalidEnumValue => Some("Use one of the documented kind/urgency/size values."),
             Self::ShardManifestMismatch => Some("Run `bn rebuild` to repair the shard manifest."),
-            Self::EventHashCollision => Some("Regenerate the event with a different payload/metadata."),
+            Self::EventHashCollision => {
+                Some("Regenerate the event with a different payload/metadata.")
+            }
             Self::CorruptProjection => Some("Run `bn rebuild` to repair the SQLite projection."),
             Self::EventFileWriteFailed => Some("Check disk space and write permissions."),
             Self::LockContention => Some("Retry after the other `bn` process releases its lock."),

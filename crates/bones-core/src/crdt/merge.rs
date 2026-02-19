@@ -1,6 +1,6 @@
-use tracing::instrument;
 use crate::crdt::*;
 use std::hash::Hash;
+use tracing::instrument;
 
 pub trait Merge {
     fn merge(&mut self, other: Self);

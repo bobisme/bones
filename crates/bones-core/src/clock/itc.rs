@@ -290,17 +290,11 @@ impl Event {
     fn subtract_base(self, delta: u32) -> Self {
         match self {
             Self::Leaf(n) => {
-                assert!(
-                    delta <= n,
-                    "subtract_base: delta {delta} > leaf value {n}"
-                );
+                assert!(delta <= n, "subtract_base: delta {delta} > leaf value {n}");
                 Self::Leaf(n - delta)
             }
             Self::Branch(n, l, r) => {
-                assert!(
-                    delta <= n,
-                    "subtract_base: delta {delta} > branch base {n}"
-                );
+                assert!(delta <= n, "subtract_base: delta {delta} > branch base {n}");
                 Self::Branch(n - delta, l, r)
             }
         }
@@ -508,10 +502,7 @@ mod tests {
 
     #[test]
     fn test_id_display_nested() {
-        let id = Id::branch(
-            Id::branch(Id::one(), Id::zero()),
-            Id::zero(),
-        );
+        let id = Id::branch(Id::branch(Id::one(), Id::zero()), Id::zero());
         assert_eq!(format!("{id}"), "((1, 0), 0)");
     }
 
@@ -552,10 +543,7 @@ mod tests {
     #[test]
     fn test_id_represents_quarter_partition() {
         // Agent owns first quarter: ((1,0), 0)
-        let id = Id::branch(
-            Id::branch(Id::one(), Id::zero()),
-            Id::zero(),
-        );
+        let id = Id::branch(Id::branch(Id::one(), Id::zero()), Id::zero());
         assert_eq!(id.depth(), 2);
         assert_eq!(id.node_count(), 5);
     }
@@ -615,7 +603,10 @@ mod tests {
         // Branch(0, Leaf(3), Leaf(5))
         // min = 3, so becomes Branch(3, Leaf(0), Leaf(2))
         let e = Event::branch(0, Event::leaf(3), Event::leaf(5));
-        assert_eq!(e, Event::Branch(3, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2))));
+        assert_eq!(
+            e,
+            Event::Branch(3, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2)))
+        );
     }
 
     #[test]
@@ -624,14 +615,20 @@ mod tests {
         // min of children = 3, so base becomes 2+3=5
         // Children become Leaf(0), Leaf(2)
         let e = Event::branch(2, Event::leaf(3), Event::leaf(5));
-        assert_eq!(e, Event::Branch(5, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2))));
+        assert_eq!(
+            e,
+            Event::Branch(5, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2)))
+        );
     }
 
     #[test]
     fn test_event_branch_one_child_zero_no_lift() {
         // Branch(0, Leaf(0), Leaf(3)) — min is 0, no lift needed
         let e = Event::branch(0, Event::leaf(0), Event::leaf(3));
-        assert_eq!(e, Event::Branch(0, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(3))));
+        assert_eq!(
+            e,
+            Event::Branch(0, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(3)))
+        );
     }
 
     #[test]
@@ -697,7 +694,11 @@ mod tests {
         // Overall: min=2, max=6
         let e = Event::Branch(
             1,
-            Box::new(Event::Branch(2, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(3)))),
+            Box::new(Event::Branch(
+                2,
+                Box::new(Event::Leaf(0)),
+                Box::new(Event::Leaf(3)),
+            )),
             Box::new(Event::Leaf(1)),
         );
         assert_eq!(e.min_value(), 2);
@@ -716,7 +717,10 @@ mod tests {
     fn test_event_lift_branch() {
         let e = Event::Branch(1, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2)));
         let lifted = e.lift(3);
-        assert_eq!(lifted, Event::Branch(4, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2))));
+        assert_eq!(
+            lifted,
+            Event::Branch(4, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(2)))
+        );
     }
 
     #[test]
@@ -752,7 +756,11 @@ mod tests {
     fn test_event_clone() {
         let e = Event::Branch(
             1,
-            Box::new(Event::Branch(0, Box::new(Event::Leaf(1)), Box::new(Event::Leaf(2)))),
+            Box::new(Event::Branch(
+                0,
+                Box::new(Event::Leaf(1)),
+                Box::new(Event::Leaf(2)),
+            )),
             Box::new(Event::Leaf(3)),
         );
         let cloned = e.clone();
@@ -765,7 +773,11 @@ mod tests {
     fn test_event_depth_nested() {
         let e = Event::Branch(
             0,
-            Box::new(Event::Branch(0, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(1)))),
+            Box::new(Event::Branch(
+                0,
+                Box::new(Event::Leaf(0)),
+                Box::new(Event::Leaf(1)),
+            )),
             Box::new(Event::Leaf(0)),
         );
         assert_eq!(e.depth(), 2);
@@ -777,7 +789,11 @@ mod tests {
         // = 1 + (1 + 1 + 1) + 1 = 5
         let e = Event::Branch(
             0,
-            Box::new(Event::Branch(0, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(1)))),
+            Box::new(Event::Branch(
+                0,
+                Box::new(Event::Leaf(0)),
+                Box::new(Event::Leaf(1)),
+            )),
             Box::new(Event::Leaf(0)),
         );
         assert_eq!(e.node_count(), 5);
@@ -813,11 +829,7 @@ mod tests {
     #[test]
     fn test_stamp_normalize() {
         let id = Id::Branch(Box::new(Id::One), Box::new(Id::One));
-        let event = Event::Branch(
-            0,
-            Box::new(Event::Leaf(2)),
-            Box::new(Event::Leaf(2)),
-        );
+        let event = Event::Branch(0, Box::new(Event::Leaf(2)), Box::new(Event::Leaf(2)));
         let s = Stamp::new(id, event).normalize();
         assert_eq!(s.id, Id::One);
         assert_eq!(s.event, Event::Leaf(2));
@@ -897,7 +909,11 @@ mod tests {
         let e = Event::Branch(
             3,
             Box::new(Event::Leaf(0)),
-            Box::new(Event::Branch(1, Box::new(Event::Leaf(2)), Box::new(Event::Leaf(0)))),
+            Box::new(Event::Branch(
+                1,
+                Box::new(Event::Leaf(2)),
+                Box::new(Event::Leaf(0)),
+            )),
         );
         let json = serde_json::to_string(&e).unwrap();
         let deser: Event = serde_json::from_str(&json).unwrap();
@@ -1015,13 +1031,14 @@ mod tests {
     #[test]
     fn test_stamp_with_complex_trees() {
         // Realistic stamp after several fork operations
-        let id = Id::branch(
-            Id::branch(Id::one(), Id::zero()),
-            Id::zero(),
-        );
+        let id = Id::branch(Id::branch(Id::one(), Id::zero()), Id::zero());
         let event = Event::Branch(
             2,
-            Box::new(Event::Branch(1, Box::new(Event::Leaf(0)), Box::new(Event::Leaf(1)))),
+            Box::new(Event::Branch(
+                1,
+                Box::new(Event::Leaf(0)),
+                Box::new(Event::Leaf(1)),
+            )),
             Box::new(Event::Leaf(0)),
         );
         let s = Stamp::new(id, event);

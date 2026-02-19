@@ -47,9 +47,7 @@ pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
     let bones_dir = project_root.join(".bones");
 
     if bones_dir.exists() && !args.force {
-        anyhow::bail!(
-            ".bones/ already exists. Use `bn init --force` to reinitialize."
-        );
+        anyhow::bail!(".bones/ already exists. Use `bn init --force` to reinitialize.");
     }
 
     // Warn about standalone (non-git) mode
@@ -63,8 +61,12 @@ pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
 
     // Create directory structure
     let events_dir = bones_dir.join("events");
-    std::fs::create_dir_all(&events_dir)
-        .with_context(|| format!("Failed to create events directory: {}", events_dir.display()))?;
+    std::fs::create_dir_all(&events_dir).with_context(|| {
+        format!(
+            "Failed to create events directory: {}",
+            events_dir.display()
+        )
+    })?;
 
     // Create initial shard named for current month (YYYY-MM.events)
     let shard_name = Local::now().format("%Y-%m.events").to_string();
@@ -117,8 +119,7 @@ mod tests {
     fn make_temp_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir =
-            std::env::temp_dir().join(format!("bones-init-test-{label}-{id}"));
+        let dir = std::env::temp_dir().join(format!("bones-init-test-{label}-{id}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("failed to create temp dir");
         dir
@@ -140,7 +141,10 @@ mod tests {
             .expect("events dir readable")
             .filter_map(|e| e.ok())
             .count();
-        assert!(count >= 2, "events dir should have shard + current.events symlink");
+        assert!(
+            count >= 2,
+            "events dir should have shard + current.events symlink"
+        );
 
         let symlink = root.join(".bones/events/current.events");
         assert!(symlink.is_symlink(), "current.events must be a symlink");
@@ -175,10 +179,13 @@ mod tests {
         let root = make_temp_dir("config");
         run_init(&InitArgs { force: false }, &root).expect("init should succeed");
 
-        let content = fs::read_to_string(root.join(".bones/config.toml"))
-            .expect("config.toml readable");
+        let content =
+            fs::read_to_string(root.join(".bones/config.toml")).expect("config.toml readable");
         assert!(content.contains("[goals]"), "missing [goals]");
-        assert!(content.contains("auto_complete = true"), "missing auto_complete");
+        assert!(
+            content.contains("auto_complete = true"),
+            "missing auto_complete"
+        );
         assert!(content.contains("[search]"), "missing [search]");
         assert!(
             content.contains("duplicate_threshold"),
@@ -198,10 +205,13 @@ mod tests {
         let root = make_temp_dir("gitignore");
         run_init(&InitArgs { force: false }, &root).expect("init should succeed");
 
-        let content = fs::read_to_string(root.join(".bones/.gitignore"))
-            .expect(".gitignore readable");
+        let content =
+            fs::read_to_string(root.join(".bones/.gitignore")).expect(".gitignore readable");
         assert!(content.contains("bones.db"), "must ignore bones.db");
-        assert!(content.contains("feedback.jsonl"), "must ignore feedback.jsonl");
+        assert!(
+            content.contains("feedback.jsonl"),
+            "must ignore feedback.jsonl"
+        );
         assert!(content.contains("cache/"), "must ignore cache/");
 
         let _ = fs::remove_dir_all(&root);

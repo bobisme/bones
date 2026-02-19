@@ -13,8 +13,8 @@
 //! {wall_ts_us}\t{agent}\t{itc}\t{parents}\t{type}\t{item_id}\t{data_json}\t{event_hash}\n
 //! ```
 
-use super::canonical::canonicalize_json;
 use super::Event;
+use super::canonical::canonicalize_json;
 
 /// The shard header line written at the start of new event log files.
 pub const SHARD_HEADER: &str = "# bones event log v1";
@@ -281,8 +281,7 @@ mod tests {
 
         // Parse back and check key order — canonical means sorted
         // For CreateData, keys should be alphabetically ordered
-        let val: serde_json::Value =
-            serde_json::from_str(json_str).expect("valid JSON");
+        let val: serde_json::Value = serde_json::from_str(json_str).expect("valid JSON");
         let obj = val.as_object().expect("should be object");
         let keys: Vec<&String> = obj.keys().collect();
 
@@ -312,7 +311,10 @@ mod tests {
         let hash1 = compute_event_hash(&event).expect("hash");
         let hash2 = compute_event_hash(&event).expect("hash");
         assert_eq!(hash1, hash2, "same event should produce same hash");
-        assert!(hash1.starts_with("blake3:"), "hash should have blake3: prefix");
+        assert!(
+            hash1.starts_with("blake3:"),
+            "hash should have blake3: prefix"
+        );
     }
 
     #[test]
@@ -323,7 +325,10 @@ mod tests {
 
         let hash1 = compute_event_hash(&event1).expect("hash");
         let hash2 = compute_event_hash(&event2).expect("hash");
-        assert_ne!(hash1, hash2, "different events should have different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "different events should have different hashes"
+        );
     }
 
     #[test]
@@ -515,8 +520,17 @@ mod tests {
         let obj = val.as_object().expect("object");
         for key in obj.keys() {
             assert!(
-                ["title", "kind", "size", "urgency", "labels", "parent", "causation", "description"]
-                    .contains(&key.as_str()),
+                [
+                    "title",
+                    "kind",
+                    "size",
+                    "urgency",
+                    "labels",
+                    "parent",
+                    "causation",
+                    "description"
+                ]
+                .contains(&key.as_str()),
                 "unexpected key in JSON: {key}"
             );
         }

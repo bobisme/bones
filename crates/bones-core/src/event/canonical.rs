@@ -161,10 +161,7 @@ mod tests {
     #[test]
     fn nested_object_keys_sorted() {
         let val = json!({"z": 1, "a": {"c": 3, "b": 2}});
-        assert_eq!(
-            canonicalize_json(&val),
-            r#"{"a":{"b":2,"c":3},"z":1}"#
-        );
+        assert_eq!(canonicalize_json(&val), r#"{"a":{"b":2,"c":3},"z":1}"#);
     }
 
     #[test]
@@ -188,10 +185,7 @@ mod tests {
     #[test]
     fn array_of_objects_sorted() {
         let val = json!([{"b": 1, "a": 2}, {"d": 3, "c": 4}]);
-        assert_eq!(
-            canonicalize_json(&val),
-            r#"[{"a":2,"b":1},{"c":4,"d":3}]"#
-        );
+        assert_eq!(canonicalize_json(&val), r#"[{"a":2,"b":1},{"c":4,"d":3}]"#);
     }
 
     #[test]

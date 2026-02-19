@@ -116,9 +116,7 @@ impl FromStr for EventType {
             "item.compact" => Ok(Self::Compact),
             "item.snapshot" => Ok(Self::Snapshot),
             "item.redact" => Ok(Self::Redact),
-            _ => Err(UnknownEventType {
-                raw: s.to_string(),
-            }),
+            _ => Err(UnknownEventType { raw: s.to_string() }),
         }
     }
 }
@@ -224,9 +222,7 @@ mod tests {
 
     #[test]
     fn error_display_includes_valid_options() {
-        let err = UnknownEventType {
-            raw: "nope".into(),
-        };
+        let err = UnknownEventType { raw: "nope".into() };
         let msg = err.to_string();
         for et in EventType::ALL {
             assert!(msg.contains(et.as_str()), "missing {}", et.as_str());

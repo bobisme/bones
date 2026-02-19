@@ -1,5 +1,5 @@
-use proptest::prelude::*;
 use bones_core::crdt::merge::Merge;
+use proptest::prelude::*;
 
 // Import generators module
 // Since generators.rs is a sibling file in tests/, we use #[path] to include it as a module.
@@ -26,12 +26,12 @@ proptest! {
         let mut m1 = a.clone();
         m1.merge(b.clone());
         m1.merge(c.clone());
-        
+
         let mut m2 = b.clone();
         m2.merge(c.clone());
         let mut m3 = a.clone();
         m3.merge(m2);
-        
+
         prop_assert_eq!(m1, m3);
     }
 
@@ -57,12 +57,12 @@ proptest! {
         let mut m1 = a.clone();
         m1.merge(b.clone());
         m1.merge(c.clone());
-        
+
         let mut m2 = b.clone();
         m2.merge(c.clone());
         let mut m3 = a.clone();
         m3.merge(m2);
-        
+
         prop_assert_eq!(m1, m3);
     }
 
@@ -88,12 +88,12 @@ proptest! {
         let mut m1 = a.clone();
         m1.merge(b.clone());
         m1.merge(c.clone());
-        
+
         let mut m2 = b.clone();
         m2.merge(c.clone());
         let mut m3 = a.clone();
         m3.merge(m2);
-        
+
         prop_assert_eq!(m1, m3);
     }
 
@@ -119,12 +119,12 @@ proptest! {
         let mut m1 = a.clone();
         m1.merge(b.clone());
         m1.merge(c.clone());
-        
+
         let mut m2 = b.clone();
         m2.merge(c.clone());
         let mut m3 = a.clone();
         m3.merge(m2);
-        
+
         prop_assert_eq!(m1, m3);
     }
 

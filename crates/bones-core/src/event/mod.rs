@@ -22,13 +22,13 @@ pub mod types;
 pub mod writer;
 
 pub use canonical::{canonicalize_json, canonicalize_json_str};
-pub use parser::{
-    parse_line, parse_line_partial, parse_lines, ParseError, ParsedLine, PartialEvent,
-    PartialParsedLine, FIELD_COMMENT, SHARD_HEADER,
-};
 pub use data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DataParseError, DeleteData,
     EventData, LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
+};
+pub use parser::{
+    FIELD_COMMENT, ParseError, ParsedLine, PartialEvent, PartialParsedLine, SHARD_HEADER,
+    parse_line, parse_line_partial, parse_lines,
 };
 pub use types::{EventType, UnknownEventType};
 
@@ -505,21 +505,14 @@ mod tests {
                 .unwrap_or_else(|e| panic!("serialize {} failed: {e}", event.event_type));
             let deser: Event = serde_json::from_str(&json)
                 .unwrap_or_else(|e| panic!("deserialize {} failed: {e}", event.event_type));
-            assert_eq!(
-                *event, deser,
-                "roundtrip failed for {}",
-                event.event_type
-            );
+            assert_eq!(*event, deser, "roundtrip failed for {}", event.event_type);
         }
     }
 
     #[test]
     fn event_display_all_data_types() {
         // Smoke test: Display doesn't panic for any variant
-        let events = vec![
-            sample_create_event(),
-            sample_move_event(),
-        ];
+        let events = vec![sample_create_event(), sample_move_event()];
         for event in events {
             let _ = event.to_string(); // Should not panic
         }

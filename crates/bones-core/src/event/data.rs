@@ -61,50 +61,24 @@ impl EventData {
     ///
     /// Returns a [`DataParseError`] if the JSON is malformed or does not match
     /// the expected schema for the given event type.
-    pub fn deserialize_for(
-        event_type: EventType,
-        json: &str,
-    ) -> Result<Self, DataParseError> {
+    pub fn deserialize_for(event_type: EventType, json: &str) -> Result<Self, DataParseError> {
         let result = match event_type {
-            EventType::Create => {
-                serde_json::from_str::<CreateData>(json).map(EventData::Create)
-            }
-            EventType::Update => {
-                serde_json::from_str::<UpdateData>(json).map(EventData::Update)
-            }
-            EventType::Move => {
-                serde_json::from_str::<MoveData>(json).map(EventData::Move)
-            }
-            EventType::Assign => {
-                serde_json::from_str::<AssignData>(json).map(EventData::Assign)
-            }
-            EventType::Comment => {
-                serde_json::from_str::<CommentData>(json).map(EventData::Comment)
-            }
-            EventType::Link => {
-                serde_json::from_str::<LinkData>(json).map(EventData::Link)
-            }
-            EventType::Unlink => {
-                serde_json::from_str::<UnlinkData>(json).map(EventData::Unlink)
-            }
-            EventType::Delete => {
-                serde_json::from_str::<DeleteData>(json).map(EventData::Delete)
-            }
-            EventType::Compact => {
-                serde_json::from_str::<CompactData>(json).map(EventData::Compact)
-            }
+            EventType::Create => serde_json::from_str::<CreateData>(json).map(EventData::Create),
+            EventType::Update => serde_json::from_str::<UpdateData>(json).map(EventData::Update),
+            EventType::Move => serde_json::from_str::<MoveData>(json).map(EventData::Move),
+            EventType::Assign => serde_json::from_str::<AssignData>(json).map(EventData::Assign),
+            EventType::Comment => serde_json::from_str::<CommentData>(json).map(EventData::Comment),
+            EventType::Link => serde_json::from_str::<LinkData>(json).map(EventData::Link),
+            EventType::Unlink => serde_json::from_str::<UnlinkData>(json).map(EventData::Unlink),
+            EventType::Delete => serde_json::from_str::<DeleteData>(json).map(EventData::Delete),
+            EventType::Compact => serde_json::from_str::<CompactData>(json).map(EventData::Compact),
             EventType::Snapshot => {
                 serde_json::from_str::<SnapshotData>(json).map(EventData::Snapshot)
             }
-            EventType::Redact => {
-                serde_json::from_str::<RedactData>(json).map(EventData::Redact)
-            }
+            EventType::Redact => serde_json::from_str::<RedactData>(json).map(EventData::Redact),
         };
 
-        result.map_err(|source| DataParseError {
-            event_type,
-            source,
-        })
+        result.map_err(|source| DataParseError { event_type, source })
     }
 
     /// Serialize the payload to a [`serde_json::Value`].
@@ -489,10 +463,7 @@ mod tests {
         let data: CreateData = serde_json::from_str(json).expect("deserialize");
         assert_eq!(data.title, "Test");
         assert_eq!(data.kind, Kind::Bug);
-        assert_eq!(
-            data.extra.get("future_field"),
-            Some(&json!("value123"))
-        );
+        assert_eq!(data.extra.get("future_field"), Some(&json!("value123")));
 
         // Roundtrip preserves the unknown field
         let reserialized = serde_json::to_string(&data).expect("serialize");
@@ -798,8 +769,8 @@ mod tests {
 
     #[test]
     fn deserialize_for_error_includes_event_type() {
-        let err = EventData::deserialize_for(EventType::Create, "not json")
-            .expect_err("should fail");
+        let err =
+            EventData::deserialize_for(EventType::Create, "not json").expect_err("should fail");
         assert!(err.to_string().contains("item.create"));
     }
 
@@ -836,14 +807,23 @@ mod tests {
             (r#"{"title":"T","kind":"task","x":1}"#, EventType::Create),
             (r#"{"field":"f","value":"v","x":1}"#, EventType::Update),
             (r#"{"state":"open","x":1}"#, EventType::Move),
-            (r#"{"agent":"a","action":"assign","x":1}"#, EventType::Assign),
+            (
+                r#"{"agent":"a","action":"assign","x":1}"#,
+                EventType::Assign,
+            ),
             (r#"{"body":"b","x":1}"#, EventType::Comment),
-            (r#"{"target":"t","link_type":"blocks","x":1}"#, EventType::Link),
+            (
+                r#"{"target":"t","link_type":"blocks","x":1}"#,
+                EventType::Link,
+            ),
             (r#"{"target":"t","x":1}"#, EventType::Unlink),
             (r#"{"x":1}"#, EventType::Delete),
             (r#"{"summary":"s","x":1}"#, EventType::Compact),
             (r#"{"state":{},"x":1}"#, EventType::Snapshot),
-            (r#"{"target_hash":"h","reason":"r","x":1}"#, EventType::Redact),
+            (
+                r#"{"target_hash":"h","reason":"r","x":1}"#,
+                EventType::Redact,
+            ),
         ];
 
         for (json_str, event_type) in test_cases {

@@ -22,10 +22,10 @@
 
 use std::fmt;
 
+use crate::event::Event;
 use crate::event::canonical::canonicalize_json;
 use crate::event::data::EventData;
 use crate::event::types::EventType;
-use crate::event::Event;
 use crate::model::item_id::ItemId;
 
 // ---------------------------------------------------------------------------
@@ -36,8 +36,7 @@ use crate::model::item_id::ItemId;
 pub const SHARD_HEADER: &str = "# bones event log v1";
 
 /// The field comment line that follows the shard header.
-pub const FIELD_COMMENT: &str =
-    "# fields: wall_ts_us \\t agent \\t itc \\t parents \\t type \\t item_id \\t data \\t event_hash";
+pub const FIELD_COMMENT: &str = "# fields: wall_ts_us \\t agent \\t itc \\t parents \\t type \\t item_id \\t data \\t event_hash";
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -354,14 +353,14 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
         .map_err(|_| ParseError::InvalidEventType(fields[4].to_string()))?;
 
     // --- Field 6: item_id ---
-    let item_id = ItemId::parse(fields[5])
-        .map_err(|_| ParseError::InvalidItemId(fields[5].to_string()))?;
+    let item_id =
+        ItemId::parse(fields[5]).map_err(|_| ParseError::InvalidItemId(fields[5].to_string()))?;
 
     // --- Field 7: data (JSON) ---
     let data_json = fields[6];
     // Validate JSON syntax first
-    let _: serde_json::Value = serde_json::from_str(data_json)
-        .map_err(|e| ParseError::InvalidDataJson(e.to_string()))?;
+    let _: serde_json::Value =
+        serde_json::from_str(data_json).map_err(|e| ParseError::InvalidDataJson(e.to_string()))?;
     // Deserialize into typed payload
     let data = EventData::deserialize_for(event_type, data_json).map_err(|e| {
         ParseError::DataSchemaMismatch {
@@ -456,14 +455,17 @@ mod tests {
         item_id: &str,
         data_json: &str,
     ) -> String {
-        let canonical_data =
-            canonicalize_json(&serde_json::from_str::<serde_json::Value>(data_json).expect("test JSON"));
+        let canonical_data = canonicalize_json(
+            &serde_json::from_str::<serde_json::Value>(data_json).expect("test JSON"),
+        );
         let hash_input = format!(
             "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\n"
         );
         let hash = blake3::hash(hash_input.as_bytes());
         let event_hash = format!("blake3:{}", hash.to_hex());
-        format!("{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\t{event_hash}")
+        format!(
+            "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\t{event_hash}"
+        )
     }
 
     fn sample_create_json() -> String {
@@ -561,8 +563,7 @@ mod tests {
     #[test]
     fn partial_parse_does_not_validate_json() {
         // Partial parse should succeed even with invalid JSON in data field
-        let line =
-            "1000\tagent\titc:A\t\titem.create\tbn-a7x\tNOT_JSON\tblake3:aaa";
+        let line = "1000\tagent\titc:A\t\titem.create\tbn-a7x\tNOT_JSON\tblake3:aaa";
         let result = parse_line_partial(line).expect("should parse");
         assert!(matches!(result, PartialParsedLine::Event(_)));
     }
@@ -570,7 +571,13 @@ mod tests {
     #[test]
     fn partial_parse_wrong_field_count() {
         let err = parse_line_partial("a\tb\tc").expect_err("should fail");
-        assert!(matches!(err, ParseError::FieldCount { found: 3, expected: 8 }));
+        assert!(matches!(
+            err,
+            ParseError::FieldCount {
+                found: 3,
+                expected: 8
+            }
+        ));
     }
 
     #[test]
@@ -730,13 +737,25 @@ mod tests {
     #[test]
     fn parse_wrong_field_count_too_few() {
         let err = parse_line("only\ttwo\tfields").expect_err("should fail");
-        assert!(matches!(err, ParseError::FieldCount { found: 3, expected: 8 }));
+        assert!(matches!(
+            err,
+            ParseError::FieldCount {
+                found: 3,
+                expected: 8
+            }
+        ));
     }
 
     #[test]
     fn parse_wrong_field_count_too_many() {
         let err = parse_line("1\t2\t3\t4\t5\t6\t7\t8\t9").expect_err("should fail");
-        assert!(matches!(err, ParseError::FieldCount { found: 9, expected: 8 }));
+        assert!(matches!(
+            err,
+            ParseError::FieldCount {
+                found: 9,
+                expected: 8
+            }
+        ));
     }
 
     #[test]
@@ -856,9 +875,7 @@ mod tests {
             extra: BTreeMap::new(),
         };
 
-        let data_json = canonicalize_json(
-            &serde_json::to_value(&data).expect("serialize"),
-        );
+        let data_json = canonicalize_json(&serde_json::to_value(&data).expect("serialize"));
 
         let line = make_line(
             1_708_012_200_123_456,
@@ -890,9 +907,7 @@ mod tests {
             extra: BTreeMap::new(),
         };
 
-        let data_json = canonicalize_json(
-            &serde_json::to_value(&data).expect("serialize"),
-        );
+        let data_json = canonicalize_json(&serde_json::to_value(&data).expect("serialize"));
 
         let parent_hash = "blake3:a1b2c3d4e5f6";
         let line = make_line(
@@ -941,9 +956,7 @@ mod tests {
             &sample_comment_json(),
         );
 
-        let input = format!(
-            "# bones event log v1\n# fields: ...\n\n{line1}\n{line2}\n"
-        );
+        let input = format!("# bones event log v1\n# fields: ...\n\n{line1}\n{line2}\n");
 
         let events = parse_lines(&input).expect("should parse");
         assert_eq!(events.len(), 2);
@@ -1002,11 +1015,11 @@ mod tests {
 
     #[test]
     fn invalid_blake3_hashes() {
-        assert!(!is_valid_blake3_hash("blake3:"));       // empty hex
-        assert!(!is_valid_blake3_hash("sha256:abc"));    // wrong prefix
-        assert!(!is_valid_blake3_hash("abc123"));        // no prefix
-        assert!(!is_valid_blake3_hash("blake3:xyz!"));   // non-hex chars
-        assert!(!is_valid_blake3_hash(""));              // empty
+        assert!(!is_valid_blake3_hash("blake3:")); // empty hex
+        assert!(!is_valid_blake3_hash("sha256:abc")); // wrong prefix
+        assert!(!is_valid_blake3_hash("abc123")); // no prefix
+        assert!(!is_valid_blake3_hash("blake3:xyz!")); // non-hex chars
+        assert!(!is_valid_blake3_hash("")); // empty
     }
 
     // -----------------------------------------------------------------------
@@ -1035,7 +1048,10 @@ mod tests {
 
     #[test]
     fn error_display_field_count() {
-        let err = ParseError::FieldCount { found: 3, expected: 8 };
+        let err = ParseError::FieldCount {
+            found: 3,
+            expected: 8,
+        };
         let msg = err.to_string();
         assert!(msg.contains("8"));
         assert!(msg.contains("3"));
@@ -1069,7 +1085,10 @@ mod tests {
             ("item.delete", r#"{}"#),
             ("item.compact", r#"{"summary":"TL;DR"}"#),
             ("item.snapshot", r#"{"state":{"id":"bn-a7x"}}"#),
-            ("item.redact", r#"{"target_hash":"blake3:abc","reason":"oops"}"#),
+            (
+                "item.redact",
+                r#"{"target_hash":"blake3:abc","reason":"oops"}"#,
+            ),
         ];
 
         for (event_type, data_json) in test_cases {

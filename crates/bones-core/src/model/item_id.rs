@@ -8,9 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use terseid::{
-    IdConfig, IdGenerator, IdResolver, ParsedId, ResolverConfig,
-    child_id as terseid_child_id, id_depth as terseid_id_depth,
-    is_child_id as terseid_is_child_id, parse_id,
+    IdConfig, IdGenerator, IdResolver, ParsedId, ResolverConfig, child_id as terseid_child_id,
+    id_depth as terseid_id_depth, is_child_id as terseid_is_child_id, parse_id,
 };
 
 /// The prefix used for all bones work-item identifiers.
@@ -41,7 +40,10 @@ pub enum ItemIdError {
     /// The ID has a valid format but the wrong prefix.
     WrongPrefix { expected: String, found: String },
     /// Partial input matched more than one existing ID.
-    Ambiguous { partial: String, matches: Vec<String> },
+    Ambiguous {
+        partial: String,
+        matches: Vec<String>,
+    },
     /// Partial input matched zero existing IDs.
     NotFound(String),
 }
@@ -91,7 +93,8 @@ impl ItemId {
         let normalized = raw.trim().to_lowercase();
 
         // Validate via terseid
-        let parsed = parse_id(&normalized).map_err(|_| ItemIdError::InvalidFormat(raw.to_string()))?;
+        let parsed =
+            parse_id(&normalized).map_err(|_| ItemIdError::InvalidFormat(raw.to_string()))?;
 
         if parsed.prefix != BONES_PREFIX {
             return Err(ItemIdError::WrongPrefix {
@@ -220,11 +223,7 @@ pub fn bones_id_generator() -> IdGenerator {
 /// `seed` — typically `format!("{title}\0{nonce}")`.
 /// `item_count` — current number of existing items (drives adaptive length).
 /// `exists` — returns `true` if a candidate ID is already taken.
-pub fn generate_item_id(
-    seed: &str,
-    item_count: usize,
-    exists: impl Fn(&str) -> bool,
-) -> ItemId {
+pub fn generate_item_id(seed: &str, item_count: usize, exists: impl Fn(&str) -> bool) -> ItemId {
     let generator = bones_id_generator();
     let id = generator.generate(
         |nonce| format!("{seed}\0{nonce}").into_bytes(),
@@ -460,11 +459,9 @@ mod tests {
         let mut taken: HashSet<String> = HashSet::new();
 
         for i in 0..20 {
-            let id = generate_item_id(
-                &format!("item-{i}"),
-                taken.len(),
-                |candidate| taken.contains(candidate),
-            );
+            let id = generate_item_id(&format!("item-{i}"), taken.len(), |candidate| {
+                taken.contains(candidate)
+            });
             assert!(
                 taken.insert(id.as_str().to_string()),
                 "collision on iteration {i}: {}",
@@ -522,11 +519,7 @@ mod tests {
             |sub| {
                 known
                     .iter()
-                    .filter(|id| {
-                        id.split('-')
-                            .last()
-                            .is_some_and(|hash| hash.contains(sub))
-                    })
+                    .filter(|id| id.split('-').last().is_some_and(|hash| hash.contains(sub)))
                     .cloned()
                     .collect()
             },
@@ -544,11 +537,7 @@ mod tests {
             |sub| {
                 known
                     .iter()
-                    .filter(|id| {
-                        id.split('-')
-                            .last()
-                            .is_some_and(|hash| hash.contains(sub))
-                    })
+                    .filter(|id| id.split('-').last().is_some_and(|hash| hash.contains(sub)))
                     .cloned()
                     .collect()
             },
