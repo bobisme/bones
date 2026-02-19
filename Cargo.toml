@@ -30,3 +30,4 @@ tracing-subscriber = "0.3"
 tempfile = "3.10"
 terseid = { git = "https://github.com/bobisme/terseid.git" }
 criterion = "0.5"
+petgraph = "0.6"

@@ -9,7 +9,10 @@ workspace = true
 [dependencies]
 bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }
+blake3 = { workspace = true }
 chrono = { workspace = true }
+petgraph = { workspace = true }
+rusqlite = { workspace = true }
 serde = { workspace = true }
 terseid = { workspace = true }
 tracing = { workspace = true }
