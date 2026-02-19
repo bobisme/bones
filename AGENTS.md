@@ -3,7 +3,79 @@
 Project type: cli, tui
 Tools: `beads`, `maw`, `crit`, `botbus`, `botty`
 
-<!-- Add project-specific context below: architecture, conventions, key files, etc. -->
+## Project Overview
+
+bones is a CRDT-native issue tracker designed for distributed human and agent collaboration.
+The repository is organized as a Cargo workspace with focused crates.
+
+## Crate Layout
+
+```
+crates/
+  bones-core/    Core data structures, locking, errors, event/CRDT foundations
+  bones-triage/  Prioritization and scoring logic
+  bones-search/  Search/index abstractions
+  bones-cli/     `bn` command-line entry point
+  bones-sim/     Deterministic simulation harness
+```
+
+## Architecture Diagram (high level)
+
+```
+             +---------------------+
+             |      bones-cli      |
+             |  command parsing    |
+             +----------+----------+
+                        |
+                        v
+     +------------------+------------------+
+     |             bones-core              |
+     | event model, ids, CRDT + projection |
+     +---------+--------------------+------+
+               |                    |
+               v                    v
+       +-------+------+      +------+-------+
+       | bones-triage |      | bones-search |
+       | scoring/rank |      | retrieval    |
+       +--------------+      +--------------+
+               ^
+               |
+       +-------+------+
+       |  bones-sim   |
+       | replay/tests |
+       +--------------+
+```
+
+## Build & Test
+
+```bash
+# Build all crates
+cargo build
+
+# Run all tests
+cargo test
+
+# Run one crate
+cargo test -p bones-core
+
+# Run CLI
+cargo run -p bones-cli -- --help
+```
+
+## Contributor Onboarding
+
+See `docs/contributor-guide.md` for:
+- adding new event types
+- adding new CLI commands
+- adding new triage/search metrics
+- local development setup and conventions
+
+## Conventions
+
+- Prefer deterministic behavior; seed randomness in tests/simulations.
+- Keep user-facing terms consistent (`agent`, `item`, `event`).
+- Preserve machine readability for CLI output (`--json` support where applicable).
+- Treat `.bones/events/*.events` as append-only logs; derived state belongs in projections.
 
 <!-- botbox:managed-start -->
 ## Botbox Workflow
