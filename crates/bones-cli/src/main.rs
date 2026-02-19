@@ -99,6 +99,26 @@ enum Commands {
     Show(cmd::show::ShowArgs),
 
     #[command(
+        next_help_heading = "Search",
+        about = "Search items using full-text search",
+        long_about = "Search work items using SQLite FTS5 lexical full-text search with BM25 ranking.\n\n\
+                      Column weights: title 3×, description 2×, labels 1×.\n\n\
+                      Supports FTS5 syntax: stemming ('run' matches 'running'), prefix ('auth*'), boolean (AND/OR/NOT).",
+        after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n    # Prefix search\n    bn search 'auth*'\n\n    # Limit results\n    bn search timeout -n 5\n\n    # Machine-readable output\n    bn search authentication --json"
+    )]
+    Search(cmd::search::SearchArgs),
+
+    #[command(
+        next_help_heading = "Search",
+        about = "Find potential duplicate work items",
+        long_about = "Find work items that may be duplicates of the given item.\n\n\
+                      Uses FTS5 lexical search with BM25 ranking. Similarity scores are \
+                      normalized and classified using thresholds from .bones/config.toml.",
+        after_help = "EXAMPLES:\n    # Find duplicates of an item\n    bn dup bn-abc\n\n    # Use a custom threshold\n    bn dup bn-abc --threshold 0.75\n\n    # Machine-readable output\n    bn dup bn-abc --json"
+    )]
+    Dup(cmd::dup::DupArgs),
+
+    #[command(
         next_help_heading = "Lifecycle",
         about = "Mark item as doing",
         long_about = "Transition a work item to the doing state.",
@@ -441,6 +461,12 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Show(ref args) => timing::timed("cmd.show", || {
             cmd::show::run_show(args, output, &project_root)
+        }),
+        Commands::Search(ref args) => timing::timed("cmd.search", || {
+            cmd::search::run_search(args, output, &project_root)
+        }),
+        Commands::Dup(ref args) => timing::timed("cmd.dup", || {
+            cmd::dup::run_dup(args, output, &project_root)
         }),
         Commands::Do(ref args) => timing::timed("cmd.do", || {
             cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)
