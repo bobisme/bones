@@ -29,9 +29,9 @@ impl<T: Eq + std::hash::Hash + Clone> GSet<T> {
     }
 
     /// Merge another G-Set into this one (set union).
-    pub fn merge(&mut self, other: &Self) {
-        for element in &other.elements {
-            self.elements.insert(element.clone());
+    pub fn merge(&mut self, other: Self) {
+        for element in other.elements {
+            self.elements.insert(element);
         }
     }
 
@@ -81,7 +81,7 @@ mod tests {
         let mut b = GSet::new();
         b.insert("hash2".to_string());
 
-        a.merge(&b);
+        a.merge(b);
         assert_eq!(a.len(), 2);
         assert!(a.contains(&"hash1".to_string()));
         assert!(a.contains(&"hash2".to_string()));
@@ -95,10 +95,10 @@ mod tests {
         b.insert("hash2".to_string());
 
         let mut a_merge_b = a.clone();
-        a_merge_b.merge(&b);
+        a_merge_b.merge(b.clone());
 
         let mut b_merge_a = b.clone();
-        b_merge_a.merge(&a);
+        b_merge_a.merge(a.clone());
 
         assert_eq!(a_merge_b, b_merge_a);
     }
@@ -113,13 +113,13 @@ mod tests {
         c.insert("hash3".to_string());
 
         let mut left = a.clone();
-        left.merge(&b);
-        left.merge(&c);
+        left.merge(b.clone());
+        left.merge(c.clone());
 
         let mut right_inner = b.clone();
-        right_inner.merge(&c);
+        right_inner.merge(c.clone());
         let mut right = a.clone();
-        right.merge(&right_inner);
+        right.merge(right_inner);
 
         assert_eq!(left, right);
     }
@@ -130,7 +130,7 @@ mod tests {
         a.insert("hash1".to_string());
 
         let mut a_merge_a = a.clone();
-        a_merge_a.merge(&a);
+        a_merge_a.merge(a.clone());
 
         assert_eq!(a, a_merge_a);
     }

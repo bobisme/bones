@@ -31,14 +31,7 @@ impl<T: Eq + Hash + Clone> Merge for GSet<T> {
     }
 }
 
-impl<T: Eq + Hash + Clone> Merge for OrSet<T> {
-    fn merge(&mut self, other: Self) {
-        // Stub implementation - naive merge
-        // Real implementation handles concurrent adds/removes properly
-        self.elements.extend(other.elements);
-        self.tombstone.extend(other.tombstone);
-    }
-}
+// NOTE: OrSet Merge impl is in orset.rs (proper add-wins OR-Set).
 
 impl Merge for EpochPhase {
     fn merge(&mut self, other: Self) {
