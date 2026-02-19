@@ -193,6 +193,13 @@ impl BlockingGraph {
     pub fn is_empty(&self) -> bool {
         self.all_items.is_empty()
     }
+
+    /// Return an iterator over all item IDs in the graph.
+    ///
+    /// Used by cycle detection to enumerate all nodes for full-graph DFS.
+    pub fn all_item_ids(&self) -> impl Iterator<Item = &str> {
+        self.all_items.iter().map(String::as_str)
+    }
 }
 
 // ---------------------------------------------------------------------------

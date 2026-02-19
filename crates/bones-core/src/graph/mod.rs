@@ -12,4 +12,5 @@
 //! [`WorkItemState`]: crate::crdt::item_state::WorkItemState
 
 pub mod blocking;
+pub mod cycles;
 pub mod hierarchy;
