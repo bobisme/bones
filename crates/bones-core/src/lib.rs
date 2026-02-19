@@ -6,13 +6,16 @@ pub mod error;
 pub mod lock;
 pub mod model;
 
+use tracing::{info, instrument};
+
 /// # Conventions
 ///
 /// - **Errors**: Use `anyhow::Result` for return types where appropriate.
 /// - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
+#[instrument]
 pub fn init() {
-    tracing::info!("bones-core initialized");
+    info!("bones-core initialized");
     // Ensure .gitattributes exists and has the union merge driver for events
     let gitattributes_path = std::path::Path::new(".gitattributes");
     let attr_line = ".bones/events merge=union\n";

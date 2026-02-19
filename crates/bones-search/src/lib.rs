@@ -6,8 +6,11 @@
 //! - **Errors**: Use `anyhow::Result` for return types.
 //! - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
+use tracing::{info, instrument};
+
+#[instrument]
 pub fn init() {
-    tracing::info!("bones-search initialized");
+    info!("bones-search initialized");
 }
 
 #[cfg(test)]

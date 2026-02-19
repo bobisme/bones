@@ -1,3 +1,4 @@
+use tracing::instrument;
 use crate::crdt::*;
 use std::hash::Hash;
 
@@ -6,6 +7,7 @@ pub trait Merge {
 }
 
 impl Merge for Timestamp {
+    #[instrument(skip(self))]
     fn merge(&mut self, other: Self) {
         if other > *self {
             *self = other;
