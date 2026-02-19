@@ -9,6 +9,7 @@ pub mod fts;
 pub mod migrations;
 pub mod project;
 pub mod query;
+pub mod rebuild;
 pub mod schema;
 
 use anyhow::{Context, Result};
