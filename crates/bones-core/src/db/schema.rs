@@ -139,15 +139,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS items_au
 AFTER UPDATE ON items
 BEGIN
-    INSERT INTO items_fts(items_fts, rowid, title, description, labels, item_id)
-    VALUES (
-        'delete',
-        old.rowid,
-        old.title,
-        COALESCE(old.description, ''),
-        COALESCE(old.search_labels, ''),
-        old.item_id
-    );
+    DELETE FROM items_fts WHERE rowid = old.rowid;
 
     INSERT INTO items_fts(rowid, title, description, labels, item_id)
     VALUES (
@@ -162,15 +154,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS items_ad
 AFTER DELETE ON items
 BEGIN
-    INSERT INTO items_fts(items_fts, rowid, title, description, labels, item_id)
-    VALUES (
-        'delete',
-        old.rowid,
-        old.title,
-        COALESCE(old.description, ''),
-        COALESCE(old.search_labels, ''),
-        old.item_id
-    );
+    DELETE FROM items_fts WHERE rowid = old.rowid;
 END;
 
 DELETE FROM items_fts;

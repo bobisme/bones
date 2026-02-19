@@ -6,6 +6,7 @@
 //! - `foreign_keys = ON` to protect relational integrity in projection tables
 
 pub mod migrations;
+pub mod query;
 pub mod schema;
 
 use anyhow::{Context, Result};
