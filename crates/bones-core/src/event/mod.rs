@@ -19,6 +19,7 @@ pub mod canonical;
 pub mod data;
 pub mod parser;
 pub mod types;
+pub mod validate;
 pub mod writer;
 
 pub use canonical::{canonicalize_json, canonicalize_json_str};
