@@ -179,10 +179,10 @@ impl<T: Eq + Hash + Clone> Merge for OrSet<T> {
 // ---------------------------------------------------------------------------
 
 use crate::dag::graph::EventDag;
-use crate::dag::replay::{replay_divergent, DivergentReplay, ReplayError};
+use crate::dag::replay::{DivergentReplay, ReplayError, replay_divergent};
+use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
-use crate::event::Event;
 
 /// An OR-Set field descriptor for DAG-based materialization.
 ///
@@ -247,8 +247,7 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
 
                                     match action_str {
                                         "add" => {
-                                            let op =
-                                                OrSetOp::Add(label_str.clone(), tag.clone());
+                                            let op = OrSetOp::Add(label_str.clone(), tag.clone());
                                             current_set.add(label_str, tag);
                                             ops.push(op);
                                         }
@@ -293,34 +292,32 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
                     _ => {}
                 }
             }
-            OrSetField::RelatedTo => {
-                match event.event_type {
-                    EventType::Link => {
-                        if let EventData::Link(data) = &event.data {
-                            if data.link_type == "related_to" || data.link_type == "related" {
-                                let target = data.target.to_string();
-                                let op = OrSetOp::Add(target.clone(), tag.clone());
-                                current_set.add(target, tag);
-                                ops.push(op);
-                            }
-                        }
-                    }
-                    EventType::Unlink => {
-                        if let EventData::Unlink(data) = &event.data {
+            OrSetField::RelatedTo => match event.event_type {
+                EventType::Link => {
+                    if let EventData::Link(data) = &event.data {
+                        if data.link_type == "related_to" || data.link_type == "related" {
                             let target = data.target.to_string();
-                            let is_related = data
-                                .link_type
-                                .as_ref()
-                                .is_none_or(|lt| lt == "related_to" || lt == "related");
-                            if is_related {
-                                let observed = current_set.remove(&target);
-                                ops.push(OrSetOp::Remove(target, observed));
-                            }
+                            let op = OrSetOp::Add(target.clone(), tag.clone());
+                            current_set.add(target, tag);
+                            ops.push(op);
                         }
                     }
-                    _ => {}
                 }
-            }
+                EventType::Unlink => {
+                    if let EventData::Unlink(data) = &event.data {
+                        let target = data.target.to_string();
+                        let is_related = data
+                            .link_type
+                            .as_ref()
+                            .is_none_or(|lt| lt == "related_to" || lt == "related");
+                        if is_related {
+                            let observed = current_set.remove(&target);
+                            ops.push(OrSetOp::Remove(target, observed));
+                        }
+                    }
+                }
+                _ => {}
+            },
         }
     }
 

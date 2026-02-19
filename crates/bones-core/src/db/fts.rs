@@ -181,7 +181,13 @@ mod tests {
         conn
     }
 
-    fn make_create(id: &str, title: &str, desc: Option<&str>, labels: &[&str], hash: &str) -> Event {
+    fn make_create(
+        id: &str,
+        title: &str,
+        desc: Option<&str>,
+        labels: &[&str],
+        hash: &str,
+    ) -> Event {
         Event {
             wall_ts_us: 1000,
             agent: "test-agent".into(),
@@ -209,13 +215,21 @@ mod tests {
         let conn = test_db();
         let proj = Projector::new(&conn);
         proj.project_event(&make_create(
-            "bn-001", "Authentication timeout regression",
-            Some("Retries fail after 30 seconds"), &["auth", "backend"], "h1",
-        )).unwrap();
+            "bn-001",
+            "Authentication timeout regression",
+            Some("Retries fail after 30 seconds"),
+            &["auth", "backend"],
+            "h1",
+        ))
+        .unwrap();
         proj.project_event(&make_create(
-            "bn-002", "Update documentation",
-            Some("Fix typos in README"), &["docs"], "h2",
-        )).unwrap();
+            "bn-002",
+            "Update documentation",
+            Some("Fix typos in README"),
+            &["docs"],
+            "h2",
+        ))
+        .unwrap();
 
         let hits = search_bm25(&conn, "authentication", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -227,8 +241,13 @@ mod tests {
         let conn = test_db();
         let proj = Projector::new(&conn);
         proj.project_event(&make_create(
-            "bn-001", "Running tests slowly", None, &[], "h1",
-        )).unwrap();
+            "bn-001",
+            "Running tests slowly",
+            None,
+            &[],
+            "h1",
+        ))
+        .unwrap();
 
         // Porter stemmer: "run" matches "running"
         let hits = search_bm25(&conn, "run", 10).unwrap();
@@ -240,8 +259,13 @@ mod tests {
         let conn = test_db();
         let proj = Projector::new(&conn);
         proj.project_event(&make_create(
-            "bn-001", "Authentication service broken", None, &[], "h1",
-        )).unwrap();
+            "bn-001",
+            "Authentication service broken",
+            None,
+            &[],
+            "h1",
+        ))
+        .unwrap();
 
         let hits = search_bm25(&conn, "auth*", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -252,8 +276,13 @@ mod tests {
         let conn = test_db();
         let proj = Projector::new(&conn);
         proj.project_event(&make_create(
-            "bn-001", "Important auth bug", None, &[], "h1",
-        )).unwrap();
+            "bn-001",
+            "Important auth bug",
+            None,
+            &[],
+            "h1",
+        ))
+        .unwrap();
 
         // Soft-delete
         proj.project_event(&Event {
@@ -268,7 +297,8 @@ mod tests {
                 extra: BTreeMap::new(),
             }),
             event_hash: "blake3:del1".into(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let hits = search_bm25(&conn, "auth", 10).unwrap();
         assert!(hits.is_empty());
@@ -281,15 +311,23 @@ mod tests {
 
         // Item with "auth" in title
         proj.project_event(&make_create(
-            "bn-title", "Authentication regression",
-            Some("A minor bug"), &[], "h1",
-        )).unwrap();
+            "bn-title",
+            "Authentication regression",
+            Some("A minor bug"),
+            &[],
+            "h1",
+        ))
+        .unwrap();
 
         // Item with "auth" only in description
         proj.project_event(&make_create(
-            "bn-desc", "Minor bug fix",
-            Some("Related to authentication module"), &[], "h2",
-        )).unwrap();
+            "bn-desc",
+            "Minor bug fix",
+            Some("Related to authentication module"),
+            &[],
+            "h2",
+        ))
+        .unwrap();
 
         let hits = search_bm25(&conn, "authentication", 10).unwrap();
         assert_eq!(hits.len(), 2);
@@ -302,8 +340,13 @@ mod tests {
         let conn = test_db();
         let proj = Projector::new(&conn);
         proj.project_event(&make_create(
-            "bn-001", "Fix something", None, &["backend", "security"], "h1",
-        )).unwrap();
+            "bn-001",
+            "Fix something",
+            None,
+            &["backend", "security"],
+            "h1",
+        ))
+        .unwrap();
 
         let hits = search_bm25(&conn, "security", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -317,8 +360,11 @@ mod tests {
             proj.project_event(&make_create(
                 &format!("bn-{i:03}"),
                 &format!("Authentication bug {i}"),
-                None, &[], &format!("h{i}"),
-            )).unwrap();
+                None,
+                &[],
+                &format!("h{i}"),
+            ))
+            .unwrap();
         }
 
         let hits = search_bm25(&conn, "authentication", 5).unwrap();
@@ -329,9 +375,8 @@ mod tests {
     fn rebuild_fts_index_restores_data() {
         let conn = test_db();
         let proj = Projector::new(&conn);
-        proj.project_event(&make_create(
-            "bn-001", "Auth bug", None, &[], "h1",
-        )).unwrap();
+        proj.project_event(&make_create("bn-001", "Auth bug", None, &[], "h1"))
+            .unwrap();
 
         // Manually corrupt FTS
         conn.execute_batch("DELETE FROM items_fts").unwrap();
@@ -351,8 +396,10 @@ mod tests {
 
         assert_eq!(fts_row_count(&conn).unwrap(), 0);
 
-        proj.project_event(&make_create("bn-001", "Item 1", None, &[], "h1")).unwrap();
-        proj.project_event(&make_create("bn-002", "Item 2", None, &[], "h2")).unwrap();
+        proj.project_event(&make_create("bn-001", "Item 1", None, &[], "h1"))
+            .unwrap();
+        proj.project_event(&make_create("bn-002", "Item 2", None, &[], "h2"))
+            .unwrap();
 
         assert_eq!(fts_row_count(&conn).unwrap(), 2);
     }
@@ -361,7 +408,8 @@ mod tests {
     fn fts_in_sync_after_projection() {
         let conn = test_db();
         let proj = Projector::new(&conn);
-        proj.project_event(&make_create("bn-001", "Item", None, &[], "h1")).unwrap();
+        proj.project_event(&make_create("bn-001", "Item", None, &[], "h1"))
+            .unwrap();
 
         assert!(fts_in_sync(&conn).unwrap());
     }
@@ -370,7 +418,8 @@ mod tests {
     fn search_bm25_empty_query_returns_empty() {
         let conn = test_db();
         let proj = Projector::new(&conn);
-        proj.project_event(&make_create("bn-001", "Item", None, &[], "h1")).unwrap();
+        proj.project_event(&make_create("bn-001", "Item", None, &[], "h1"))
+            .unwrap();
 
         // Empty match expression — FTS5 returns error for empty string
         let result = search_bm25(&conn, "nonexistent_term_xyz", 10).unwrap();

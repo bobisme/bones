@@ -1,11 +1,9 @@
 use bones_core::clock::itc::Stamp;
 use bones_core::crdt::item_state::WorkItemState;
 use bones_core::crdt::state::Phase;
-use bones_core::event::data::{
-    CommentData, CreateData, EventData, LinkData, MoveData, UpdateData,
-};
-use bones_core::event::types::EventType;
 use bones_core::event::Event;
+use bones_core::event::data::{CommentData, CreateData, EventData, LinkData, MoveData, UpdateData};
+use bones_core::event::types::EventType;
 use bones_core::model::item::{Kind, Size, State, Urgency};
 use bones_core::model::item_id::ItemId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,7 +66,14 @@ fn update_title_event(item_id: &str, title: &str, wall_ts: i64, agent: &str, has
     )
 }
 
-fn label_event(item_id: &str, action: &str, label: &str, wall_ts: i64, agent: &str, hash: &str) -> Event {
+fn label_event(
+    item_id: &str,
+    action: &str,
+    label: &str,
+    wall_ts: i64,
+    agent: &str,
+    hash: &str,
+) -> Event {
     make_event(
         EventType::Update,
         EventData::Update(UpdateData {
@@ -144,7 +149,13 @@ fn three_agents_converge_all_merge_orderings() {
     let item = "bn-conv-1";
 
     let mut a = WorkItemState::new();
-    a.apply_event(&create_event(item, "initial", 1_000, "alpha", "blake3:a-create"));
+    a.apply_event(&create_event(
+        item,
+        "initial",
+        1_000,
+        "alpha",
+        "blake3:a-create",
+    ));
     a.apply_event(&label_event(
         item,
         "add",
@@ -184,8 +195,20 @@ fn three_agents_converge_all_merge_orderings() {
     ));
 
     let mut c = WorkItemState::new();
-    c.apply_event(&move_event(item, State::Doing, 3_000, "charlie", "blake3:c-doing"));
-    c.apply_event(&move_event(item, State::Done, 3_100, "charlie", "blake3:c-done"));
+    c.apply_event(&move_event(
+        item,
+        State::Doing,
+        3_000,
+        "charlie",
+        "blake3:c-doing",
+    ));
+    c.apply_event(&move_event(
+        item,
+        State::Done,
+        3_100,
+        "charlie",
+        "blake3:c-done",
+    ));
     c.apply_event(&make_event(
         EventType::Comment,
         EventData::Comment(CommentData {
@@ -301,7 +324,13 @@ fn epoch_phase_race_converges_to_higher_epoch() {
     let item = "bn-conv-epoch";
 
     let mut base = WorkItemState::new();
-    base.apply_event(&move_event(item, State::Done, 1_000, "alpha", "blake3:base-done"));
+    base.apply_event(&move_event(
+        item,
+        State::Done,
+        1_000,
+        "alpha",
+        "blake3:base-done",
+    ));
 
     let mut reopen_branch = base.clone();
     reopen_branch.apply_event(&move_event(

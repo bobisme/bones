@@ -199,11 +199,7 @@ impl fmt::Display for EpochPhaseState {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StateError {
     #[error("invalid transition from {from} to {to} in epoch {epoch}")]
-    InvalidTransition {
-        from: Phase,
-        to: Phase,
-        epoch: u64,
-    },
+    InvalidTransition { from: Phase, to: Phase, epoch: u64 },
 }
 
 // ---------------------------------------------------------------------------
@@ -381,9 +377,18 @@ mod tests {
     #[test]
     fn semilattice_commutative() {
         let cases = vec![
-            (EpochPhaseState::with(0, Phase::Open), EpochPhaseState::with(0, Phase::Done)),
-            (EpochPhaseState::with(1, Phase::Doing), EpochPhaseState::with(0, Phase::Archived)),
-            (EpochPhaseState::with(2, Phase::Open), EpochPhaseState::with(2, Phase::Doing)),
+            (
+                EpochPhaseState::with(0, Phase::Open),
+                EpochPhaseState::with(0, Phase::Done),
+            ),
+            (
+                EpochPhaseState::with(1, Phase::Doing),
+                EpochPhaseState::with(0, Phase::Archived),
+            ),
+            (
+                EpochPhaseState::with(2, Phase::Open),
+                EpochPhaseState::with(2, Phase::Doing),
+            ),
         ];
         for (a, b) in cases {
             let mut ab = a.clone();

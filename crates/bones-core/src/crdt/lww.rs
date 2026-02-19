@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::clock::itc::Stamp;
-use crate::crdt::trace::{merge_tracing_enabled, MergeTrace, TieBreakStep};
+use crate::crdt::trace::{MergeTrace, TieBreakStep, merge_tracing_enabled};
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
@@ -49,13 +49,7 @@ pub struct LwwRegister<T> {
 
 impl<T> LwwRegister<T> {
     /// Create a new LWW register with the given value and metadata.
-    pub fn new(
-        value: T,
-        stamp: Stamp,
-        wall_ts: u64,
-        agent_id: String,
-        event_hash: String,
-    ) -> Self {
+    pub fn new(value: T, stamp: Stamp, wall_ts: u64, agent_id: String, event_hash: String) -> Self {
         Self {
             value,
             stamp,
@@ -223,7 +217,13 @@ mod tests {
         (a, b)
     }
 
-    fn reg(value: &str, stamp: Stamp, wall_ts: u64, agent: &str, hash: &str) -> LwwRegister<String> {
+    fn reg(
+        value: &str,
+        stamp: Stamp,
+        wall_ts: u64,
+        agent: &str,
+        hash: &str,
+    ) -> LwwRegister<String> {
         LwwRegister::new(
             value.to_string(),
             stamp,

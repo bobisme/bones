@@ -41,20 +41,20 @@
     clippy::cast_possible_truncation,
     clippy::too_many_lines,
     clippy::redundant_clone,
-    clippy::match_same_arms,
+    clippy::match_same_arms
 )]
 
 use std::collections::HashSet;
 
 use crate::clock::itc::Stamp;
+use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
 use crate::crdt::lww::LwwRegister;
 use crate::crdt::merge::Merge;
 use crate::crdt::state::{EpochPhaseState, Phase};
-use crate::crdt::OrSet;
+use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
-use crate::event::Event;
 use crate::model::item::{Kind, Size, State, Urgency};
 
 use super::Timestamp;
@@ -161,13 +161,7 @@ impl WorkItemState {
             blocked_by: OrSet::new(),
             related_to: OrSet::new(),
             comments: GSet::new(),
-            deleted: LwwRegister::new(
-                false,
-                zero_stamp,
-                zero_ts,
-                zero_agent,
-                zero_hash,
-            ),
+            deleted: LwwRegister::new(false, zero_stamp, zero_ts, zero_agent, zero_hash),
             created_at: 0,
             updated_at: 0,
         }
@@ -200,9 +194,7 @@ impl WorkItemState {
         self.deleted.merge(&other.deleted);
 
         // Timestamps: created_at = min of non-zero, updated_at = max
-        if other.created_at != 0
-            && (self.created_at == 0 || other.created_at < self.created_at)
-        {
+        if other.created_at != 0 && (self.created_at == 0 || other.created_at < self.created_at) {
             self.created_at = other.created_at;
         }
         if other.updated_at > self.updated_at {
@@ -313,55 +305,28 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            self.description = LwwRegister::new(
-                                desc,
-                                stamp,
-                                wall_ts,
-                                agent_id,
-                                event_hash,
-                            );
+                            self.description =
+                                LwwRegister::new(desc, stamp, wall_ts, agent_id, event_hash);
                         }
                         "kind" => {
-                            if let Some(kind) = data
-                                .value
-                                .as_str()
-                                .and_then(|s| s.parse::<Kind>().ok())
+                            if let Some(kind) =
+                                data.value.as_str().and_then(|s| s.parse::<Kind>().ok())
                             {
-                                self.kind = LwwRegister::new(
-                                    kind,
-                                    stamp,
-                                    wall_ts,
-                                    agent_id,
-                                    event_hash,
-                                );
+                                self.kind =
+                                    LwwRegister::new(kind, stamp, wall_ts, agent_id, event_hash);
                             }
                         }
                         "size" => {
-                            let size = data
-                                .value
-                                .as_str()
-                                .and_then(|s| s.parse::<Size>().ok());
-                            self.size = LwwRegister::new(
-                                size,
-                                stamp,
-                                wall_ts,
-                                agent_id,
-                                event_hash,
-                            );
+                            let size = data.value.as_str().and_then(|s| s.parse::<Size>().ok());
+                            self.size =
+                                LwwRegister::new(size, stamp, wall_ts, agent_id, event_hash);
                         }
                         "urgency" => {
-                            if let Some(urgency) = data
-                                .value
-                                .as_str()
-                                .and_then(|s| s.parse::<Urgency>().ok())
+                            if let Some(urgency) =
+                                data.value.as_str().and_then(|s| s.parse::<Urgency>().ok())
                             {
-                                self.urgency = LwwRegister::new(
-                                    urgency,
-                                    stamp,
-                                    wall_ts,
-                                    agent_id,
-                                    event_hash,
-                                );
+                                self.urgency =
+                                    LwwRegister::new(urgency, stamp, wall_ts, agent_id, event_hash);
                             }
                         }
                         "parent" => {
@@ -370,21 +335,14 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            self.parent = LwwRegister::new(
-                                parent,
-                                stamp,
-                                wall_ts,
-                                agent_id,
-                                event_hash,
-                            );
+                            self.parent =
+                                LwwRegister::new(parent, stamp, wall_ts, agent_id, event_hash);
                         }
                         "labels" => {
                             // Labels update via OR-Set add/remove encoded in value.
                             if let Some(obj) = data.value.as_object() {
-                                let action = obj
-                                    .get("action")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
+                                let action =
+                                    obj.get("action").and_then(|v| v.as_str()).unwrap_or("");
                                 let label = obj
                                     .get("label")
                                     .and_then(|v| v.as_str())
@@ -427,12 +385,7 @@ impl WorkItemState {
                 if let EventData::Assign(data) = &event.data {
                     match data.action {
                         AssignAction::Assign => {
-                            let tag = make_orset_tag(
-                                wall_ts,
-                                &agent_id,
-                                &event_hash,
-                                &data.agent,
-                            );
+                            let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, &data.agent);
                             self.assignees.add(data.agent.clone(), tag);
                         }
                         AssignAction::Unassign => {
@@ -451,12 +404,7 @@ impl WorkItemState {
 
             EventType::Link => {
                 if let EventData::Link(data) = &event.data {
-                    let tag = make_orset_tag(
-                        wall_ts,
-                        &agent_id,
-                        &event_hash,
-                        &data.target,
-                    );
+                    let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, &data.target);
                     match data.link_type.as_str() {
                         "blocks" | "blocked_by" => {
                             self.blocked_by.add(data.target.clone(), tag);
@@ -491,13 +439,7 @@ impl WorkItemState {
 
             EventType::Delete => {
                 // Set deleted flag via LWW.
-                self.deleted = LwwRegister::new(
-                    true,
-                    stamp,
-                    wall_ts,
-                    agent_id,
-                    event_hash,
-                );
+                self.deleted = LwwRegister::new(true, stamp, wall_ts, agent_id, event_hash);
             }
 
             EventType::Compact => {
@@ -677,9 +619,9 @@ fn make_orset_tag(wall_ts: u64, agent: &str, event_hash: &str, suffix: &str) -> 
 mod tests {
     use super::*;
     use crate::clock::itc::Stamp;
+    use crate::event::Event;
     use crate::event::data::*;
     use crate::event::types::EventType;
-    use crate::event::Event;
     use crate::model::item::{Kind, Size, State, Urgency};
     use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
@@ -790,13 +732,7 @@ mod tests {
         )
     }
 
-    fn link_event(
-        target: &str,
-        link_type: &str,
-        wall_ts: i64,
-        agent: &str,
-        hash: &str,
-    ) -> Event {
+    fn link_event(target: &str, link_type: &str, wall_ts: i64, agent: &str, hash: &str) -> Event {
         make_event(
             EventType::Link,
             EventData::Link(LinkData {
@@ -1179,7 +1115,13 @@ mod tests {
     #[test]
     fn apply_link_blocks() {
         let mut state = WorkItemState::new();
-        state.apply_event(&link_event("bn-blocker", "blocks", 1000, "alice", "blake3:l1"));
+        state.apply_event(&link_event(
+            "bn-blocker",
+            "blocks",
+            1000,
+            "alice",
+            "blake3:l1",
+        ));
         assert!(state.blocked_by_ids().contains(&"bn-blocker".to_string()));
     }
 
@@ -1215,7 +1157,13 @@ mod tests {
     #[test]
     fn apply_unlink_related() {
         let mut state = WorkItemState::new();
-        state.apply_event(&link_event("bn-r1", "related_to", 1000, "alice", "blake3:l1"));
+        state.apply_event(&link_event(
+            "bn-r1",
+            "related_to",
+            1000,
+            "alice",
+            "blake3:l1",
+        ));
         state.apply_event(&unlink_event(
             "bn-r1",
             Some("related_to"),
@@ -1492,10 +1440,7 @@ mod tests {
         let mut a_bc = a.clone();
         a_bc.merge(&bc);
 
-        assert!(
-            states_equal(&ab_c, &a_bc),
-            "merge should be associative"
-        );
+        assert!(states_equal(&ab_c, &a_bc), "merge should be associative");
     }
 
     #[test]
@@ -1539,12 +1484,7 @@ mod tests {
         assert_eq!(state.phase(), Phase::Doing);
 
         // Add comment.
-        state.apply_event(&comment_event(
-            "Found root cause",
-            4000,
-            "bob",
-            "blake3:e4",
-        ));
+        state.apply_event(&comment_event("Found root cause", 4000, "bob", "blake3:e4"));
         assert_eq!(state.comments.len(), 1);
 
         // Update title.
@@ -1615,12 +1555,7 @@ mod tests {
         // Branch B: bob updates title (later ts), adds label, assigns self.
         let mut branch_b = WorkItemState::new();
         branch_b.apply_event(&create);
-        branch_b.apply_event(&update_title_event(
-            "Bob's Title",
-            2500,
-            "bob",
-            "blake3:b1",
-        ));
+        branch_b.apply_event(&update_title_event("Bob's Title", 2500, "bob", "blake3:b1"));
         branch_b.apply_event(&label_add_event("urgent", 3500, "bob", "blake3:b2"));
         branch_b.apply_event(&assign_event(
             "bob",

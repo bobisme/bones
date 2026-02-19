@@ -139,7 +139,9 @@ impl FromStr for SortOrder {
             "updated_desc" | "updated-desc" | "recent" => Ok(Self::UpdatedDesc),
             "updated_asc" | "updated-asc" | "stale" => Ok(Self::UpdatedAsc),
             "priority" | "triage" => Ok(Self::Priority),
-            other => bail!("unknown sort order '{other}': expected one of created_desc, created_asc, updated_desc, updated_asc, priority"),
+            other => bail!(
+                "unknown sort order '{other}': expected one of created_desc, created_asc, updated_desc, updated_asc, priority"
+            ),
         }
     }
 }
@@ -188,7 +190,11 @@ pub struct ItemFilter {
 /// # Errors
 ///
 /// Returns an error if the database query fails.
-pub fn get_item(conn: &Connection, item_id: &str, include_deleted: bool) -> Result<Option<QueryItem>> {
+pub fn get_item(
+    conn: &Connection,
+    item_id: &str,
+    include_deleted: bool,
+) -> Result<Option<QueryItem>> {
     let sql = if include_deleted {
         "SELECT item_id, title, description, kind, state, urgency, size, \
          parent_id, compact_summary, is_deleted, deleted_at_us, \
@@ -201,8 +207,7 @@ pub fn get_item(conn: &Connection, item_id: &str, include_deleted: bool) -> Resu
          FROM items WHERE item_id = ?1 AND is_deleted = 0"
     };
 
-    let mut stmt = conn.prepare(sql)
-        .context("prepare get_item query")?;
+    let mut stmt = conn.prepare(sql).context("prepare get_item query")?;
 
     let result = stmt.query_row(params![item_id], row_to_query_item);
 
@@ -291,7 +296,8 @@ pub fn list_items(conn: &Connection, filter: &ItemFilter) -> Result<Vec<QueryIte
          FROM items i{joins}{where_clause} {sort_clause}{limit_clause}"
     );
 
-    let mut stmt = conn.prepare(&sql)
+    let mut stmt = conn
+        .prepare(&sql)
         .with_context(|| format!("prepare list_items query: {sql}"))?;
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
@@ -325,8 +331,7 @@ pub fn search(conn: &Connection, query: &str, limit: u32) -> Result<Vec<SearchHi
                ORDER BY rank \
                LIMIT ?2";
 
-    let mut stmt = conn.prepare(sql)
-        .context("prepare FTS5 search query")?;
+    let mut stmt = conn.prepare(sql).context("prepare FTS5 search query")?;
 
     let rows = stmt
         .query_map(params![query, limit], |row| {
@@ -574,7 +579,8 @@ pub fn count_items(conn: &Connection, filter: &ItemFilter) -> Result<u64> {
 
     let sql = format!("SELECT COUNT(*) FROM items i{joins}{where_clause}");
 
-    let mut stmt = conn.prepare(&sql)
+    let mut stmt = conn
+        .prepare(&sql)
         .with_context(|| format!("prepare count_items: {sql}"))?;
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
@@ -744,7 +750,9 @@ mod tests {
             "INSERT INTO items (item_id, title, description, kind, state, urgency, \
              parent_id, is_deleted, search_labels, created_at_us, updated_at_us) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10)",
-            params![id, title, desc, kind, state, urgency, parent_id, labels, created, updated],
+            params![
+                id, title, desc, kind, state, urgency, parent_id, labels, created, updated
+            ],
         )
         .expect("insert full item");
     }
@@ -1078,9 +1086,18 @@ mod tests {
 
     #[test]
     fn sort_order_parse_aliases() {
-        assert_eq!("newest".parse::<SortOrder>().unwrap(), SortOrder::CreatedDesc);
-        assert_eq!("oldest".parse::<SortOrder>().unwrap(), SortOrder::CreatedAsc);
-        assert_eq!("recent".parse::<SortOrder>().unwrap(), SortOrder::UpdatedDesc);
+        assert_eq!(
+            "newest".parse::<SortOrder>().unwrap(),
+            SortOrder::CreatedDesc
+        );
+        assert_eq!(
+            "oldest".parse::<SortOrder>().unwrap(),
+            SortOrder::CreatedAsc
+        );
+        assert_eq!(
+            "recent".parse::<SortOrder>().unwrap(),
+            SortOrder::UpdatedDesc
+        );
         assert_eq!("stale".parse::<SortOrder>().unwrap(), SortOrder::UpdatedAsc);
         assert_eq!("triage".parse::<SortOrder>().unwrap(), SortOrder::Priority);
     }
@@ -1412,4 +1429,3 @@ mod tests {
         assert!(result.is_none());
     }
 }
-

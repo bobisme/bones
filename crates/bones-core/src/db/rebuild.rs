@@ -66,15 +66,11 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     }
 
     // 2. Create fresh schema
-    let conn = open_projection(db_path)
-        .context("create fresh projection database")?;
-    project::ensure_tracking_table(&conn)
-        .context("create tracking table")?;
+    let conn = open_projection(db_path).context("create fresh projection database")?;
+    project::ensure_tracking_table(&conn).context("create tracking table")?;
 
     // 3. Read and replay all events
-    let bones_dir = events_dir
-        .parent()
-        .unwrap_or(Path::new("."));
+    let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
 
     let shards = shard_mgr
@@ -89,9 +85,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
 
     // Parse events (parse_lines handles comments/blanks internally)
     let events = parse_lines(&content)
-        .map_err(|(line_num, e)| {
-            anyhow::anyhow!("parse error at line {line_num}: {e}")
-        })?;
+        .map_err(|(line_num, e)| anyhow::anyhow!("parse error at line {line_num}: {e}"))?;
 
     // 4. Project all events
     let projector = project::Projector::new(&conn);
@@ -137,10 +131,10 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::Event;
     use crate::event::data::*;
     use crate::event::types::EventType;
     use crate::event::writer;
-    use crate::event::Event;
     use crate::model::item::{Kind, Size, Urgency};
     use crate::model::item_id::ItemId;
     use crate::shard::ShardManager;
@@ -181,7 +175,12 @@ mod tests {
         event
     }
 
-    fn make_move_event(id: &str, state: crate::model::item::State, ts: i64, parent_hash: &str) -> Event {
+    fn make_move_event(
+        id: &str,
+        state: crate::model::item::State,
+        ts: i64,
+        parent_hash: &str,
+    ) -> Event {
         let mut event = Event {
             wall_ts_us: ts,
             agent: "test-agent".into(),
@@ -203,7 +202,9 @@ mod tests {
     fn append_event(shard_mgr: &ShardManager, event: &Event) {
         let line = writer::write_line(event).expect("serialize event");
         let (year, month) = shard_mgr.active_shard().unwrap().unwrap();
-        shard_mgr.append_raw(year, month, &line).expect("append event");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append event");
     }
 
     #[test]
@@ -235,7 +236,12 @@ mod tests {
         // Write events
         let create1 = make_create_event("bn-001", "First item", 1000);
         let create2 = make_create_event("bn-002", "Second item", 1001);
-        let mv = make_move_event("bn-001", crate::model::item::State::Doing, 2000, &create1.event_hash);
+        let mv = make_move_event(
+            "bn-001",
+            crate::model::item::State::Doing,
+            2000,
+            &create1.event_hash,
+        );
 
         append_event(&shard_mgr, &create1);
         append_event(&shard_mgr, &create2);

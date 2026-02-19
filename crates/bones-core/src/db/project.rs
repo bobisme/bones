@@ -20,9 +20,9 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 
+use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
-use crate::event::Event;
 
 // ---------------------------------------------------------------------------
 // ProjectionStats
@@ -362,9 +362,7 @@ impl<'conn> Projector<'conn> {
                          VALUES (?1, ?2, ?3)",
                         params![event.item_id.as_str(), data.agent, event.wall_ts_us],
                     )
-                    .with_context(|| {
-                        format!("assign {} to {}", data.agent, event.item_id)
-                    })?;
+                    .with_context(|| format!("assign {} to {}", data.agent, event.item_id))?;
             }
             AssignAction::Unassign => {
                 self.conn
@@ -372,9 +370,7 @@ impl<'conn> Projector<'conn> {
                         "DELETE FROM item_assignees WHERE item_id = ?1 AND agent = ?2",
                         params![event.item_id.as_str(), data.agent],
                     )
-                    .with_context(|| {
-                        format!("unassign {} from {}", data.agent, event.item_id)
-                    })?;
+                    .with_context(|| format!("unassign {} from {}", data.agent, event.item_id))?;
             }
         }
 
@@ -462,9 +458,7 @@ impl<'conn> Projector<'conn> {
                      WHERE item_id = ?1 AND depends_on_item_id = ?2 AND link_type = ?3",
                     params![event.item_id.as_str(), data.target, link_type],
                 )
-                .with_context(|| {
-                    format!("unlink {} -/-> {}", event.item_id, data.target)
-                })?;
+                .with_context(|| format!("unlink {} -/-> {}", event.item_id, data.target))?;
         } else {
             // No link_type: remove all links to target
             self.conn
@@ -473,9 +467,7 @@ impl<'conn> Projector<'conn> {
                      WHERE item_id = ?1 AND depends_on_item_id = ?2",
                     params![event.item_id.as_str(), data.target],
                 )
-                .with_context(|| {
-                    format!("unlink all {} -/-> {}", event.item_id, data.target)
-                })?;
+                .with_context(|| format!("unlink all {} -/-> {}", event.item_id, data.target))?;
         }
 
         // Bump updated_at
@@ -525,8 +517,7 @@ impl<'conn> Projector<'conn> {
 
         self.ensure_item_exists(event)?;
 
-        let json_str = serde_json::to_string(&data.state)
-            .context("serialize snapshot state")?;
+        let json_str = serde_json::to_string(&data.state).context("serialize snapshot state")?;
 
         self.conn
             .execute(
@@ -602,9 +593,7 @@ impl<'conn> Projector<'conn> {
                     ) VALUES (?1, '', 'task', 'open', 'default', 0, '', ?2, ?2)",
                     params![event.item_id.as_str(), event.wall_ts_us],
                 )
-                .with_context(|| {
-                    format!("create placeholder item for {}", event.item_id)
-                })?;
+                .with_context(|| format!("create placeholder item for {}", event.item_id))?;
         }
 
         Ok(())
@@ -666,7 +655,7 @@ pub fn clear_projection(conn: &Connection) -> Result<()> {
          DELETE FROM item_labels;
          DELETE FROM items;
          DELETE FROM projected_events;
-         UPDATE projection_meta SET last_event_offset = 0, last_event_hash = NULL WHERE id = 1;"
+         UPDATE projection_meta SET last_event_offset = 0, last_event_hash = NULL WHERE id = 1;",
     )
     .context("clear projection tables")?;
     Ok(())
@@ -1215,7 +1204,9 @@ mod tests {
         let event2 = make_create("bn-002", "Item 2", "bbb", 1001);
 
         // Project first batch
-        let stats1 = projector.project_batch(&[event1.clone(), event2.clone()]).unwrap();
+        let stats1 = projector
+            .project_batch(&[event1.clone(), event2.clone()])
+            .unwrap();
         assert_eq!(stats1.projected, 2);
         assert_eq!(stats1.duplicates, 0);
 
@@ -1302,8 +1293,12 @@ mod tests {
         }
 
         // Compare results
-        let item_full = query::get_item(&conn_full, "bn-001", false).unwrap().unwrap();
-        let item_inc = query::get_item(&conn_inc, "bn-001", false).unwrap().unwrap();
+        let item_full = query::get_item(&conn_full, "bn-001", false)
+            .unwrap()
+            .unwrap();
+        let item_inc = query::get_item(&conn_inc, "bn-001", false)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(item_full.title, item_inc.title);
         assert_eq!(item_full.state, item_inc.state);
@@ -1345,16 +1340,22 @@ mod tests {
 
         // First pass
         projector.project_batch(&events).unwrap();
-        let count1: i64 = conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0)).unwrap();
+        let count1: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count1, 2);
 
         // Clear and replay
         clear_projection(&conn).unwrap();
-        let count_after_clear: i64 = conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0)).unwrap();
+        let count_after_clear: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count_after_clear, 0);
 
         projector.project_batch(&events).unwrap();
-        let count2: i64 = conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0)).unwrap();
+        let count2: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count2, 2);
 
         let deps = query::get_dependencies(&conn, "bn-002").unwrap();
@@ -1398,7 +1399,12 @@ mod tests {
         let conn = test_db();
         let projector = Projector::new(&conn);
         projector
-            .project_event(&make_create("bn-001", "Authentication timeout", "aaa", 1000))
+            .project_event(&make_create(
+                "bn-001",
+                "Authentication timeout",
+                "aaa",
+                1000,
+            ))
             .unwrap();
 
         let hits = query::search(&conn, "authentication", 10).unwrap();
@@ -1475,108 +1481,128 @@ mod tests {
 
         // 2. Update title
         events.push(make_event(
-            EventType::Update, "bn-001",
+            EventType::Update,
+            "bn-001",
             EventData::Update(UpdateData {
                 field: "title".into(),
                 value: serde_json::json!("Auth timeout bug"),
                 extra: BTreeMap::new(),
             }),
-            "h03", 2000,
+            "h03",
+            2000,
         ));
 
         // 3. Move to doing
         events.push(make_event(
-            EventType::Move, "bn-001",
+            EventType::Move,
+            "bn-001",
             EventData::Move(MoveData {
                 state: State::Doing,
                 reason: None,
                 extra: BTreeMap::new(),
             }),
-            "h04", 3000,
+            "h04",
+            3000,
         ));
 
         // 4. Assign
         events.push(make_event(
-            EventType::Assign, "bn-001",
+            EventType::Assign,
+            "bn-001",
             EventData::Assign(AssignData {
                 agent: "alice".into(),
                 action: AssignAction::Assign,
                 extra: BTreeMap::new(),
             }),
-            "h05", 4000,
+            "h05",
+            4000,
         ));
 
         // 5. Comment
         events.push(make_event(
-            EventType::Comment, "bn-001",
+            EventType::Comment,
+            "bn-001",
             EventData::Comment(CommentData {
                 body: "Found root cause".into(),
                 extra: BTreeMap::new(),
             }),
-            "h06", 5000,
+            "h06",
+            5000,
         ));
 
         // 6. Link
         events.push(make_event(
-            EventType::Link, "bn-001",
+            EventType::Link,
+            "bn-001",
             EventData::Link(LinkData {
                 target: "bn-002".into(),
                 link_type: "blocks".into(),
                 extra: BTreeMap::new(),
             }),
-            "h07", 6000,
+            "h07",
+            6000,
         ));
 
         // 7. Unlink
         events.push(make_event(
-            EventType::Unlink, "bn-001",
+            EventType::Unlink,
+            "bn-001",
             EventData::Unlink(UnlinkData {
                 target: "bn-002".into(),
                 link_type: Some("blocks".into()),
                 extra: BTreeMap::new(),
             }),
-            "h08", 7000,
+            "h08",
+            7000,
         ));
 
         // 8. Compact
         events.push(make_event(
-            EventType::Compact, "bn-001",
+            EventType::Compact,
+            "bn-001",
             EventData::Compact(CompactData {
                 summary: "Auth token refresh race".into(),
                 extra: BTreeMap::new(),
             }),
-            "h09", 8000,
+            "h09",
+            8000,
         ));
 
         // 9. Snapshot
         events.push(make_event(
-            EventType::Snapshot, "bn-001",
+            EventType::Snapshot,
+            "bn-001",
             EventData::Snapshot(SnapshotData {
                 state: serde_json::json!({"id": "bn-001", "resolved": true}),
                 extra: BTreeMap::new(),
             }),
-            "h10", 9000,
+            "h10",
+            9000,
         ));
 
         // 10. Redact the comment
         events.push(make_event(
-            EventType::Redact, "bn-001",
+            EventType::Redact,
+            "bn-001",
             EventData::Redact(RedactData {
                 target_hash: "blake3:h06".into(),
                 reason: "Contained secret".into(),
                 extra: BTreeMap::new(),
             }),
-            "h11", 10000,
+            "h11",
+            10000,
         ));
 
         // 11. Delete
         events.push(make_event(
-            EventType::Delete, "bn-001",
+            EventType::Delete,
+            "bn-001",
             EventData::Delete(DeleteData {
                 reason: Some("Duplicate".into()),
                 extra: BTreeMap::new(),
             }),
-            "h12", 11000,
+            "h12",
+            11000,
         ));
 
         let stats = projector.project_batch(&events).unwrap();
@@ -1589,7 +1615,10 @@ mod tests {
         assert_eq!(item.title, "Auth timeout bug");
         assert_eq!(item.state, "doing");
         assert!(item.is_deleted);
-        assert_eq!(item.compact_summary.as_deref(), Some("Auth token refresh race"));
+        assert_eq!(
+            item.compact_summary.as_deref(),
+            Some("Auth token refresh race")
+        );
         let snapshot: Option<String> = conn
             .query_row(
                 "SELECT snapshot_json FROM items WHERE item_id = 'bn-001'",
@@ -1610,7 +1639,9 @@ mod tests {
 
         // Redaction record exists
         let redaction_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM event_redactions", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM event_redactions", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(redaction_count, 1);
     }

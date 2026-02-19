@@ -3,6 +3,7 @@
 mod cmd;
 mod git;
 
+use bones_core::timing;
 use clap::{Parser, Subcommand};
 use std::env;
 use std::fs;
@@ -22,6 +23,10 @@ struct Cli {
     /// Enable verbose logging.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Emit command timing report to stderr.
+    #[arg(long, global = true)]
+    timing: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -235,6 +240,9 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let cli = Cli::parse();
+    let timing_enabled = cli.timing || timing::timing_enabled_from_env();
+    timing::set_timing_enabled(timing_enabled);
+    timing::clear_timings();
 
     if cli.verbose {
         info!("Verbose mode enabled");
@@ -242,45 +250,47 @@ fn main() -> anyhow::Result<()> {
 
     let project_root = std::env::current_dir()?;
 
-    match cli.command {
+    let command_result = match cli.command {
         Commands::Init(args) => {
-            cmd::init::run_init(&args, &project_root)?;
+            timing::timed("cmd.init", || cmd::init::run_init(&args, &project_root))
         }
         Commands::Sync(args) => {
-            cmd::sync::run_sync(&args, &project_root)?;
+            timing::timed("cmd.sync", || cmd::sync::run_sync(&args, &project_root))
         }
-        Commands::Import(args) => {
-            cmd::import::run_import(&args, &project_root)?;
-        }
+        Commands::Import(args) => timing::timed("cmd.import", || {
+            cmd::import::run_import(&args, &project_root)
+        }),
         Commands::Hooks {
             command: HookCommand::Install,
-        } => {
-            git::hooks::install_hooks(&project_root)?;
-        }
+        } => timing::timed("cmd.hooks.install", || {
+            git::hooks::install_hooks(&project_root)
+        }),
         Commands::Verify {
             staged,
             regenerate_missing,
-        } => {
+        } => timing::timed("cmd.verify", || {
             if staged {
-                git::hooks::verify_staged_events()?;
+                git::hooks::verify_staged_events()
             } else {
-                cmd::verify::run_verify(&project_root, regenerate_missing)?;
+                cmd::verify::run_verify(&project_root, regenerate_missing)
             }
-        }
-        Commands::Rebuild { incremental } => {
+        }),
+        Commands::Rebuild { incremental } => timing::timed("cmd.rebuild", || {
             if incremental {
                 println!("[bn] incremental rebuild requested (currently a CLI placeholder).\n");
             } else {
                 println!("[bn] rebuild requested (currently a CLI placeholder).\n");
             }
-        }
+
+            Ok(())
+        }),
         Commands::MergeTool {
             setup,
             base,
             left,
             right,
             output,
-        } => {
+        } => timing::timed("cmd.merge-tool", || {
             if setup {
                 return setup_merge_tool();
             }
@@ -290,13 +300,50 @@ fn main() -> anyhow::Result<()> {
             let right = right.ok_or_else(|| anyhow::anyhow!("Missing right file argument"))?;
             let output = output.ok_or_else(|| anyhow::anyhow!("Missing output file argument"))?;
 
-            merge_files(&base, &left, &right, &output)?;
-        }
+            merge_files(&base, &left, &right, &output)
+        }),
 
-        Commands::MergeDriver { base, ours, theirs } => {
-            git::merge_driver::merge_driver_main(&base, &ours, &theirs)?;
+        Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
+            git::merge_driver::merge_driver_main(&base, &ours, &theirs)
+        }),
+    };
+
+    if timing_enabled {
+        let report = timing::collect_report();
+        if report.is_empty() {
+            eprintln!("timing report: no samples recorded");
+        } else {
+            eprintln!("timing report:");
+            eprintln!("{}", report.display_table());
+            eprintln!("timing report (json):");
+            eprintln!("{}", serde_json::to_string_pretty(&report.to_json())?);
         }
     }
 
-    Ok(())
+    command_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_flag_parses_before_subcommand() {
+        let cli = Cli::parse_from(["bn", "--timing", "rebuild"]);
+        assert!(cli.timing);
+        assert!(matches!(
+            cli.command,
+            Commands::Rebuild { incremental: false }
+        ));
+    }
+
+    #[test]
+    fn timing_flag_parses_after_subcommand() {
+        let cli = Cli::parse_from(["bn", "rebuild", "--timing", "--incremental"]);
+        assert!(cli.timing);
+        assert!(matches!(
+            cli.command,
+            Commands::Rebuild { incremental: true }
+        ));
+    }
 }
