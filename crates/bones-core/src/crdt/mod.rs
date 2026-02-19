@@ -1,3 +1,4 @@
+pub mod gset;
 pub mod merge;
 
 use chrono::{DateTime, Utc};
@@ -22,10 +23,7 @@ pub struct Lww<T> {
 }
 
 /// Grow-only Set
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GSet<T: Hash + Eq> {
-    pub elements: HashSet<T>,
-}
+pub use crate::crdt::gset::GSet;
 
 /// Observed-Remove Set (Add-Wins)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
