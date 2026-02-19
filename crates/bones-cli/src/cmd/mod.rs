@@ -1,5 +1,12 @@
+pub mod create;
+pub mod do_cmd;
+pub mod done;
 pub mod import;
 pub mod init;
+pub mod list;
+pub mod move_cmd;
 pub mod rebuild;
+pub mod show;
 pub mod sync;
+pub mod tag;
 pub mod verify;

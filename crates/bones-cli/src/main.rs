@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod agent;
 mod cmd;
 mod git;
+mod output;
 
 use bones_core::timing;
 use clap::{Parser, Subcommand};
+use output::OutputMode;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -28,14 +31,66 @@ struct Cli {
     #[arg(long, global = true)]
     timing: bool,
 
+    /// Emit JSON output instead of human-readable text.
+    #[arg(long, global = true)]
+    json: bool,
+
+    /// Override agent identity (skips env resolution).
+    #[arg(long, global = true)]
+    agent: Option<String>,
+
+    /// Suppress non-essential output.
+    #[arg(short, long, global = true)]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+impl Cli {
+    /// Derive the output mode from flags.
+    fn output_mode(&self) -> OutputMode {
+        if self.json {
+            OutputMode::Json
+        } else {
+            OutputMode::Human
+        }
+    }
+
+    /// Get the agent flag as an Option<&str> for resolution.
+    fn agent_flag(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Initialize a new bones project in the current directory.
     Init(cmd::init::InitArgs),
+
+    /// Create a new work item.
+    Create(cmd::create::CreateArgs),
+
+    /// List work items with optional filters.
+    List(cmd::list::ListArgs),
+
+    /// Show details of a single work item.
+    Show(cmd::show::ShowArgs),
+
+    /// Transition an item to "doing" state.
+    Do(cmd::do_cmd::DoArgs),
+
+    /// Mark an item as "done".
+    Done(cmd::done::DoneArgs),
+
+    /// Add labels to a work item.
+    Tag(cmd::tag::TagArgs),
+
+    /// Remove labels from a work item.
+    Untag(cmd::tag::UntagArgs),
+
+    /// Move a work item under a different parent.
+    Move(cmd::move_cmd::MoveArgs),
 
     /// Install optional git hooks for projection refresh and staged event validation.
     Hooks {
@@ -249,11 +304,36 @@ fn main() -> anyhow::Result<()> {
     }
 
     let project_root = std::env::current_dir()?;
+    let output = cli.output_mode();
 
     let command_result = match cli.command {
         Commands::Init(args) => {
             timing::timed("cmd.init", || cmd::init::run_init(&args, &project_root))
         }
+        Commands::Create(ref args) => timing::timed("cmd.create", || {
+            cmd::create::run_create(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::List(ref args) => {
+            timing::timed("cmd.list", || cmd::list::run_list(args, output, &project_root))
+        }
+        Commands::Show(ref args) => {
+            timing::timed("cmd.show", || cmd::show::run_show(args, output, &project_root))
+        }
+        Commands::Do(ref args) => timing::timed("cmd.do", || {
+            cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Done(ref args) => timing::timed("cmd.done", || {
+            cmd::done::run_done(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Tag(ref args) => timing::timed("cmd.tag", || {
+            cmd::tag::run_tag(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Untag(ref args) => timing::timed("cmd.untag", || {
+            cmd::tag::run_untag(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Move(ref args) => timing::timed("cmd.move", || {
+            cmd::move_cmd::run_move(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Sync(args) => {
             timing::timed("cmd.sync", || cmd::sync::run_sync(&args, &project_root))
         }
@@ -339,5 +419,147 @@ mod tests {
             cli.command,
             Commands::Rebuild { incremental: true }
         ));
+    }
+
+    #[test]
+    fn json_flag_sets_output_mode() {
+        let cli = Cli::parse_from(["bn", "--json", "list"]);
+        assert!(cli.json);
+        assert!(cli.output_mode().is_json());
+    }
+
+    #[test]
+    fn json_flag_after_subcommand() {
+        let cli = Cli::parse_from(["bn", "list", "--json"]);
+        assert!(cli.json);
+        assert!(cli.output_mode().is_json());
+    }
+
+    #[test]
+    fn default_output_is_human() {
+        let cli = Cli::parse_from(["bn", "list"]);
+        assert!(!cli.json);
+        assert!(!cli.output_mode().is_json());
+    }
+
+    #[test]
+    fn agent_flag_parsed() {
+        let cli = Cli::parse_from(["bn", "--agent", "test-agent", "list"]);
+        assert_eq!(cli.agent.as_deref(), Some("test-agent"));
+        assert_eq!(cli.agent_flag(), Some("test-agent"));
+    }
+
+    #[test]
+    fn agent_flag_none_by_default() {
+        let cli = Cli::parse_from(["bn", "list"]);
+        assert!(cli.agent.is_none());
+        assert!(cli.agent_flag().is_none());
+    }
+
+    #[test]
+    fn quiet_flag_parsed() {
+        let cli = Cli::parse_from(["bn", "-q", "list"]);
+        assert!(cli.quiet);
+    }
+
+    #[test]
+    fn create_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "create", "--title", "My task"]);
+        assert!(matches!(cli.command, Commands::Create(_)));
+    }
+
+    #[test]
+    fn list_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "list"]);
+        assert!(matches!(cli.command, Commands::List(_)));
+    }
+
+    #[test]
+    fn show_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "show", "item-123"]);
+        assert!(matches!(cli.command, Commands::Show(_)));
+    }
+
+    #[test]
+    fn do_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "do", "item-123"]);
+        assert!(matches!(cli.command, Commands::Do(_)));
+    }
+
+    #[test]
+    fn done_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "done", "item-123"]);
+        assert!(matches!(cli.command, Commands::Done(_)));
+    }
+
+    #[test]
+    fn tag_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "tag", "item-123", "bug", "urgent"]);
+        assert!(matches!(cli.command, Commands::Tag(_)));
+    }
+
+    #[test]
+    fn untag_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "untag", "item-123", "stale"]);
+        assert!(matches!(cli.command, Commands::Untag(_)));
+    }
+
+    #[test]
+    fn move_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "move", "item-123", "--parent", "goal-1"]);
+        assert!(matches!(cli.command, Commands::Move(_)));
+    }
+
+    #[test]
+    fn all_subcommands_listed() {
+        // Verify all planned lifecycle subcommands exist by parsing each
+        let subcommands = [
+            vec!["bn", "init"],
+            vec!["bn", "create", "--title", "x"],
+            vec!["bn", "list"],
+            vec!["bn", "show", "x"],
+            vec!["bn", "do", "x"],
+            vec!["bn", "done", "x"],
+            vec!["bn", "tag", "x", "l"],
+            vec!["bn", "untag", "x", "l"],
+            vec!["bn", "move", "x", "--parent", "p"],
+        ];
+        for args in &subcommands {
+            let result = Cli::try_parse_from(args.iter());
+            assert!(
+                result.is_ok(),
+                "Failed to parse: {:?} — error: {:?}",
+                args,
+                result.err()
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_commands_work_without_agent() {
+        // list and show are read-only — they should parse without --agent
+        let cli = Cli::parse_from(["bn", "list"]);
+        assert!(cli.agent_flag().is_none());
+
+        let cli = Cli::parse_from(["bn", "show", "item-1"]);
+        assert!(cli.agent_flag().is_none());
+    }
+
+    #[test]
+    fn mutating_commands_accept_agent_flag() {
+        let cli = Cli::parse_from(["bn", "--agent", "me", "create", "--title", "t"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "do", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "done", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "tag", "x", "l"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "move", "x", "--parent", "p"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
     }
 }
