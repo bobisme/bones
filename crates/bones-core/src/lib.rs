@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! bones-core library.
 
+pub mod crdt;
 pub mod lock;
 
 /// # Conventions
