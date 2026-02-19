@@ -7,11 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core" }
-bones-triage = { path = "../bones-triage" }
-bones-search = { path = "../bones-search" }
-bones-sim = { path = "../bones-sim" }
 anyhow = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

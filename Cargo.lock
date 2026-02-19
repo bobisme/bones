@@ -161,10 +161,7 @@ name = "bones-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bones-core",
- "bones-search",
- "bones-sim",
- "bones-triage",
+ "chrono",
  "clap",
  "serde",
  "serde_json",

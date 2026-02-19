@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
-use clap::Parser;
+
+mod cmd;
+
+use clap::{Parser, Subcommand};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -8,17 +11,26 @@ use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
+#[command(
+    author,
+    version,
+    about = "bones: CRDT-native issue tracker",
+    long_about = None
+)]
+struct Cli {
+    /// Enable verbose logging.
     #[arg(short, long)]
     verbose: bool,
 
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Subcommand, Debug)]
 enum Commands {
+    /// Initialize a new bones project in the current directory.
+    Init(cmd::init::InitArgs),
+
     /// Merge tool for jj conflict resolution on append-only event files
     MergeTool {
         /// Configure jj to use bones as a merge tool
@@ -63,9 +75,7 @@ fn init_tracing() {
                 .init();
         }
         _ => {
-            registry
-                .with(fmt::layer().compact())
-                .init();
+            registry.with(fmt::layer().compact()).init();
         }
     }
 }
@@ -103,8 +113,6 @@ fn merge_files(
     let mut output_file = fs::OpenOptions::new().append(true).open(output)?;
 
     for (line_no, line) in reader.lines().enumerate() {
-        // Line numbers are 0-indexed, but base_lines is 1-indexed
-        // We want to append lines from index base_lines onwards
         if line_no >= base_lines {
             let line_content = line?;
             writeln!(output_file, "{}", line_content)?;
@@ -120,7 +128,6 @@ fn merge_files(
 fn setup_merge_tool() -> anyhow::Result<()> {
     info!("Setting up jj configuration for bones merge tool");
 
-    // Try to run jj config set commands
     let commands = vec![
         vec![
             "jj",
@@ -160,44 +167,39 @@ fn setup_merge_tool() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Initialize logging
     init_tracing();
 
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    if args.verbose {
+    if cli.verbose {
         info!("Verbose mode enabled");
     }
 
-    info!("bones-cli initialized");
+    let project_root = std::env::current_dir()?;
 
-    // Handle subcommands
-    if let Some(Commands::MergeTool {
-        setup,
-        base,
-        left,
-        right,
-        output,
-    }) = args.command
-    {
-        if setup {
-            return setup_merge_tool();
+    match cli.command {
+        Commands::Init(args) => {
+            cmd::init::run_init(&args, &project_root)?;
         }
+        Commands::MergeTool {
+            setup,
+            base,
+            left,
+            right,
+            output,
+        } => {
+            if setup {
+                return setup_merge_tool();
+            }
 
-        // Validate that all file arguments are provided
-        let base = base.ok_or_else(|| anyhow::anyhow!("Missing base file argument"))?;
-        let left = left.ok_or_else(|| anyhow::anyhow!("Missing left file argument"))?;
-        let right = right.ok_or_else(|| anyhow::anyhow!("Missing right file argument"))?;
-        let output = output.ok_or_else(|| anyhow::anyhow!("Missing output file argument"))?;
+            let base = base.ok_or_else(|| anyhow::anyhow!("Missing base file argument"))?;
+            let left = left.ok_or_else(|| anyhow::anyhow!("Missing left file argument"))?;
+            let right = right.ok_or_else(|| anyhow::anyhow!("Missing right file argument"))?;
+            let output = output.ok_or_else(|| anyhow::anyhow!("Missing output file argument"))?;
 
-        return merge_files(&base, &left, &right, &output);
+            merge_files(&base, &left, &right, &output)?;
+        }
     }
-
-    // Initialize core systems (demonstration)
-    bones_core::init();
-    bones_triage::init();
-    bones_search::init();
-    bones_sim::init();
 
     Ok(())
 }
