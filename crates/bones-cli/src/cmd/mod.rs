@@ -1,3 +1,4 @@
+pub mod close;
 pub mod completions;
 pub mod create;
 pub mod do_cmd;
@@ -8,7 +9,9 @@ pub mod list;
 pub mod migrate;
 pub mod move_cmd;
 pub mod rebuild;
+pub mod reopen;
 pub mod show;
 pub mod sync;
 pub mod tag;
+pub mod update;
 pub mod verify;

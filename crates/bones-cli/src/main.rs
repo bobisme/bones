@@ -115,6 +115,30 @@ enum Commands {
     Done(cmd::done::DoneArgs),
 
     #[command(
+        next_help_heading = "Lifecycle",
+        about = "Update fields on a work item",
+        long_about = "Update one or more fields on an existing work item. Each field change emits a separate item.update event.",
+        after_help = "EXAMPLES:\n    # Update title\n    bn update bn-abc --title \"New title\"\n\n    # Update multiple fields\n    bn update bn-abc --title \"Fix\" --urgency urgent\n\n    # Emit machine-readable output\n    bn update bn-abc --title \"Fix\" --json"
+    )]
+    Update(cmd::update::UpdateArgs),
+
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Close a work item (alias for done)",
+        long_about = "Transition a work item to the done state. Equivalent to 'bn done'.",
+        after_help = "EXAMPLES:\n    # Close an item\n    bn close bn-abc\n\n    # Close with reason\n    bn close bn-abc --reason \"Shipped in v2\"\n\n    # Emit machine-readable output\n    bn close bn-abc --json"
+    )]
+    Close(cmd::close::CloseArgs),
+
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Reopen a closed or archived item",
+        long_about = "Transition a done or archived work item back to the open state.",
+        after_help = "EXAMPLES:\n    # Reopen an item\n    bn reopen bn-abc\n\n    # Emit machine-readable output\n    bn reopen bn-abc --json"
+    )]
+    Reopen(cmd::reopen::ReopenArgs),
+
+    #[command(
         next_help_heading = "Metadata",
         about = "Add labels to an item",
         long_about = "Attach one or more labels to an existing work item.",
@@ -405,6 +429,15 @@ fn main() -> anyhow::Result<()> {
         Commands::Done(ref args) => timing::timed("cmd.done", || {
             cmd::done::run_done(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Update(ref args) => timing::timed("cmd.update", || {
+            cmd::update::run_update(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Close(ref args) => timing::timed("cmd.close", || {
+            cmd::close::run_close(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Reopen(ref args) => timing::timed("cmd.reopen", || {
+            cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Tag(ref args) => timing::timed("cmd.tag", || {
             cmd::tag::run_tag(args, cli.agent_flag(), output, &project_root)
         }),
@@ -619,6 +652,9 @@ mod tests {
             vec!["bn", "show", "x"],
             vec!["bn", "do", "x"],
             vec!["bn", "done", "x"],
+            vec!["bn", "update", "x", "--title", "t"],
+            vec!["bn", "close", "x"],
+            vec!["bn", "reopen", "x"],
             vec!["bn", "tag", "x", "l"],
             vec!["bn", "untag", "x", "l"],
             vec!["bn", "move", "x", "--parent", "p"],
@@ -632,6 +668,49 @@ mod tests {
                 args,
                 result.err()
             );
+        }
+    }
+
+    #[test]
+    fn update_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "update", "item-1", "--title", "New title"]);
+        assert!(matches!(cli.command, Commands::Update(_)));
+    }
+
+    #[test]
+    fn update_subcommand_parses_multiple_flags() {
+        let cli = Cli::parse_from([
+            "bn", "update", "item-1", "--title", "X", "--size", "m", "--urgency", "urgent",
+        ]);
+        assert!(matches!(cli.command, Commands::Update(_)));
+        if let Commands::Update(ref args) = cli.command {
+            assert_eq!(args.title.as_deref(), Some("X"));
+            assert_eq!(args.size.as_deref(), Some("m"));
+            assert_eq!(args.urgency.as_deref(), Some("urgent"));
+        }
+    }
+
+    #[test]
+    fn close_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "close", "item-1"]);
+        assert!(matches!(cli.command, Commands::Close(_)));
+    }
+
+    #[test]
+    fn close_subcommand_parses_with_reason() {
+        let cli = Cli::parse_from(["bn", "close", "item-1", "--reason", "Done"]);
+        assert!(matches!(cli.command, Commands::Close(_)));
+        if let Commands::Close(ref args) = cli.command {
+            assert_eq!(args.reason.as_deref(), Some("Done"));
+        }
+    }
+
+    #[test]
+    fn reopen_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "reopen", "item-1"]);
+        assert!(matches!(cli.command, Commands::Reopen(_)));
+        if let Commands::Reopen(ref args) = cli.command {
+            assert_eq!(args.id, "item-1");
         }
     }
 
@@ -654,6 +733,15 @@ mod tests {
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "done", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "update", "x", "--title", "t"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "close", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "reopen", "x"]);
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "tag", "x", "l"]);
