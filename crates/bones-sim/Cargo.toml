@@ -1,0 +1,12 @@
+[package]
+name = "bones-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bones-core = { path = "../bones-core" }
+anyhow = { workspace = true }
+proptest = { workspace = true }
+serde = { workspace = true }
+terseid = { workspace = true }
+tracing = { workspace = true }

@@ -3,3 +3,6 @@ ws/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Rust build artifacts
+target/

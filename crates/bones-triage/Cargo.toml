@@ -1,0 +1,15 @@
+[package]
+name = "bones-triage"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bones-core = { path = "../bones-core" }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+terseid = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bones-core",
+    "crates/bones-triage",
+    "crates/bones-search",
+    "crates/bones-cli",
+    "crates/bones-sim",
+]
+
+[workspace.dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+clap = { version = "4.4", features = ["derive"] }
+proptest = "1.4"
+rusqlite = { version = "0.30", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+terseid = { git = "https://github.com/bobisme/terseid.git" }

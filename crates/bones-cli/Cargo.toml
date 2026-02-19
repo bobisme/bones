@@ -1,0 +1,17 @@
+[package]
+name = "bones-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bones-core = { path = "../bones-core" }
+bones-triage = { path = "../bones-triage" }
+bones-search = { path = "../bones-search" }
+bones-sim = { path = "../bones-sim" }
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+terseid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
