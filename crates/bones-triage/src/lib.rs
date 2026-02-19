@@ -8,6 +8,7 @@
 
 pub mod graph;
 pub mod metrics;
+pub mod score;
 
 use tracing::{info, instrument};
 

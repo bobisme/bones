@@ -38,4 +38,6 @@ tempfile = "3.10"
 terseid = { git = "https://github.com/bobisme/terseid.git" }
 criterion = "0.5"
 clap_complete = "4.5"
+dirs = "5.0"
 petgraph = "0.6"
+toml = "0.8"

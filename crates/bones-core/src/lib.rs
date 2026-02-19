@@ -3,6 +3,7 @@
 
 pub mod cache;
 pub mod clock;
+pub mod config;
 pub mod crdt;
 pub mod dag;
 pub mod db;
@@ -11,6 +12,7 @@ pub mod event;
 pub mod graph;
 pub mod lock;
 pub mod model;
+pub mod recovery;
 pub mod shard;
 pub mod sync;
 pub mod timing;
