@@ -6,6 +6,7 @@
 //! - `foreign_keys = ON` to protect relational integrity in projection tables
 
 pub mod fts;
+pub mod incremental;
 pub mod migrations;
 pub mod project;
 pub mod query;
