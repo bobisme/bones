@@ -30,12 +30,14 @@
 
 pub mod codec;
 pub mod columns;
+pub mod writer;
 
 pub use codec::{
     ColumnCodec, EventTypeCodec, InternedStringCodec, ItemIdCodec, RawBytesCodec, TimestampCodec,
     ValueCodec,
 };
 pub use columns::{COLUMN_COUNT, CacheColumns, ColumnRow};
+pub use writer::{CacheStats, CacheWriter, rebuild_cache};
 
 use crate::event::Event;
 use columns::{

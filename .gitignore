@@ -6,3 +6,6 @@ ws/
 
 # Rust build artifacts
 target/
+
+# bones derived cache artifacts
+.bones/cache/

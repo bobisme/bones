@@ -276,13 +276,7 @@ fn main() -> anyhow::Result<()> {
             }
         }),
         Commands::Rebuild { incremental } => timing::timed("cmd.rebuild", || {
-            if incremental {
-                println!("[bn] incremental rebuild requested (currently a CLI placeholder).\n");
-            } else {
-                println!("[bn] rebuild requested (currently a CLI placeholder).\n");
-            }
-
-            Ok(())
+            cmd::rebuild::run_rebuild(&project_root, incremental)
         }),
         Commands::MergeTool {
             setup,
