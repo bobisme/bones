@@ -262,10 +262,24 @@ fn orset_both_agents_add_same_label_is_idempotent() {
     let label = "urgent";
 
     let mut state_a = WorkItemState::new();
-    state_a.apply_event(&crdt_label(item, "add", label, 1_000, "agent-a", "blake3:a-add"));
+    state_a.apply_event(&crdt_label(
+        item,
+        "add",
+        label,
+        1_000,
+        "agent-a",
+        "blake3:a-add",
+    ));
 
     let mut state_b = WorkItemState::new();
-    state_b.apply_event(&crdt_label(item, "add", label, 1_000, "agent-b", "blake3:b-add"));
+    state_b.apply_event(&crdt_label(
+        item,
+        "add",
+        label,
+        1_000,
+        "agent-b",
+        "blake3:b-add",
+    ));
 
     // Merge in both orderings
     let mut a_then_b = state_a.clone();
@@ -302,7 +316,14 @@ fn orset_concurrent_add_remove_is_add_wins_all_orderings() {
 
     // Base: add label from agent-a
     let mut add_side = WorkItemState::new();
-    add_side.apply_event(&crdt_label(item, "add", "backend", 1_000, "agent-a", "blake3:add-be"));
+    add_side.apply_event(&crdt_label(
+        item,
+        "add",
+        "backend",
+        1_000,
+        "agent-a",
+        "blake3:add-be",
+    ));
 
     // Concurrent: remove label from agent-b
     let mut remove_side = WorkItemState::new();
@@ -347,10 +368,22 @@ fn concurrent_move_different_states_converges_deterministically() {
     let ts = 5_000;
 
     let mut state_done = WorkItemState::new();
-    state_done.apply_event(&crdt_move(item, State::Done, ts, "agent-a", "blake3:done-hash"));
+    state_done.apply_event(&crdt_move(
+        item,
+        State::Done,
+        ts,
+        "agent-a",
+        "blake3:done-hash",
+    ));
 
     let mut state_arch = WorkItemState::new();
-    state_arch.apply_event(&crdt_move(item, State::Archived, ts, "agent-b", "blake3:arch-hash"));
+    state_arch.apply_event(&crdt_move(
+        item,
+        State::Archived,
+        ts,
+        "agent-b",
+        "blake3:arch-hash",
+    ));
 
     // Merge in both orderings
     let mut done_then_arch = state_done.clone();
@@ -380,10 +413,22 @@ fn concurrent_done_by_both_agents_is_idempotent() {
     let ts = 2_000;
 
     let mut state_a = WorkItemState::new();
-    state_a.apply_event(&crdt_move(item, State::Done, ts, "agent-a", "blake3:done-a"));
+    state_a.apply_event(&crdt_move(
+        item,
+        State::Done,
+        ts,
+        "agent-a",
+        "blake3:done-a",
+    ));
 
     let mut state_b = WorkItemState::new();
-    state_b.apply_event(&crdt_move(item, State::Done, ts, "agent-b", "blake3:done-b"));
+    state_b.apply_event(&crdt_move(
+        item,
+        State::Done,
+        ts,
+        "agent-b",
+        "blake3:done-b",
+    ));
 
     let mut a_then_b = state_a.clone();
     a_then_b.merge(&state_b);
@@ -393,7 +438,11 @@ fn concurrent_done_by_both_agents_is_idempotent() {
 
     // Both orderings converge to Done
     assert_eq!(a_then_b.phase(), b_then_a.phase());
-    assert_eq!(a_then_b.phase(), Phase::Done, "both agents done = item is done");
+    assert_eq!(
+        a_then_b.phase(),
+        Phase::Done,
+        "both agents done = item is done"
+    );
 }
 
 /// Two agents create two separate items with the same title/content.
@@ -425,7 +474,10 @@ fn two_creates_different_item_ids_same_content_are_distinct() {
         .expect("item 2 exists");
 
     assert_eq!(item1.title, item2.title, "same title");
-    assert_ne!(item1.item_id, item2.item_id, "different IDs — distinct items");
+    assert_ne!(
+        item1.item_id, item2.item_id,
+        "different IDs — distinct items"
+    );
 
     let all = query::list_items(&conn, &ItemFilter::default()).expect("list");
     assert_eq!(all.len(), 2, "two distinct items in projection");
@@ -471,11 +523,23 @@ fn lww_higher_wall_ts_wins_regardless_of_merge_order() {
 
     // agent-early: ts=1000 (lower)
     let mut early = WorkItemState::new();
-    early.apply_event(&crdt_update_title(item, "old-title", 1_000, "agent-early", "blake3:early"));
+    early.apply_event(&crdt_update_title(
+        item,
+        "old-title",
+        1_000,
+        "agent-early",
+        "blake3:early",
+    ));
 
     // agent-late: ts=9000 (higher)
     let mut late = WorkItemState::new();
-    late.apply_event(&crdt_update_title(item, "new-title", 9_000, "agent-late", "blake3:late"));
+    late.apply_event(&crdt_update_title(
+        item,
+        "new-title",
+        9_000,
+        "agent-late",
+        "blake3:late",
+    ));
 
     let mut early_then_late = early.clone();
     early_then_late.merge(&late);
@@ -517,7 +581,8 @@ fn empty_db_get_item_returns_none() {
 #[test]
 fn empty_db_get_dependencies_returns_empty() {
     let conn = test_db();
-    let deps = query::get_dependencies(&conn, "bn-ec-nodeps").expect("get_dependencies on empty db");
+    let deps =
+        query::get_dependencies(&conn, "bn-ec-nodeps").expect("get_dependencies on empty db");
     assert!(deps.is_empty(), "no deps in empty db");
 }
 
@@ -525,7 +590,8 @@ fn empty_db_get_dependencies_returns_empty() {
 #[test]
 fn empty_db_get_comments_returns_empty() {
     let conn = test_db();
-    let comments = query::get_comments(&conn, "bn-ec-nocomments").expect("get_comments on empty db");
+    let comments =
+        query::get_comments(&conn, "bn-ec-nocomments").expect("get_comments on empty db");
     assert!(comments.is_empty(), "no comments in empty db");
 }
 
@@ -686,13 +752,24 @@ fn goal_nesting_100_deep_does_not_panic() {
     let mut events = Vec::new();
 
     // First item: root
-    events.push(make_create_goal("bn-ec-nest-0000", "Root goal", "agent-a", 1_000));
+    events.push(make_create_goal(
+        "bn-ec-nest-0000",
+        "Root goal",
+        "agent-a",
+        1_000,
+    ));
 
     // Chain: each item is a child of the previous
     for i in 1..=100usize {
         let id = format!("bn-ec-nest-{i:04}");
         let parent_id = format!("bn-ec-nest-{:04}", i - 1);
-        events.push(make_create_child(&id, &format!("Level {i}"), &parent_id, "agent-a", 1_000 + i as i64));
+        events.push(make_create_child(
+            &id,
+            &format!("Level {i}"),
+            &parent_id,
+            "agent-a",
+            1_000 + i as i64,
+        ));
     }
 
     // Must not panic
@@ -729,10 +806,22 @@ fn circular_blocking_dependency_detected_and_reported() {
 
     // Create base states
     let mut state_a = WorkItemState::new();
-    state_a.apply_event(&crdt_move(item_a, State::Open, 1_000, "agent", "blake3:a-create"));
+    state_a.apply_event(&crdt_move(
+        item_a,
+        State::Open,
+        1_000,
+        "agent",
+        "blake3:a-create",
+    ));
 
     let mut state_b = WorkItemState::new();
-    state_b.apply_event(&crdt_move(item_b, State::Open, 1_000, "agent", "blake3:b-create"));
+    state_b.apply_event(&crdt_move(
+        item_b,
+        State::Open,
+        1_000,
+        "agent",
+        "blake3:b-create",
+    ));
     // B is blocked by A (A → B edge: A blocks B)
     state_b.apply_event(&make_crdt_event(
         EventType::Link,
@@ -748,7 +837,13 @@ fn circular_blocking_dependency_detected_and_reported() {
     ));
 
     let mut state_c = WorkItemState::new();
-    state_c.apply_event(&crdt_move(item_c, State::Open, 1_000, "agent", "blake3:c-create"));
+    state_c.apply_event(&crdt_move(
+        item_c,
+        State::Open,
+        1_000,
+        "agent",
+        "blake3:c-create",
+    ));
     // C is blocked by B (B → C edge: B blocks C)
     state_c.apply_event(&make_crdt_event(
         EventType::Link,
@@ -833,12 +928,12 @@ fn mutual_blocking_dependency_detected() {
 
     // Adding B blocked_by A → mutual block
     let warning = detect_cycle_on_add(&graph, item_b, item_a);
-    assert!(
-        warning.is_some(),
-        "mutual block A↔B must be detected"
-    );
+    assert!(warning.is_some(), "mutual block A↔B must be detected");
     let w = warning.unwrap();
-    assert!(w.is_mutual_block(), "warning should classify as mutual block");
+    assert!(
+        w.is_mutual_block(),
+        "warning should classify as mutual block"
+    );
 }
 
 /// Item ID collision via content hash: structural impossibility test.
@@ -888,7 +983,12 @@ fn create_1000_items_all_present() {
         // Use unique item IDs in bn-XXXX format
         // Generate human-readable IDs since we can't use the ID generator here
         let id = format!("bn-stress-{i:04}");
-        events.push(make_create(&id, &format!("Stress item {i}"), "agent-a", 1_000 + i as i64));
+        events.push(make_create(
+            &id,
+            &format!("Stress item {i}"),
+            "agent-a",
+            1_000 + i as i64,
+        ));
     }
 
     let conn = project_events(&events);
@@ -950,7 +1050,14 @@ fn three_way_concurrent_merge_all_6_permutations_converge() {
         "agent-a",
         "blake3:a-title",
     ));
-    a.apply_event(&crdt_label(item, "add", "frontend", 3_100, "agent-a", "blake3:a-label"));
+    a.apply_event(&crdt_label(
+        item,
+        "add",
+        "frontend",
+        3_100,
+        "agent-a",
+        "blake3:a-label",
+    ));
 
     let mut b = WorkItemState::new();
     b.apply_event(&crdt_update_title(
@@ -960,10 +1067,23 @@ fn three_way_concurrent_merge_all_6_permutations_converge() {
         "agent-b",
         "blake3:b-title",
     ));
-    b.apply_event(&crdt_label(item, "add", "backend", 2_100, "agent-b", "blake3:b-label"));
+    b.apply_event(&crdt_label(
+        item,
+        "add",
+        "backend",
+        2_100,
+        "agent-b",
+        "blake3:b-label",
+    ));
 
     let mut c = WorkItemState::new();
-    c.apply_event(&crdt_move(item, State::Done, 1_000, "agent-c", "blake3:c-done"));
+    c.apply_event(&crdt_move(
+        item,
+        State::Done,
+        1_000,
+        "agent-c",
+        "blake3:c-done",
+    ));
 
     let parts = [&a, &b, &c];
     let orderings = [
@@ -984,7 +1104,11 @@ fn three_way_concurrent_merge_all_6_permutations_converge() {
         results.push((
             merged.title.value.clone(),
             merged.phase(),
-            merged.label_names().into_iter().cloned().collect::<std::collections::BTreeSet<_>>(),
+            merged
+                .label_names()
+                .into_iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
         ));
     }
 
@@ -999,7 +1123,10 @@ fn three_way_concurrent_merge_all_6_permutations_converge() {
     // title-from-a has highest wall_ts (3000) → wins LWW
     assert_eq!(results[0].0, "title-from-a", "highest wall_ts title wins");
     // Both labels preserved (OR-Set)
-    assert!(results[0].2.contains("frontend"), "frontend label preserved");
+    assert!(
+        results[0].2.contains("frontend"),
+        "frontend label preserved"
+    );
     assert!(results[0].2.contains("backend"), "backend label preserved");
     // Phase: Done from agent-c
     assert_eq!(results[0].1, Phase::Done, "Done phase preserved");

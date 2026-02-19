@@ -35,7 +35,7 @@
     clippy::collapsible_if,
     clippy::doc_markdown,
     clippy::bool_to_int_with_if,
-    clippy::redundant_closure_for_method_calls,
+    clippy::redundant_closure_for_method_calls
 )]
 
 use std::collections::{HashMap, HashSet};
@@ -196,13 +196,7 @@ pub fn find_all_cycles(graph: &BlockingGraph) -> Vec<CycleWarning> {
 
     for item in graph.all_item_ids() {
         if color.get(item) == Some(&Color::White) {
-            dfs_all_cycles(
-                graph,
-                item,
-                &mut color,
-                &mut parent_map,
-                &mut warnings,
-            );
+            dfs_all_cycles(graph, item, &mut color, &mut parent_map, &mut warnings);
         }
     }
 
@@ -367,11 +361,7 @@ fn dfs_all_cycles(
 }
 
 /// DFS that returns `true` as soon as any cycle (back edge) is found.
-fn dfs_has_cycle(
-    graph: &BlockingGraph,
-    node: &str,
-    color: &mut HashMap<String, Color>,
-) -> bool {
+fn dfs_has_cycle(graph: &BlockingGraph, node: &str, color: &mut HashMap<String, Color>) -> bool {
     color.insert(node.to_string(), Color::Gray);
 
     for neighbor in graph.get_blockers(node) {
@@ -399,11 +389,11 @@ fn dfs_has_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::itc::Stamp;
     use crate::crdt::item_state::WorkItemState;
+    use crate::event::Event;
     use crate::event::data::{EventData, LinkData};
     use crate::event::types::EventType;
-    use crate::event::Event;
-    use crate::clock::itc::Stamp;
     use crate::model::item_id::ItemId;
     use std::collections::{BTreeMap, HashMap};
 
@@ -491,11 +481,7 @@ mod tests {
     #[test]
     fn cycle_warning_mutual_block_display() {
         let w = CycleWarning {
-            cycle_path: vec![
-                "A".to_string(),
-                "B".to_string(),
-                "A".to_string(),
-            ],
+            cycle_path: vec!["A".to_string(), "B".to_string(), "A".to_string()],
             edge_from: "A".to_string(),
             edge_to: "B".to_string(),
         };
@@ -603,11 +589,7 @@ mod tests {
     #[test]
     fn no_cycle_diamond_dag() {
         // Diamond: A → B, A → C, B → D, C → D. Adding E→A is safe.
-        let graph = build_graph(&[
-            ("A", &["B", "C"]),
-            ("B", &["D"]),
-            ("C", &["D"]),
-        ]);
+        let graph = build_graph(&[("A", &["B", "C"]), ("B", &["D"]), ("C", &["D"])]);
         let warning = detect_cycle_on_add(&graph, "E", "A");
         assert!(warning.is_none());
     }
@@ -718,7 +700,11 @@ mod tests {
         let cycles = find_all_cycles(&graph);
         assert!(!cycles.is_empty());
         // Should find the self-loop.
-        assert!(cycles.iter().any(|w| w.edge_from == "A" && w.edge_to == "A"));
+        assert!(
+            cycles
+                .iter()
+                .any(|w| w.edge_from == "A" && w.edge_to == "A")
+        );
     }
 
     #[test]
@@ -731,12 +717,7 @@ mod tests {
     #[test]
     fn find_all_cycles_multiple_disjoint() {
         // Two independent cycles: A↔B and C↔D.
-        let graph = build_graph(&[
-            ("A", &["B"]),
-            ("B", &["A"]),
-            ("C", &["D"]),
-            ("D", &["C"]),
-        ]);
+        let graph = build_graph(&[("A", &["B"]), ("B", &["A"]), ("C", &["D"]), ("D", &["C"])]);
         let cycles = find_all_cycles(&graph);
         // Should find at least one cycle in each pair.
         assert!(cycles.len() >= 2);

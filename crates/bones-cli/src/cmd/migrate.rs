@@ -255,7 +255,10 @@ pub fn run_migrate(args: &MigrateArgs, project_root: &Path) -> Result<()> {
 
         if state != State::Open {
             let mut move_event = Event {
-                wall_ts_us: issue.closed_us.unwrap_or(issue.updated_us).max(issue.created_us),
+                wall_ts_us: issue
+                    .closed_us
+                    .unwrap_or(issue.updated_us)
+                    .max(issue.created_us),
                 agent: issue
                     .actor
                     .clone()
@@ -383,7 +386,11 @@ fn find_bones_dir(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn append_event(shard_manager: &ShardManager, active_shard: (i32, u32), event: &mut Event) -> Result<()> {
+fn append_event(
+    shard_manager: &ShardManager,
+    active_shard: (i32, u32),
+    event: &mut Event,
+) -> Result<()> {
     let line = write_event(event).context("failed to serialize migrated event")?;
     shard_manager
         .append_raw(active_shard.0, active_shard.1, &line)

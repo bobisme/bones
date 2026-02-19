@@ -89,7 +89,9 @@ fn lww_from_token<T>(token: u8, value: T) -> LwwRegister<T> {
     )
 }
 
-fn arb_lww_register_string(prefix: &'static str) -> impl Strategy<Value = LwwRegister<String>> + Clone {
+fn arb_lww_register_string(
+    prefix: &'static str,
+) -> impl Strategy<Value = LwwRegister<String>> + Clone {
     any::<u8>().prop_map(move |token| lww_from_token(token, format!("{prefix}-{token:02x}")))
 }
 

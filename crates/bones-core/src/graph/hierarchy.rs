@@ -32,7 +32,7 @@
 #![allow(
     clippy::must_use_candidate,
     clippy::module_name_repetitions,
-    clippy::doc_markdown,
+    clippy::doc_markdown
 )]
 
 use anyhow::Context as AnyhowContext;
@@ -245,10 +245,7 @@ pub fn compute_nested_progress(
 /// # Errors
 ///
 /// Returns [`HierarchyError::Db`] for database failures.
-pub fn get_subtree_ids(
-    conn: &Connection,
-    root_id: &str,
-) -> Result<Vec<String>, HierarchyError> {
+pub fn get_subtree_ids(conn: &Connection, root_id: &str) -> Result<Vec<String>, HierarchyError> {
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = VecDeque::new();
     let mut result: Vec<String> = Vec::new();
@@ -286,10 +283,7 @@ pub fn get_subtree_ids(
 ///
 /// Returns [`HierarchyError::ItemNotFound`] if `item_id` does not exist,
 /// or [`HierarchyError::Db`] for database failures.
-pub fn get_ancestors(
-    conn: &Connection,
-    item_id: &str,
-) -> Result<Vec<QueryItem>, HierarchyError> {
+pub fn get_ancestors(conn: &Connection, item_id: &str) -> Result<Vec<QueryItem>, HierarchyError> {
     // Verify the item exists.
     let start = query::get_item(conn, item_id, false)
         .with_context(|| format!("get_item '{item_id}'"))?
@@ -371,10 +365,7 @@ pub fn validate_reparent(
 ///
 /// Returns `HierarchyError::ItemNotFound` if not found,
 /// `HierarchyError::NotAGoal` if found but not a goal.
-fn require_goal(
-    conn: &Connection,
-    item_id: &str,
-) -> Result<QueryItem, HierarchyError> {
+fn require_goal(conn: &Connection, item_id: &str) -> Result<QueryItem, HierarchyError> {
     let item = query::get_item(conn, item_id, false)
         .with_context(|| format!("get_item '{item_id}'"))?
         .ok_or_else(|| HierarchyError::ItemNotFound(item_id.to_string()))?;
@@ -466,13 +457,7 @@ mod tests {
     }
 
     /// Insert an item with minimal required fields.
-    fn insert_item(
-        conn: &Connection,
-        id: &str,
-        kind: &str,
-        state: &str,
-        parent_id: Option<&str>,
-    ) {
+    fn insert_item(conn: &Connection, id: &str, kind: &str, state: &str, parent_id: Option<&str>) {
         conn.execute(
             "INSERT INTO items \
              (item_id, title, kind, state, urgency, is_deleted, search_labels, \

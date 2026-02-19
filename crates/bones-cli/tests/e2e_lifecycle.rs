@@ -68,9 +68,7 @@ fn create_item_kind(dir: &Path, title: &str, kind: &str) -> String {
 /// Create an item as a child of a parent.
 fn create_child(dir: &Path, title: &str, parent_id: &str) -> String {
     let output = bn_cmd(dir)
-        .args([
-            "create", "--title", title, "--parent", parent_id, "--json",
-        ])
+        .args(["create", "--title", title, "--parent", parent_id, "--json"])
         .output()
         .expect("create child should not crash");
     assert!(
@@ -101,10 +99,7 @@ fn show_item_json(dir: &Path, id: &str) -> Value {
 /// Some commands (tag, untag, move) don't inline-project to SQLite, so we need
 /// this after those operations.
 fn rebuild(dir: &Path) {
-    bn_cmd(dir)
-        .args(["rebuild"])
-        .assert()
-        .success();
+    bn_cmd(dir).args(["rebuild"]).assert().success();
 }
 
 /// Run `bn list --json` and return the parsed JSON array.
@@ -190,19 +185,13 @@ fn full_lifecycle_create_do_done() {
     assert_eq!(item["state"], "open");
 
     // Do
-    bn_cmd(dir.path())
-        .args(["do", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["do", &id]).assert().success();
 
     let item = show_item_json(dir.path(), &id);
     assert_eq!(item["state"], "doing");
 
     // Done
-    bn_cmd(dir.path())
-        .args(["done", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["done", &id]).assert().success();
 
     let item = show_item_json(dir.path(), &id);
     assert_eq!(item["state"], "done");
@@ -277,10 +266,7 @@ fn skip_do_direct_open_to_done() {
     let id = create_item(dir.path(), "Direct Done Test");
 
     // open -> done directly (should work)
-    bn_cmd(dir.path())
-        .args(["done", &id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["done", &id]).assert().success();
 
     let item = show_item_json(dir.path(), &id);
     assert_eq!(item["state"], "done");
@@ -327,7 +313,10 @@ fn goal_auto_complete_when_all_children_done() {
         .assert()
         .success();
     let goal = show_item_json(dir.path(), &goal_id);
-    assert_eq!(goal["state"], "open", "goal should remain open with 1 child pending");
+    assert_eq!(
+        goal["state"], "open",
+        "goal should remain open with 1 child pending"
+    );
 
     // Complete second child — goal should auto-complete
     bn_cmd(dir.path())
@@ -335,7 +324,10 @@ fn goal_auto_complete_when_all_children_done() {
         .assert()
         .success();
     let goal = show_item_json(dir.path(), &goal_id);
-    assert_eq!(goal["state"], "done", "goal should auto-complete when all children are done");
+    assert_eq!(
+        goal["state"], "done",
+        "goal should auto-complete when all children are done"
+    );
 }
 
 #[test]
@@ -352,7 +344,10 @@ fn goal_auto_complete_single_child() {
         .success();
 
     let goal = show_item_json(dir.path(), &goal_id);
-    assert_eq!(goal["state"], "done", "goal should auto-close on single child done");
+    assert_eq!(
+        goal["state"], "done",
+        "goal should auto-close on single child done"
+    );
 }
 
 #[test]
@@ -545,7 +540,10 @@ fn create_json_contract() {
     assert!(json["kind"].is_string(), "kind must be a string");
     assert!(json["state"].is_string(), "state must be a string");
     assert!(json["agent"].is_string(), "agent must be a string");
-    assert!(json["event_hash"].is_string(), "event_hash must be a string");
+    assert!(
+        json["event_hash"].is_string(),
+        "event_hash must be a string"
+    );
 
     // Values
     assert_eq!(json["title"], "Contract Test");
@@ -658,10 +656,7 @@ fn done_already_done_item_fails() {
     bn_cmd(dir.path()).args(["done", &id]).assert().success();
 
     // Second done should fail
-    bn_cmd(dir.path())
-        .args(["done", &id])
-        .assert()
-        .failure();
+    bn_cmd(dir.path()).args(["done", &id]).assert().failure();
 }
 
 #[test]
@@ -673,10 +668,7 @@ fn do_already_done_item_fails() {
     bn_cmd(dir.path()).args(["done", &id]).assert().success();
 
     // do on a done item should fail
-    bn_cmd(dir.path())
-        .args(["do", &id])
-        .assert()
-        .failure();
+    bn_cmd(dir.path()).args(["do", &id]).assert().failure();
 }
 
 #[test]
@@ -794,10 +786,7 @@ fn do_with_partial_id() {
     let id = create_item(dir.path(), "Partial Do Test");
     let short_id = id.strip_prefix("bn-").unwrap_or(&id);
 
-    bn_cmd(dir.path())
-        .args(["do", short_id])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["do", short_id]).assert().success();
 
     let item = show_item_json(dir.path(), &id);
     assert_eq!(item["state"], "doing");
@@ -888,8 +877,5 @@ fn list_empty_project_human_output_succeeds() {
     let dir = TempDir::new().unwrap();
     init_project(dir.path());
 
-    bn_cmd(dir.path())
-        .args(["list"])
-        .assert()
-        .success();
+    bn_cmd(dir.path()).args(["list"]).assert().success();
 }

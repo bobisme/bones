@@ -29,9 +29,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use petgraph::{
+    Direction,
     graph::NodeIndex,
     visit::{IntoNodeIdentifiers, NodeIndexable},
-    Direction,
 };
 use tracing::instrument;
 
@@ -274,10 +274,7 @@ mod tests {
         let ng = make_normalized(&[("A", "B"), ("A", "C"), ("B", "D"), ("C", "D")]);
         let bc = betweenness_centrality(&ng);
 
-        assert!(
-            (bc["A"] - 0.0).abs() < 1e-10,
-            "A source betweenness = 0"
-        );
+        assert!((bc["A"] - 0.0).abs() < 1e-10, "A source betweenness = 0");
         assert!(
             (bc["B"] - 0.5).abs() < 1e-10,
             "B on half of A→D shortest paths: got {}",
@@ -288,10 +285,7 @@ mod tests {
             "C on half of A→D shortest paths: got {}",
             bc["C"]
         );
-        assert!(
-            (bc["D"] - 0.0).abs() < 1e-10,
-            "D sink betweenness = 0"
-        );
+        assert!((bc["D"] - 0.0).abs() < 1e-10, "D sink betweenness = 0");
     }
 
     #[test]
@@ -302,10 +296,7 @@ mod tests {
         let ng = make_normalized(&[("A", "B"), ("B", "C"), ("C", "D")]);
         let bc = betweenness_centrality(&ng);
 
-        assert!(
-            (bc["A"] - 0.0).abs() < 1e-10,
-            "A betweenness = 0"
-        );
+        assert!((bc["A"] - 0.0).abs() < 1e-10, "A betweenness = 0");
         assert!(
             (bc["B"] - 2.0).abs() < 1e-10,
             "B betweenness = 2.0, got {}",
@@ -316,10 +307,7 @@ mod tests {
             "C betweenness = 2.0, got {}",
             bc["C"]
         );
-        assert!(
-            (bc["D"] - 0.0).abs() < 1e-10,
-            "D betweenness = 0"
-        );
+        assert!((bc["D"] - 0.0).abs() < 1e-10, "D betweenness = 0");
     }
 
     #[test]

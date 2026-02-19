@@ -358,10 +358,7 @@ fn parse_error_to_validation(err: ParseError, line_num: usize, raw: &str) -> Val
             ValidationErrorKind::InvalidAgent,
             format!("invalid agent field: '{raw_agent}'"),
         ),
-        ParseError::EmptyItc => (
-            ValidationErrorKind::EmptyItc,
-            "itc field is empty".into(),
-        ),
+        ParseError::EmptyItc => (ValidationErrorKind::EmptyItc, "itc field is empty".into()),
         ParseError::InvalidParentHash(raw_hash) => (
             ValidationErrorKind::InvalidParentHash,
             format!("invalid parent hash: '{raw_hash}'"),
@@ -417,11 +414,7 @@ fn truncate_line(line: &str) -> String {
 }
 
 /// Check shard file against its manifest.
-fn check_manifest(
-    content_bytes: &[u8],
-    manifest: &ShardManifest,
-    report: &mut ValidationReport,
-) {
+fn check_manifest(content_bytes: &[u8], manifest: &ShardManifest, report: &mut ValidationReport) {
     // Check byte length
     let byte_len = content_bytes.len() as u64;
     if byte_len != manifest.byte_len {
@@ -676,7 +669,8 @@ mod tests {
 
     #[test]
     fn validate_event_bad_parent_hash() {
-        let line = "1000\tagent\titc:A\tnotahash\titem.comment\tbn-a7x\t{\"body\":\"hi\"}\tblake3:abc";
+        let line =
+            "1000\tagent\titc:A\tnotahash\titem.comment\tbn-a7x\t{\"body\":\"hi\"}\tblake3:abc";
         let err = validate_event(line, 1).unwrap_err();
         assert_eq!(err.kind, ValidationErrorKind::InvalidParentHash);
     }
@@ -739,9 +733,7 @@ mod tests {
             "bn-a7x",
             &sample_comment_json(),
         );
-        let content = format!(
-            "# header\n{valid_line}\nbad\tline\twith\twrong\tfield\tcount\n"
-        );
+        let content = format!("# header\n{valid_line}\nbad\tline\twith\twrong\tfield\tcount\n");
         let path = write_shard_file(tmp.path(), "2026-01.events", &content);
 
         let report = validate_shard(&path, None);
@@ -989,9 +981,7 @@ mod tests {
             "bn-a7x",
             &sample_comment_json(),
         );
-        let content = format!(
-            "# header\n{valid_line}\nbad1\nbad2\tbad\n{valid_line}\n"
-        );
+        let content = format!("# header\n{valid_line}\nbad1\nbad2\tbad\n{valid_line}\n");
         let path = write_shard_file(tmp.path(), "2026-01.events", &content);
 
         let report = validate_shard(&path, None);

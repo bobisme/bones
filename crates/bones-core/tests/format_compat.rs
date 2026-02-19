@@ -23,14 +23,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use bones_core::event::Event;
 use bones_core::event::data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DeleteData, EventData,
     LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
 };
 use bones_core::event::types::EventType;
 use bones_core::event::writer::write_event;
-use bones_core::event::{parse_line, parse_lines, ParseError, ParsedLine, detect_version};
-use bones_core::event::Event;
+use bones_core::event::{ParseError, ParsedLine, detect_version, parse_line, parse_lines};
 use bones_core::model::item::{Kind, Size, State, Urgency};
 use bones_core::model::item_id::ItemId;
 
@@ -414,8 +414,7 @@ fn v1_events_parse_with_current_parser() {
     // Write the fixture if it doesn't exist (first run only).
     // Use the generated content for verification regardless of file state.
     if !path.exists() {
-        std::fs::create_dir_all(path.parent().unwrap())
-            .expect("create fixtures directory");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create fixtures directory");
         // Best-effort write: if two test threads race here, both produce the
         // same deterministic content, so a partial overwrite is harmless.
         let _ = std::fs::write(&path, &generated_content);
@@ -424,8 +423,7 @@ fn v1_events_parse_with_current_parser() {
 
     // Read from file if available; fall back to generated content.
     // This avoids a race condition on first run when the file is being written.
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| generated_content.clone());
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|_| generated_content.clone());
 
     // The file must begin with the v1 header.
     let first_line = content.lines().next().unwrap_or("");
@@ -530,9 +528,8 @@ fn unknown_event_type_warns_not_errors() {
     // Construct a raw TSJSON line with a future event type.
     // We must compute the hash ourselves since write_event only handles known types.
     let unknown_data_json = canonicalize_json(&serde_json::json!({"action":"future_action"}));
-    let hash_input = format!(
-        "2000\ttest-agent\titc:AQ\t\titem.future_v2_type\tbn-a7x\t{unknown_data_json}\n"
-    );
+    let hash_input =
+        format!("2000\ttest-agent\titc:AQ\t\titem.future_v2_type\tbn-a7x\t{unknown_data_json}\n");
     let hash = blake3::hash(hash_input.as_bytes());
     let unknown_line = format!(
         "2000\ttest-agent\titc:AQ\t\titem.future_v2_type\tbn-a7x\t{unknown_data_json}\tblake3:{}",
@@ -561,13 +558,12 @@ fn unknown_event_type_warns_not_errors() {
     let known2_line = write_event(&mut known2).expect("write known2");
 
     // Interleave known and unknown event types.
-    let input = format!(
-        "# bones event log v1\n{known_line}{unknown_line}\n{unknown_line2}\n{known2_line}"
-    );
+    let input =
+        format!("# bones event log v1\n{known_line}{unknown_line}\n{unknown_line2}\n{known2_line}");
 
     // parse_lines must succeed: unknown types are skipped, not errors.
-    let events = parse_lines(&input)
-        .expect("unknown event types must be skipped, not cause errors");
+    let events =
+        parse_lines(&input).expect("unknown event types must be skipped, not cause errors");
 
     // Only the 2 known events should be returned; the 2 unknown lines skipped.
     assert_eq!(
@@ -582,8 +578,8 @@ fn unknown_event_type_warns_not_errors() {
 
     // Single-line parse of an unknown type also errors (parse_line is strict).
     // Only parse_lines does the skip-and-warn; parse_line returns the error.
-    let single_err = parse_line(&unknown_line)
-        .expect_err("parse_line should error on unknown event type");
+    let single_err =
+        parse_line(&unknown_line).expect_err("parse_line should error on unknown event type");
     assert!(
         matches!(single_err, ParseError::InvalidEventType(_)),
         "expected InvalidEventType, got {single_err:?}"
@@ -633,8 +629,8 @@ fn unknown_json_fields_ignored() {
     );
 
     // Must parse without error.
-    let parsed = parse_line(&line)
-        .expect("event with unknown JSON fields must parse without error");
+    let parsed =
+        parse_line(&line).expect("event with unknown JSON fields must parse without error");
 
     let event = match parsed {
         ParsedLine::Event(e) => *e,
@@ -676,8 +672,7 @@ fn unknown_json_fields_ignored() {
 
     // Verify the same behavior works via parse_lines.
     let input = format!("# bones event log v1\n{line}\n");
-    let events = parse_lines(&input)
-        .expect("parse_lines with extra JSON fields should succeed");
+    let events = parse_lines(&input).expect("parse_lines with extra JSON fields should succeed");
     assert_eq!(events.len(), 1);
     // Confirm the extra fields survive parse_lines too.
     match &events[0].data {
@@ -698,17 +693,15 @@ fn unknown_json_fields_ignored() {
         "model_version": "gpt-5-turbo"
     });
     let comment_canonical = canonicalize_json(&comment_with_extras);
-    let comment_hash_input = format!(
-        "6000\ttest-agent\titc:AQ\t\titem.comment\tbn-a7x\t{comment_canonical}\n"
-    );
+    let comment_hash_input =
+        format!("6000\ttest-agent\titc:AQ\t\titem.comment\tbn-a7x\t{comment_canonical}\n");
     let comment_hash = blake3::hash(comment_hash_input.as_bytes());
     let comment_line = format!(
         "6000\ttest-agent\titc:AQ\t\titem.comment\tbn-a7x\t{comment_canonical}\tblake3:{}",
         comment_hash.to_hex()
     );
 
-    let parsed_comment = parse_line(&comment_line)
-        .expect("comment with extra fields must parse");
+    let parsed_comment = parse_line(&comment_line).expect("comment with extra fields must parse");
     match parsed_comment {
         ParsedLine::Event(e) => match &e.data {
             EventData::Comment(d) => {
@@ -769,8 +762,8 @@ fn future_version_produces_upgrade_error() {
     }
 
     // --- parse_lines with v2 header ---
-    let (line_no, err) = parse_lines("# bones event log v2\n")
-        .expect_err("future version should fail");
+    let (line_no, err) =
+        parse_lines("# bones event log v2\n").expect_err("future version should fail");
 
     // Error must be on line 1 (the header line).
     assert_eq!(line_no, 1, "version error should be on line 1");
@@ -789,7 +782,10 @@ fn future_version_produces_upgrade_error() {
     );
     let lower = msg.to_lowercase();
     assert!(
-        lower.contains("upgrade") || lower.contains("install") || lower.contains("newer") || lower.contains("mismatch"),
+        lower.contains("upgrade")
+            || lower.contains("install")
+            || lower.contains("newer")
+            || lower.contains("mismatch"),
         "VersionMismatch message should guide user: {msg}"
     );
 
@@ -820,23 +816,20 @@ fn missing_header_produces_clear_error() {
         "",
         "not a valid header",
         "# this is not the bones header",
-        "bones event log v1", // missing #
-        "# bones event log",  // missing version number
-        "# bones event log v", // version number is empty
-        "# bones event log vX", // version number is not numeric
-        "# BONES EVENT LOG V1", // wrong case
+        "bones event log v1",    // missing #
+        "# bones event log",     // missing version number
+        "# bones event log v",   // version number is empty
+        "# bones event log vX",  // version number is not numeric
+        "# BONES EVENT LOG V1",  // wrong case
         "## bones event log v1", // double hash
     ];
 
     for header in bad_headers {
-        let err = detect_version(header)
-            .expect_err(&format!("'{header}' should fail version detection"));
+        let err =
+            detect_version(header).expect_err(&format!("'{header}' should fail version detection"));
 
         // Error must be non-empty and descriptive.
-        assert!(
-            !err.is_empty(),
-            "error for '{header}' must be non-empty"
-        );
+        assert!(!err.is_empty(), "error for '{header}' must be non-empty");
 
         // Should mention what was found or expected, not just "error".
         // (At minimum, the error must be human-readable.)
@@ -858,8 +851,8 @@ fn missing_header_produces_clear_error() {
 
     // A file where the first line looks like a header but has a wrong format
     // should produce a clear error when detect_version is called directly.
-    let err = detect_version("# bones event log vNaN")
-        .expect_err("non-numeric version should fail");
+    let err =
+        detect_version("# bones event log vNaN").expect_err("non-numeric version should fail");
     assert!(!err.is_empty());
     assert!(
         err.len() > 10,
@@ -867,9 +860,11 @@ fn missing_header_produces_clear_error() {
     );
 
     // An empty file's "first line" is an empty string — should fail clearly.
-    let err = detect_version("")
-        .expect_err("empty header should fail");
-    assert!(!err.is_empty(), "empty header should produce descriptive error");
+    let err = detect_version("").expect_err("empty header should fail");
+    assert!(
+        !err.is_empty(),
+        "empty header should produce descriptive error"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -891,18 +886,15 @@ fn v1_roundtrip_through_current_writer() {
 
     // Write the fixture if it doesn't exist (first run only, best-effort).
     if !path.exists() {
-        std::fs::create_dir_all(path.parent().unwrap())
-            .expect("create fixtures directory");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create fixtures directory");
         let _ = std::fs::write(&path, &generated_content);
     }
 
     // Read from file if available; fall back to the generated content.
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| generated_content.clone());
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|_| generated_content.clone());
 
     // Parse all v1 events.
-    let v1_events = parse_lines(&content)
-        .expect("v1 events must parse for roundtrip test");
+    let v1_events = parse_lines(&content).expect("v1 events must parse for roundtrip test");
     assert!(!v1_events.is_empty(), "no events to round-trip");
 
     for (i, original) in v1_events.iter().enumerate() {
@@ -913,8 +905,8 @@ fn v1_roundtrip_through_current_writer() {
 
         // Parse the written line.
         let trimmed = written_line.trim_end_matches('\n');
-        let reparsed = parse_line(trimmed)
-            .unwrap_or_else(|e| panic!("re-parse of v1 event {i} failed: {e}"));
+        let reparsed =
+            parse_line(trimmed).unwrap_or_else(|e| panic!("re-parse of v1 event {i} failed: {e}"));
 
         let reparsed_event = match reparsed {
             ParsedLine::Event(e) => *e,
@@ -925,43 +917,35 @@ fn v1_roundtrip_through_current_writer() {
         // (The hash is recomputed by write_event, so it will be the same
         // deterministic value — we verify it matches.)
         assert_eq!(
-            original.wall_ts_us,
-            reparsed_event.wall_ts_us,
+            original.wall_ts_us, reparsed_event.wall_ts_us,
             "v1 event {i}: wall_ts_us mismatch after roundtrip"
         );
         assert_eq!(
-            original.agent,
-            reparsed_event.agent,
+            original.agent, reparsed_event.agent,
             "v1 event {i}: agent mismatch after roundtrip"
         );
         assert_eq!(
-            original.itc,
-            reparsed_event.itc,
+            original.itc, reparsed_event.itc,
             "v1 event {i}: itc mismatch after roundtrip"
         );
         assert_eq!(
-            original.parents,
-            reparsed_event.parents,
+            original.parents, reparsed_event.parents,
             "v1 event {i}: parents mismatch after roundtrip"
         );
         assert_eq!(
-            original.event_type,
-            reparsed_event.event_type,
+            original.event_type, reparsed_event.event_type,
             "v1 event {i}: event_type mismatch after roundtrip"
         );
         assert_eq!(
-            original.item_id,
-            reparsed_event.item_id,
+            original.item_id, reparsed_event.item_id,
             "v1 event {i}: item_id mismatch after roundtrip"
         );
         assert_eq!(
-            original.data,
-            reparsed_event.data,
+            original.data, reparsed_event.data,
             "v1 event {i}: data mismatch after roundtrip"
         );
         assert_eq!(
-            original.event_hash,
-            reparsed_event.event_hash,
+            original.event_hash, reparsed_event.event_hash,
             "v1 event {i}: event_hash mismatch after roundtrip (hash not deterministic?)"
         );
     }
@@ -972,13 +956,11 @@ fn v1_roundtrip_through_current_writer() {
     all_written.push_str("# bones event log v1\n");
     for original in &v1_events {
         let mut event_copy = original.clone();
-        let line = write_event(&mut event_copy)
-            .expect("write_event in bulk roundtrip");
+        let line = write_event(&mut event_copy).expect("write_event in bulk roundtrip");
         all_written.push_str(&line);
     }
 
-    let reparsed_all = parse_lines(&all_written)
-        .expect("bulk roundtrip should parse cleanly");
+    let reparsed_all = parse_lines(&all_written).expect("bulk roundtrip should parse cleanly");
     assert_eq!(
         v1_events.len(),
         reparsed_all.len(),

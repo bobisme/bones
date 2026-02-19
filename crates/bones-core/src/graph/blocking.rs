@@ -51,10 +51,7 @@
 //! println!("Ready items: {ready:?}");
 //! ```
 
-#![allow(
-    clippy::must_use_candidate,
-    clippy::module_name_repetitions,
-)]
+#![allow(clippy::must_use_candidate, clippy::module_name_repetitions)]
 
 use std::collections::{HashMap, HashSet};
 
@@ -108,14 +105,12 @@ impl BlockingGraph {
         let mut related_to: HashMap<String, HashSet<String>> = HashMap::new();
 
         for (item_id, state) in states {
-            let blockers: HashSet<String> =
-                state.blocked_by_ids().into_iter().cloned().collect();
+            let blockers: HashSet<String> = state.blocked_by_ids().into_iter().cloned().collect();
             if !blockers.is_empty() {
                 blocked_by.insert(item_id.clone(), blockers);
             }
 
-            let related: HashSet<String> =
-                state.related_to_ids().into_iter().cloned().collect();
+            let related: HashSet<String> = state.related_to_ids().into_iter().cloned().collect();
             if !related.is_empty() {
                 related_to.insert(item_id.clone(), related);
             }
@@ -244,11 +239,11 @@ pub fn ready_items(states: &HashMap<String, WorkItemState>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::itc::Stamp;
     use crate::crdt::item_state::WorkItemState;
+    use crate::event::Event;
     use crate::event::data::{EventData, LinkData, UnlinkData};
     use crate::event::types::EventType;
-    use crate::event::Event;
-    use crate::clock::itc::Stamp;
     use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
 
@@ -567,10 +562,7 @@ mod tests {
     fn cross_goal_blocker_not_in_states_still_blocks() {
         // The blocker may not be in the states map (e.g., different shard).
         let mut states = HashMap::new();
-        states.insert(
-            "bn-task".to_string(),
-            state_with_blockers(&["bn-external"]),
-        );
+        states.insert("bn-task".to_string(), state_with_blockers(&["bn-external"]));
         // bn-external is NOT in states.
 
         let graph = BlockingGraph::from_states(&states);

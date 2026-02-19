@@ -1178,10 +1178,7 @@ mod tests {
             "expected VersionMismatch, got {err:?}"
         );
         let msg = err.to_string();
-        assert!(
-            msg.contains("999"),
-            "error should mention version: {msg}"
-        );
+        assert!(msg.contains("999"), "error should mention version: {msg}");
     }
 
     // -----------------------------------------------------------------------
@@ -1208,9 +1205,8 @@ mod tests {
         let canonical_unknown = serde_json::from_str::<serde_json::Value>(unknown_data)
             .map(|v| canonicalize_json(&v))
             .unwrap();
-        let hash_input = format!(
-            "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\n"
-        );
+        let hash_input =
+            format!("2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\n");
         let hash = blake3::hash(hash_input.as_bytes());
         let unknown_line = format!(
             "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\tblake3:{}",
@@ -1252,8 +1248,7 @@ mod tests {
         let canonical_u =
             canonicalize_json(&serde_json::from_str::<serde_json::Value>(unknown_data).unwrap());
         let mk_unknown = |ts: i64, et: &str| -> String {
-            let hash_input =
-                format!("{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\n");
+            let hash_input = format!("{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\n");
             let hash = blake3::hash(hash_input.as_bytes());
             format!(
                 "{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\tblake3:{}",
@@ -1263,9 +1258,7 @@ mod tests {
         let unknown1 = mk_unknown(2_000, "item.new_future_type");
         let unknown2 = mk_unknown(2_500, "item.another_future_type");
 
-        let input = format!(
-            "# bones event log v1\n{known1}\n{unknown1}\n{unknown2}\n{known2}\n"
-        );
+        let input = format!("# bones event log v1\n{known1}\n{unknown1}\n{unknown2}\n{known2}\n");
         let events = parse_lines(&input).expect("should succeed skipping unknowns");
         assert_eq!(events.len(), 2, "only known events returned");
         assert_eq!(events[0].wall_ts_us, 1_000);

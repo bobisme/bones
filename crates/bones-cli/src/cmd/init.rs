@@ -31,7 +31,7 @@ const CONFIG_TOML: &str = "[goals]\n\
     [archive]\n\
     auto_days = 30\n";
 
-const GITIGNORE: &str = "bones.db\nfeedback.jsonl\ncache/\n";
+const GITIGNORE: &str = "bones.db\nfeedback.jsonl\nagent_profiles/\ncache/\n";
 
 const SHARD_HEADER: &str =
     "# bones event log v1\n# fields: timestamp\tagent\ttype\titem_id\tdata\n";
@@ -44,7 +44,7 @@ const SHARD_HEADER: &str =
 ///     YYYY-MM.events    (active shard with header comment)
 ///     current.events    (symlink -> YYYY-MM.events)
 ///   config.toml         (default project config template)
-///   .gitignore          (bones.db, feedback.jsonl, cache/)
+///   .gitignore          (bones.db, feedback.jsonl, agent_profiles/, cache/)
 /// ```
 ///
 /// # Errors
@@ -266,6 +266,10 @@ mod tests {
         assert!(
             content.contains("feedback.jsonl"),
             "must ignore feedback.jsonl"
+        );
+        assert!(
+            content.contains("agent_profiles/"),
+            "must ignore agent_profiles/"
         );
         assert!(content.contains("cache/"), "must ignore cache/");
 

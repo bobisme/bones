@@ -38,7 +38,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use petgraph::{algo::toposort, graph::NodeIndex, visit::EdgeRef, Direction};
+use petgraph::{Direction, algo::toposort, graph::NodeIndex, visit::EdgeRef};
 
 use crate::graph::normalize::NormalizedGraph;
 
@@ -155,7 +155,10 @@ pub fn compute_critical_path(ng: &NormalizedGraph) -> CriticalPathResult {
         let min_succ_start = condensed
             .edges_directed(v, Direction::Outgoing)
             .map(|e| {
-                let lf = latest_finish.get(&e.target()).copied().unwrap_or(project_finish);
+                let lf = latest_finish
+                    .get(&e.target())
+                    .copied()
+                    .unwrap_or(project_finish);
                 lf - 1 // latest_start of successor = latest_finish[succ] - 1
             })
             .min()
@@ -372,7 +375,10 @@ mod tests {
 
         // All slack should be zero
         for item in ["A", "B", "C"] {
-            assert_eq!(result.item_timings[item].slack, 0, "slack({item}) should be 0");
+            assert_eq!(
+                result.item_timings[item].slack, 0,
+                "slack({item}) should be 0"
+            );
         }
 
         // Critical path should be in dependency order A→B→C
@@ -428,13 +434,7 @@ mod tests {
         // A → B → C → D (long branch, length 4)
         // A → E → D      (short branch via E, length 3)
         // E has slack 1 (can start 1 step later than earliest)
-        let ng = make_normalized(&[
-            ("A", "B"),
-            ("B", "C"),
-            ("C", "D"),
-            ("A", "E"),
-            ("E", "D"),
-        ]);
+        let ng = make_normalized(&[("A", "B"), ("B", "C"), ("C", "D"), ("A", "E"), ("E", "D")]);
         let result = compute_critical_path(&ng);
 
         // Project length should be 4 (A→B→C→D)
@@ -455,7 +455,10 @@ mod tests {
         );
 
         // E should NOT be in critical_items
-        assert!(!result.critical_items.contains("E"), "E not on critical path");
+        assert!(
+            !result.critical_items.contains("E"),
+            "E not on critical path"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -506,26 +509,13 @@ mod tests {
 
     #[test]
     fn timing_invariants_hold_for_parallel_branches() {
-        let ng = make_normalized(&[
-            ("A", "B"),
-            ("B", "C"),
-            ("C", "D"),
-            ("A", "E"),
-            ("E", "D"),
-        ]);
+        let ng = make_normalized(&[("A", "B"), ("B", "C"), ("C", "D"), ("A", "E"), ("E", "D")]);
         let result = compute_critical_path(&ng);
 
         for (id, t) in &result.item_timings {
-            assert_eq!(
-                t.earliest_finish,
-                t.earliest_start + 1,
-                "{id}: ef = es + 1"
-            );
+            assert_eq!(t.earliest_finish, t.earliest_start + 1, "{id}: ef = es + 1");
             assert_eq!(t.latest_finish, t.latest_start + 1, "{id}: lf = ls + 1");
-            assert!(
-                t.latest_start >= t.earliest_start,
-                "{id}: ls >= es"
-            );
+            assert!(t.latest_start >= t.earliest_start, "{id}: ls >= es");
         }
     }
 

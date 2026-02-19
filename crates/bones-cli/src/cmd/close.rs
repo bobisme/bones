@@ -177,7 +177,11 @@ mod tests {
             reason: Some("All done".to_string()),
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "close from doing failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "close from doing failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
@@ -194,10 +198,12 @@ mod tests {
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("cannot transition"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot transition")
+        );
     }
 
     #[test]
@@ -208,7 +214,11 @@ mod tests {
             reason: None,
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "close via partial ID failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "close via partial ID failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();

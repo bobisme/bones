@@ -112,8 +112,8 @@ pub fn incremental_apply(
     };
 
     // Read cursor
-    let (byte_offset, last_hash) = query::get_projection_cursor(&conn)
-        .context("read projection cursor")?;
+    let (byte_offset, last_hash) =
+        query::get_projection_cursor(&conn).context("read projection cursor")?;
 
     // Fresh database — no events have been applied yet → full rebuild
     if byte_offset == 0 && last_hash.is_none() {
@@ -170,10 +170,9 @@ pub fn incremental_apply(
     let new_content = &content[offset..];
 
     // Parse only the new events
-    let events = parse_lines(new_content)
-        .map_err(|(line_num, e)| {
-            anyhow::anyhow!("parse error at line {line_num} (offset {offset}): {e}")
-        })?;
+    let events = parse_lines(new_content).map_err(|(line_num, e)| {
+        anyhow::anyhow!("parse error at line {line_num} (offset {offset}): {e}")
+    })?;
 
     if events.is_empty() {
         // Only comments/blanks after the cursor — still update offset
@@ -191,8 +190,7 @@ pub fn incremental_apply(
     }
 
     // Ensure tracking table exists (needed for dedup)
-    project::ensure_tracking_table(&conn)
-        .context("ensure projected_events tracking table")?;
+    project::ensure_tracking_table(&conn).context("ensure projected_events tracking table")?;
 
     // Project the new events
     let projector = project::Projector::new(&conn);
@@ -233,8 +231,7 @@ pub fn incremental_apply(
 ///
 /// Returns an error if the database query fails.
 pub fn read_hwm(db: &Connection) -> Result<Option<EventHash>> {
-    let (_offset, hash) = query::get_projection_cursor(db)
-        .context("read high-water mark")?;
+    let (_offset, hash) = query::get_projection_cursor(db).context("read high-water mark")?;
     Ok(hash.map(EventHash))
 }
 
@@ -245,10 +242,9 @@ pub fn read_hwm(db: &Connection) -> Result<Option<EventHash>> {
 /// Returns an error if the database update fails.
 pub fn write_hwm(db: &Connection, hwm: &EventHash) -> Result<()> {
     // Preserve the existing offset, just update the hash
-    let (offset, _) = query::get_projection_cursor(db)
-        .context("read current cursor for hwm update")?;
-    query::update_projection_cursor(db, offset, Some(&hwm.0))
-        .context("write high-water mark")?;
+    let (offset, _) =
+        query::get_projection_cursor(db).context("read current cursor for hwm update")?;
+    query::update_projection_cursor(db, offset, Some(&hwm.0)).context("write high-water mark")?;
     Ok(())
 }
 
@@ -261,10 +257,7 @@ pub fn write_hwm(db: &Connection, hwm: &EventHash) -> Result<()> {
 ///
 /// Returns `Ok(())` if incremental is safe, `Err(reason)` with a human-readable
 /// reason string if a full rebuild is needed.
-pub fn check_incremental_safety(
-    db: &Connection,
-    events_dir: &Path,
-) -> Result<(), String> {
+pub fn check_incremental_safety(db: &Connection, events_dir: &Path) -> Result<(), String> {
     // 1. Schema version check
     let schema_version = migrations::current_schema_version(db)
         .map_err(|e| format!("failed to read schema version: {e}"))?;
@@ -305,14 +298,15 @@ pub fn check_incremental_safety(
                             return Err(format!(
                                 "sealed shard {}-{:02} size mismatch: \
                                  manifest says {} bytes, file is {} bytes",
-                                year, month, manifest.byte_len, meta.len()
+                                year,
+                                month,
+                                manifest.byte_len,
+                                meta.len()
                             ));
                         }
                     }
                     Err(e) => {
-                        return Err(format!(
-                            "cannot stat sealed shard {year}-{month:02}: {e}"
-                        ));
+                        return Err(format!("cannot stat sealed shard {year}-{month:02}: {e}"));
                     }
                 }
             }
@@ -448,10 +442,13 @@ mod tests {
         let report = incremental_apply(&events_dir, &db_path, false).unwrap();
         assert!(report.full_rebuild_triggered);
         assert!(
-            report.full_rebuild_reason.as_deref()
+            report
+                .full_rebuild_reason
+                .as_deref()
                 .unwrap()
                 .contains("missing"),
-            "reason: {:?}", report.full_rebuild_reason
+            "reason: {:?}",
+            report.full_rebuild_reason
         );
     }
 
@@ -641,10 +638,13 @@ mod tests {
         let report = incremental_apply(&events_dir, &db_path, false).unwrap();
         assert!(report.full_rebuild_triggered);
         assert!(
-            report.full_rebuild_reason.as_deref()
+            report
+                .full_rebuild_reason
+                .as_deref()
                 .unwrap()
                 .contains("schema version"),
-            "reason: {:?}", report.full_rebuild_reason
+            "reason: {:?}",
+            report.full_rebuild_reason
         );
     }
 

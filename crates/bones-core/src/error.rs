@@ -153,10 +153,10 @@ impl ErrorCode {
             Self::ConfigInvalidValue => {
                 Some("Check .bones/config.toml for the invalid key and correct it.")
             }
-            Self::ModelNotFound => {
-                Some("Install or configure the semantic model before search.")
+            Self::ModelNotFound => Some("Install or configure the semantic model before search."),
+            Self::ItemNotFound => {
+                Some("Check the item ID and try again. Use `bn list` to find valid IDs.")
             }
-            Self::ItemNotFound => Some("Check the item ID and try again. Use `bn list` to find valid IDs."),
             Self::InvalidStateTransition => {
                 Some("Follow valid transitions: open -> doing -> done -> archived.")
             }
@@ -187,9 +187,7 @@ impl ErrorCode {
                 Some("Reduce the event payload size or split into smaller events.")
             }
             Self::EventFileWriteFailed => Some("Check disk space and write permissions."),
-            Self::LockContention => {
-                Some("Retry after the other `bn` process releases its lock.")
-            }
+            Self::LockContention => Some("Retry after the other `bn` process releases its lock."),
             Self::LockAlreadyHeld => {
                 Some("Another process holds the lock. Wait or check for stale lock files.")
             }
@@ -207,19 +205,17 @@ impl ErrorCode {
             Self::DbSchemaVersion => {
                 Some("Run `bn rebuild` to migrate to the current schema version.")
             }
-            Self::DbQueryFailed => {
-                Some("Run `bn rebuild` to repair the database. If the error persists, report a bug.")
-            }
-            Self::DbRebuildFailed => {
-                Some("Check disk space and permissions. Try deleting .bones/db.sqlite and rebuilding.")
-            }
+            Self::DbQueryFailed => Some(
+                "Run `bn rebuild` to repair the database. If the error persists, report a bug.",
+            ),
+            Self::DbRebuildFailed => Some(
+                "Check disk space and permissions. Try deleting .bones/db.sqlite and rebuilding.",
+            ),
             Self::FtsIndexMissing => Some("Run `bn rebuild` to create the FTS index."),
             Self::SemanticModelLoadFailed => {
                 Some("Verify model files and runtime dependencies are available.")
             }
-            Self::InternalUnexpected => {
-                Some("Retry once. If persistent, report a bug with logs.")
-            }
+            Self::InternalUnexpected => Some("Retry once. If persistent, report a bug with logs."),
         }
     }
 }
@@ -324,7 +320,9 @@ pub struct JsonError {
 #[derive(Debug, thiserror::Error)]
 pub enum EventError {
     /// A line in the event file could not be parsed.
-    #[error("Error: Failed to parse event at line {line_num}\nCause: {reason}\nFix: Check the event file for malformed lines. Run `bn verify` for details.")]
+    #[error(
+        "Error: Failed to parse event at line {line_num}\nCause: {reason}\nFix: Check the event file for malformed lines. Run `bn verify` for details."
+    )]
     ParseFailed {
         /// 1-based line number within the shard file.
         line_num: usize,
@@ -333,28 +331,36 @@ pub enum EventError {
     },
 
     /// The event type string is not recognized.
-    #[error("Error: Unknown event type '{event_type}'\nCause: This event type is not part of the bones schema\nFix: You may need a newer version of bn. Supported types: item.create, item.update, item.state, item.tag, item.untag, item.link, item.unlink, item.move, item.assign, item.unassign, item.comment")]
+    #[error(
+        "Error: Unknown event type '{event_type}'\nCause: This event type is not part of the bones schema\nFix: You may need a newer version of bn. Supported types: item.create, item.update, item.state, item.tag, item.untag, item.link, item.unlink, item.move, item.assign, item.unassign, item.comment"
+    )]
     UnknownType {
         /// The unrecognized event type string.
         event_type: String,
     },
 
     /// A timestamp in an event line is malformed.
-    #[error("Error: Invalid timestamp '{raw}'\nCause: Timestamp does not match expected microsecond epoch format\nFix: Check the event file for corruption. Valid timestamps are positive integers (microseconds since Unix epoch).")]
+    #[error(
+        "Error: Invalid timestamp '{raw}'\nCause: Timestamp does not match expected microsecond epoch format\nFix: Check the event file for corruption. Valid timestamps are positive integers (microseconds since Unix epoch)."
+    )]
     InvalidTimestamp {
         /// The raw timestamp string that failed to parse.
         raw: String,
     },
 
     /// The referenced shard file does not exist on disk.
-    #[error("Error: Shard file not found at {path}\nCause: The shard file may have been deleted or moved\nFix: Run `bn verify` to check integrity. Run `bn rebuild` if the projection is stale.")]
+    #[error(
+        "Error: Shard file not found at {path}\nCause: The shard file may have been deleted or moved\nFix: Run `bn verify` to check integrity. Run `bn rebuild` if the projection is stale."
+    )]
     ShardNotFound {
         /// Path where the shard was expected.
         path: PathBuf,
     },
 
     /// A sealed shard's content does not match its manifest.
-    #[error("Error: Shard manifest mismatch for {shard}\nCause: Expected hash {expected_hash}, got {actual_hash}\nFix: Run `bn rebuild` to repair. If the shard was modified externally, the data may be corrupted.")]
+    #[error(
+        "Error: Shard manifest mismatch for {shard}\nCause: Expected hash {expected_hash}, got {actual_hash}\nFix: Run `bn rebuild` to repair. If the shard was modified externally, the data may be corrupted."
+    )]
     ManifestMismatch {
         /// Path to the shard file.
         shard: PathBuf,
@@ -365,7 +371,9 @@ pub enum EventError {
     },
 
     /// An event payload exceeds the maximum allowed size.
-    #[error("Error: Event payload is {size} bytes (max: {max} bytes)\nCause: The event data exceeds the size limit\nFix: Reduce the payload size or split into smaller events.")]
+    #[error(
+        "Error: Event payload is {size} bytes (max: {max} bytes)\nCause: The event data exceeds the size limit\nFix: Reduce the payload size or split into smaller events."
+    )]
     OversizedPayload {
         /// Actual payload size in bytes.
         size: usize,
@@ -374,18 +382,24 @@ pub enum EventError {
     },
 
     /// An event line contains an invalid hash.
-    #[error("Error: Event hash collision detected\nCause: Two events produced the same hash, which should be statistically impossible\nFix: Regenerate the event with different metadata. If this recurs, report a bug.")]
+    #[error(
+        "Error: Event hash collision detected\nCause: Two events produced the same hash, which should be statistically impossible\nFix: Regenerate the event with different metadata. If this recurs, report a bug."
+    )]
     HashCollision,
 
     /// Failed to write an event to the shard file.
-    #[error("Error: Failed to write event to shard\nCause: {reason}\nFix: Check disk space and file permissions on the .bones/events directory.")]
+    #[error(
+        "Error: Failed to write event to shard\nCause: {reason}\nFix: Check disk space and file permissions on the .bones/events directory."
+    )]
     WriteFailed {
         /// Description of the write failure.
         reason: String,
     },
 
     /// JSON serialization of event data failed.
-    #[error("Error: Failed to serialize event data\nCause: {reason}\nFix: Check that event data contains only valid JSON-serializable values.")]
+    #[error(
+        "Error: Failed to serialize event data\nCause: {reason}\nFix: Check that event data contains only valid JSON-serializable values."
+    )]
     SerializeFailed {
         /// Description of the serialization failure.
         reason: String,
@@ -452,14 +466,18 @@ impl EventError {
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectionError {
     /// The projection database file does not exist.
-    #[error("Error: Projection database not found at {path}\nCause: The database file is missing or was deleted\nFix: Run `bn rebuild` to recreate the projection database.")]
+    #[error(
+        "Error: Projection database not found at {path}\nCause: The database file is missing or was deleted\nFix: Run `bn rebuild` to recreate the projection database."
+    )]
     DbMissing {
         /// Expected path to the database file.
         path: PathBuf,
     },
 
     /// The database schema version does not match the expected version.
-    #[error("Error: Schema version mismatch (expected v{expected}, found v{found})\nCause: The database was created by a different version of bn\nFix: Run `bn rebuild` to migrate to the current schema version.")]
+    #[error(
+        "Error: Schema version mismatch (expected v{expected}, found v{found})\nCause: The database was created by a different version of bn\nFix: Run `bn rebuild` to migrate to the current schema version."
+    )]
     SchemaVersion {
         /// Expected schema version.
         expected: u32,
@@ -468,7 +486,9 @@ pub enum ProjectionError {
     },
 
     /// A SQL query failed.
-    #[error("Error: Database query failed\nCause: {reason}\nFix: Run `bn rebuild` to repair the database. If the error persists, report a bug.")]
+    #[error(
+        "Error: Database query failed\nCause: {reason}\nFix: Run `bn rebuild` to repair the database. If the error persists, report a bug."
+    )]
     QueryFailed {
         /// The SQL that failed (may be truncated for large queries).
         sql: String,
@@ -477,21 +497,27 @@ pub enum ProjectionError {
     },
 
     /// Rebuilding the projection from events failed.
-    #[error("Error: Projection rebuild failed\nCause: {reason}\nFix: Delete .bones/db.sqlite and retry `bn rebuild`. Check disk space and permissions.")]
+    #[error(
+        "Error: Projection rebuild failed\nCause: {reason}\nFix: Delete .bones/db.sqlite and retry `bn rebuild`. Check disk space and permissions."
+    )]
     RebuildFailed {
         /// Description of the failure.
         reason: String,
     },
 
     /// The projection database appears corrupt.
-    #[error("Error: Corrupt projection database\nCause: {reason}\nFix: Delete .bones/db.sqlite and run `bn rebuild` to recreate from events.")]
+    #[error(
+        "Error: Corrupt projection database\nCause: {reason}\nFix: Delete .bones/db.sqlite and run `bn rebuild` to recreate from events."
+    )]
     Corrupt {
         /// Description of the corruption.
         reason: String,
     },
 
     /// The full-text search index is missing.
-    #[error("Error: FTS index is missing from the projection database\nCause: The database may have been created without FTS support\nFix: Run `bn rebuild` to create the FTS index.")]
+    #[error(
+        "Error: FTS index is missing from the projection database\nCause: The database may have been created without FTS support\nFix: Run `bn rebuild` to create the FTS index."
+    )]
     FtsIndexMissing,
 }
 
@@ -541,14 +567,18 @@ impl ProjectionError {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     /// The config file does not exist.
-    #[error("Error: Config file not found at {path}\nCause: The config file is missing\nFix: Run `bn init` to create a default configuration, or create .bones/config.toml manually.")]
+    #[error(
+        "Error: Config file not found at {path}\nCause: The config file is missing\nFix: Run `bn init` to create a default configuration, or create .bones/config.toml manually."
+    )]
     NotFound {
         /// Expected path to the config file.
         path: PathBuf,
     },
 
     /// A config value is invalid.
-    #[error("Error: Invalid config value for '{key}': '{value}'\nCause: {reason}\nFix: Edit .bones/config.toml and correct the value for '{key}'.")]
+    #[error(
+        "Error: Invalid config value for '{key}': '{value}'\nCause: {reason}\nFix: Edit .bones/config.toml and correct the value for '{key}'."
+    )]
     InvalidValue {
         /// The config key with the invalid value.
         key: String,
@@ -559,7 +589,9 @@ pub enum ConfigError {
     },
 
     /// The config file could not be parsed.
-    #[error("Error: Failed to parse config file at {path}\nCause: {reason}\nFix: Fix the syntax in .bones/config.toml. Check for missing quotes, brackets, or invalid TOML.")]
+    #[error(
+        "Error: Failed to parse config file at {path}\nCause: {reason}\nFix: Fix the syntax in .bones/config.toml. Check for missing quotes, brackets, or invalid TOML."
+    )]
     ParseFailed {
         /// Path to the config file.
         path: PathBuf,
@@ -605,28 +637,36 @@ impl ConfigError {
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
     /// Permission denied accessing a path.
-    #[error("Error: Permission denied at {path}\nCause: The current user lacks read/write access\nFix: Check file permissions and ownership. Run `ls -la {path}` to inspect.")]
+    #[error(
+        "Error: Permission denied at {path}\nCause: The current user lacks read/write access\nFix: Check file permissions and ownership. Run `ls -la {path}` to inspect."
+    )]
     PermissionDenied {
         /// The path that could not be accessed.
         path: PathBuf,
     },
 
     /// The disk is full.
-    #[error("Error: Disk full — cannot write to {path}\nCause: No disk space remaining on the target filesystem\nFix: Free disk space and retry. Check usage with `df -h`.")]
+    #[error(
+        "Error: Disk full — cannot write to {path}\nCause: No disk space remaining on the target filesystem\nFix: Free disk space and retry. Check usage with `df -h`."
+    )]
     DiskFull {
         /// The path where the write failed.
         path: PathBuf,
     },
 
     /// The directory is not a bones project.
-    #[error("Error: Not a bones project at {path}\nCause: No .bones directory found in this path or any parent\nFix: Run `bn init` to create a new bones project, or cd to an existing one.")]
+    #[error(
+        "Error: Not a bones project at {path}\nCause: No .bones directory found in this path or any parent\nFix: Run `bn init` to create a new bones project, or cd to an existing one."
+    )]
     NotABonesProject {
         /// The path that was checked.
         path: PathBuf,
     },
 
     /// Generic I/O error with context.
-    #[error("Error: I/O error at {path}\nCause: {reason}\nFix: Check that the path exists and is accessible. Verify disk space and permissions.")]
+    #[error(
+        "Error: I/O error at {path}\nCause: {reason}\nFix: Check that the path exists and is accessible. Verify disk space and permissions."
+    )]
     Generic {
         /// The path involved in the error.
         path: PathBuf,
@@ -677,7 +717,9 @@ impl IoError {
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
     /// An invalid state transition was attempted.
-    #[error("Error: Cannot transition item '{item_id}' from '{from}' to '{to}'\nCause: This state transition is not allowed by lifecycle rules\nFix: Valid transitions: open->doing, open->done, doing->done, doing->open, done->archived, done->open, archived->open")]
+    #[error(
+        "Error: Cannot transition item '{item_id}' from '{from}' to '{to}'\nCause: This state transition is not allowed by lifecycle rules\nFix: Valid transitions: open->doing, open->done, doing->done, doing->open, done->archived, done->open, archived->open"
+    )]
     InvalidTransition {
         /// The item being transitioned.
         item_id: String,
@@ -688,7 +730,9 @@ pub enum ModelError {
     },
 
     /// The referenced item does not exist.
-    #[error("Error: Item '{item_id}' not found\nCause: No item with this ID exists in the project\nFix: Check the ID and try again. Use `bn list` to see all items. Use a longer prefix if the ID is ambiguous.")]
+    #[error(
+        "Error: Item '{item_id}' not found\nCause: No item with this ID exists in the project\nFix: Check the ID and try again. Use `bn list` to see all items. Use a longer prefix if the ID is ambiguous."
+    )]
     ItemNotFound {
         /// The ID that was not found.
         item_id: String,
@@ -702,7 +746,9 @@ pub enum ModelError {
     },
 
     /// The item ID format is invalid.
-    #[error("Error: Invalid item ID '{raw}'\nCause: Item IDs must be valid terseid identifiers\nFix: Use `bn list` to find valid item IDs. IDs are short alphanumeric strings.")]
+    #[error(
+        "Error: Invalid item ID '{raw}'\nCause: Item IDs must be valid terseid identifiers\nFix: Use `bn list` to find valid item IDs. IDs are short alphanumeric strings."
+    )]
     InvalidItemId {
         /// The raw string that failed validation.
         raw: String,
@@ -720,7 +766,9 @@ pub enum ModelError {
     },
 
     /// An enum value (kind, state, urgency, size) is invalid.
-    #[error("Error: Invalid {field} value '{value}'\nCause: '{value}' is not a recognized {field}\nFix: Valid {field} values: {valid_values}")]
+    #[error(
+        "Error: Invalid {field} value '{value}'\nCause: '{value}' is not a recognized {field}\nFix: Valid {field} values: {valid_values}"
+    )]
     InvalidEnumValue {
         /// Which field (e.g., "kind", "state", "urgency", "size").
         field: String,
@@ -731,7 +779,9 @@ pub enum ModelError {
     },
 
     /// A duplicate item was detected.
-    #[error("Error: Duplicate item '{item_id}'\nCause: An item with this ID already exists\nFix: Use a different ID or update the existing item.")]
+    #[error(
+        "Error: Duplicate item '{item_id}'\nCause: An item with this ID already exists\nFix: Use a different ID or update the existing item."
+    )]
     DuplicateItem {
         /// The duplicate item ID.
         item_id: String,
@@ -801,7 +851,9 @@ impl ModelError {
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
     /// A lock acquisition timed out.
-    #[error("Error: Lock timed out after {waited:?} at {path}\nCause: Another bn process is holding the lock\nFix: Wait for the other process to finish, then retry. Check for stale lock files at {path}.")]
+    #[error(
+        "Error: Lock timed out after {waited:?} at {path}\nCause: Another bn process is holding the lock\nFix: Wait for the other process to finish, then retry. Check for stale lock files at {path}."
+    )]
     Timeout {
         /// The lock file path.
         path: PathBuf,
@@ -1031,11 +1083,7 @@ mod tests {
         ];
 
         for code in all {
-            assert!(
-                code.hint().is_some(),
-                "{:?} has no hint",
-                code
-            );
+            assert!(code.hint().is_some(), "{:?} has no hint", code);
         }
     }
 
@@ -1278,48 +1326,137 @@ mod tests {
 
     #[test]
     fn bones_error_from_serde_json_error() {
-        let json_err = serde_json::from_str::<serde_json::Value>("{{bad}}")
-            .expect_err("should fail");
+        let json_err =
+            serde_json::from_str::<serde_json::Value>("{{bad}}").expect_err("should fail");
         let err: BonesError = json_err.into();
-        assert!(matches!(err, BonesError::Event(EventError::SerializeFailed { .. })));
+        assert!(matches!(
+            err,
+            BonesError::Event(EventError::SerializeFailed { .. })
+        ));
     }
 
     #[test]
     fn every_error_variant_has_suggestion() {
         // Comprehensive check: create one of each variant and verify suggestion is non-empty
         let errors: Vec<BonesError> = vec![
-            EventError::ParseFailed { line_num: 1, reason: "x".into() }.into(),
-            EventError::UnknownType { event_type: "x".into() }.into(),
+            EventError::ParseFailed {
+                line_num: 1,
+                reason: "x".into(),
+            }
+            .into(),
+            EventError::UnknownType {
+                event_type: "x".into(),
+            }
+            .into(),
             EventError::InvalidTimestamp { raw: "x".into() }.into(),
-            EventError::ShardNotFound { path: PathBuf::from("x") }.into(),
-            EventError::ManifestMismatch { shard: PathBuf::from("x"), expected_hash: "a".into(), actual_hash: "b".into() }.into(),
+            EventError::ShardNotFound {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            EventError::ManifestMismatch {
+                shard: PathBuf::from("x"),
+                expected_hash: "a".into(),
+                actual_hash: "b".into(),
+            }
+            .into(),
             EventError::OversizedPayload { size: 1, max: 0 }.into(),
             EventError::HashCollision.into(),
             EventError::WriteFailed { reason: "x".into() }.into(),
             EventError::SerializeFailed { reason: "x".into() }.into(),
-            ProjectionError::DbMissing { path: PathBuf::from("x") }.into(),
-            ProjectionError::SchemaVersion { expected: 1, found: 0 }.into(),
-            ProjectionError::QueryFailed { sql: "x".into(), reason: "x".into() }.into(),
+            ProjectionError::DbMissing {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            ProjectionError::SchemaVersion {
+                expected: 1,
+                found: 0,
+            }
+            .into(),
+            ProjectionError::QueryFailed {
+                sql: "x".into(),
+                reason: "x".into(),
+            }
+            .into(),
             ProjectionError::RebuildFailed { reason: "x".into() }.into(),
             ProjectionError::Corrupt { reason: "x".into() }.into(),
             ProjectionError::FtsIndexMissing.into(),
-            ConfigError::NotFound { path: PathBuf::from("x") }.into(),
-            ConfigError::InvalidValue { key: "k".into(), value: "v".into(), reason: "r".into() }.into(),
-            ConfigError::ParseFailed { path: PathBuf::from("x"), reason: "r".into() }.into(),
-            IoError::PermissionDenied { path: PathBuf::from("x") }.into(),
-            IoError::DiskFull { path: PathBuf::from("x") }.into(),
-            IoError::NotABonesProject { path: PathBuf::from("x") }.into(),
-            IoError::Generic { path: PathBuf::from("x"), reason: "r".into() }.into(),
-            ModelError::InvalidTransition { item_id: "x".into(), from: "a".into(), to: "b".into() }.into(),
-            ModelError::ItemNotFound { item_id: "x".into() }.into(),
-            ModelError::CircularContainment { cycle: vec!["a".into(), "b".into()] }.into(),
+            ConfigError::NotFound {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            ConfigError::InvalidValue {
+                key: "k".into(),
+                value: "v".into(),
+                reason: "r".into(),
+            }
+            .into(),
+            ConfigError::ParseFailed {
+                path: PathBuf::from("x"),
+                reason: "r".into(),
+            }
+            .into(),
+            IoError::PermissionDenied {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            IoError::DiskFull {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            IoError::NotABonesProject {
+                path: PathBuf::from("x"),
+            }
+            .into(),
+            IoError::Generic {
+                path: PathBuf::from("x"),
+                reason: "r".into(),
+            }
+            .into(),
+            ModelError::InvalidTransition {
+                item_id: "x".into(),
+                from: "a".into(),
+                to: "b".into(),
+            }
+            .into(),
+            ModelError::ItemNotFound {
+                item_id: "x".into(),
+            }
+            .into(),
+            ModelError::CircularContainment {
+                cycle: vec!["a".into(), "b".into()],
+            }
+            .into(),
             ModelError::InvalidItemId { raw: "x".into() }.into(),
-            ModelError::AmbiguousId { prefix: "x".into(), count: 2, matches: vec!["xa".into(), "xb".into()] }.into(),
-            ModelError::InvalidEnumValue { field: "f".into(), value: "v".into(), valid_values: "a, b".into() }.into(),
-            ModelError::DuplicateItem { item_id: "x".into() }.into(),
-            ModelError::CycleDetected { cycle: vec!["a".into(), "b".into()] }.into(),
-            LockError::Timeout { path: PathBuf::from("x"), waited: Duration::from_secs(1) }.into(),
-            LockError::AlreadyLocked { path: PathBuf::from("x"), holder: None }.into(),
+            ModelError::AmbiguousId {
+                prefix: "x".into(),
+                count: 2,
+                matches: vec!["xa".into(), "xb".into()],
+            }
+            .into(),
+            ModelError::InvalidEnumValue {
+                field: "f".into(),
+                value: "v".into(),
+                valid_values: "a, b".into(),
+            }
+            .into(),
+            ModelError::DuplicateItem {
+                item_id: "x".into(),
+            }
+            .into(),
+            ModelError::CycleDetected {
+                cycle: vec!["a".into(), "b".into()],
+            }
+            .into(),
+            LockError::Timeout {
+                path: PathBuf::from("x"),
+                waited: Duration::from_secs(1),
+            }
+            .into(),
+            LockError::AlreadyLocked {
+                path: PathBuf::from("x"),
+                holder: None,
+            }
+            .into(),
         ];
 
         for (i, err) in errors.iter().enumerate() {
@@ -1354,7 +1491,10 @@ mod tests {
         };
         let msg = err.to_string();
         assert!(msg.contains("Error:"), "Missing 'Error:' in: {msg}");
-        assert!(msg.contains("Cause:") || msg.contains("bad json"), "Missing cause in: {msg}");
+        assert!(
+            msg.contains("Cause:") || msg.contains("bad json"),
+            "Missing cause in: {msg}"
+        );
         assert!(msg.contains("Fix:"), "Missing 'Fix:' in: {msg}");
 
         let err = ModelError::InvalidTransition {

@@ -242,17 +242,11 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
 
     // Quarantine: write corrupt tail to backup
     let backup_path = path.with_extension("corrupt");
-    let corrupt_content: String = lines[bad_idx..]
-        .iter()
-        .map(|l| format!("{l}\n"))
-        .collect();
+    let corrupt_content: String = lines[bad_idx..].iter().map(|l| format!("{l}\n")).collect();
     fs::write(&backup_path, &corrupt_content)?;
 
     // Truncate original to valid prefix
-    let valid_content: String = lines[..bad_idx]
-        .iter()
-        .map(|l| format!("{l}\n"))
-        .collect();
+    let valid_content: String = lines[..bad_idx].iter().map(|l| format!("{l}\n")).collect();
     fs::write(path, &valid_content)?;
 
     tracing::warn!(
@@ -291,7 +285,10 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
 /// # Errors
 ///
 /// Returns an error if the events directory doesn't exist or rebuild fails.
-pub fn recover_missing_db(events_dir: &Path, db_path: &Path) -> Result<RecoveryReport, RecoveryError> {
+pub fn recover_missing_db(
+    events_dir: &Path,
+    db_path: &Path,
+) -> Result<RecoveryReport, RecoveryError> {
     if !events_dir.exists() {
         return Err(RecoveryError::EventsDirNotFound(events_dir.to_path_buf()));
     }
@@ -446,8 +443,7 @@ fn is_locked_error(e: &rusqlite::Error) -> bool {
         rusqlite::Error::SqliteFailure(err, _) => {
             matches!(
                 err.code,
-                rusqlite::ffi::ErrorCode::DatabaseBusy
-                    | rusqlite::ffi::ErrorCode::DatabaseLocked
+                rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked
             )
         }
         _ => {
@@ -544,8 +540,7 @@ pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError
             match crate::db::open_projection(&db_path) {
                 Ok(conn) => {
                     // Try a simple query to verify DB isn't corrupt
-                    conn.execute_batch("SELECT COUNT(*) FROM items")
-                        .is_err()
+                    conn.execute_batch("SELECT COUNT(*) FROM items").is_err()
                 }
                 Err(_) => true,
             }
@@ -579,9 +574,7 @@ pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError
                     Ok(true) => result.caches_cleaned += 1,
                     Ok(false) => {}
                     Err(e) => {
-                        result
-                            .warnings
-                            .push(format!("cache cleanup failed: {e}"));
+                        result.warnings.push(format!("cache cleanup failed: {e}"));
                     }
                 }
             }
@@ -666,7 +659,10 @@ mod tests {
 
         let result = recover_partial_write(&path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RecoveryError::ShardNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RecoveryError::ShardNotFound(_)
+        ));
     }
 
     // ---- Corrupt shard tests ----
@@ -797,10 +793,10 @@ mod tests {
         shard_mgr.init().expect("init");
 
         // Write a create event
+        use crate::event::Event;
         use crate::event::data::*;
         use crate::event::types::EventType;
         use crate::event::writer;
-        use crate::event::Event;
         use crate::model::item::{Kind, Size, Urgency};
         use crate::model::item_id::ItemId;
         use std::collections::BTreeMap;
@@ -930,7 +926,10 @@ mod tests {
         // Simulate torn write: append incomplete data to active shard
         let (year, month) = shard_mgr.active_shard().unwrap().unwrap();
         let shard_path = events_dir.join(format!("{year:04}-{month:02}.events"));
-        let mut file = fs::OpenOptions::new().append(true).open(&shard_path).unwrap();
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&shard_path)
+            .unwrap();
         file.write_all(b"incomplete line without newline").unwrap();
 
         let result = auto_recover(bones_dir).unwrap();
@@ -990,7 +989,8 @@ mod tests {
 
         // Create a valid DB first
         let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute_batch("CREATE TABLE test (id INTEGER)").unwrap();
+        conn.execute_batch("CREATE TABLE test (id INTEGER)")
+            .unwrap();
         drop(conn);
 
         // Should open immediately

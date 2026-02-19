@@ -33,9 +33,9 @@
 use std::collections::HashMap;
 
 use petgraph::{
+    Direction,
     graph::NodeIndex,
     visit::{IntoNodeIdentifiers, NodeIndexable},
-    Direction,
 };
 use tracing::instrument;
 
@@ -333,10 +333,7 @@ mod tests {
 
         // All nodes should have some score.
         for id in ["A", "B", "C", "D"] {
-            assert!(
-                result.scores.contains_key(id),
-                "{id} should have a score"
-            );
+            assert!(result.scores.contains_key(id), "{id} should have a score");
         }
 
         // By symmetry: A≈C and B≈D (two identical disconnected components).

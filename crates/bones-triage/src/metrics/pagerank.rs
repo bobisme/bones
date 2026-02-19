@@ -34,8 +34,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::{
-    visit::{IntoNodeIdentifiers, NodeIndexable},
     Direction,
+    visit::{IntoNodeIdentifiers, NodeIndexable},
 };
 use tracing::{instrument, warn};
 
@@ -481,7 +481,10 @@ fn check_divergence(
     for node in g.node_identifiers() {
         let idx = g.to_index(node);
         if let Some(scc) = g.node_weight(node) {
-            if let Some(&full_score) = scc.members.first().and_then(|id| full_result.scores.get(id))
+            if let Some(&full_score) = scc
+                .members
+                .first()
+                .and_then(|id| full_result.scores.get(id))
             {
                 let div = (incremental_ranks[idx] - full_score).abs();
                 max_div = max_div.max(div);
@@ -589,8 +592,12 @@ mod tests {
         let ng = make_normalized(&[("A", "B")]);
         let result = pagerank(&ng, &default_config());
         assert_eq!(result.scores.len(), 2);
-        assert!(result.scores["B"] > result.scores["A"],
-            "B ({}) should have higher rank than A ({})", result.scores["B"], result.scores["A"]);
+        assert!(
+            result.scores["B"] > result.scores["A"],
+            "B ({}) should have higher rank than A ({})",
+            result.scores["B"],
+            result.scores["A"]
+        );
         assert!(result.converged);
     }
 
@@ -601,10 +608,14 @@ mod tests {
         let result = pagerank(&ng, &default_config());
 
         assert!(result.converged);
-        assert!(result.scores["C"] > result.scores["B"],
-            "C should have highest rank");
-        assert!(result.scores["B"] > result.scores["A"],
-            "B should have higher rank than A");
+        assert!(
+            result.scores["C"] > result.scores["B"],
+            "C should have highest rank"
+        );
+        assert!(
+            result.scores["B"] > result.scores["A"],
+            "B should have higher rank than A"
+        );
     }
 
     #[test]
@@ -670,7 +681,10 @@ mod tests {
         let edges: Vec<(String, String)> = (0..19)
             .map(|i| (format!("A{i}"), format!("A{}", i + 1)))
             .collect();
-        let edge_refs: Vec<(&str, &str)> = edges.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let edge_refs: Vec<(&str, &str)> = edges
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
         let ng = make_normalized(&edge_refs);
 
         let result = pagerank(&ng, &default_config());
@@ -703,7 +717,10 @@ mod tests {
         };
         let result = pagerank(&ng, &config);
         assert_eq!(result.iterations, 1);
-        assert!(!result.converged, "Should not converge in 1 iteration with tight tolerance");
+        assert!(
+            !result.converged,
+            "Should not converge in 1 iteration with tight tolerance"
+        );
     }
 
     #[test]
@@ -801,10 +818,26 @@ mod tests {
         // New graph is completely different.
         let ng_new = make_normalized(&[("A", "C"), ("C", "D"), ("D", "B")]);
         let changes = vec![
-            EdgeChange { from: "A".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Removed },
-            EdgeChange { from: "A".to_string(), to: "C".to_string(), kind: EdgeChangeKind::Added },
-            EdgeChange { from: "C".to_string(), to: "D".to_string(), kind: EdgeChangeKind::Added },
-            EdgeChange { from: "D".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Added },
+            EdgeChange {
+                from: "A".to_string(),
+                to: "B".to_string(),
+                kind: EdgeChangeKind::Removed,
+            },
+            EdgeChange {
+                from: "A".to_string(),
+                to: "C".to_string(),
+                kind: EdgeChangeKind::Added,
+            },
+            EdgeChange {
+                from: "C".to_string(),
+                to: "D".to_string(),
+                kind: EdgeChangeKind::Added,
+            },
+            EdgeChange {
+                from: "D".to_string(),
+                to: "B".to_string(),
+                kind: EdgeChangeKind::Added,
+            },
         ];
 
         let result = pagerank_incremental(&ng_new, &prev.scores, &changes, &default_config());
@@ -926,6 +959,9 @@ mod tests {
     fn pagerank_result_method_enum_values() {
         assert_eq!(PageRankMethod::Full, PageRankMethod::Full);
         assert_ne!(PageRankMethod::Full, PageRankMethod::Incremental);
-        assert_ne!(PageRankMethod::Incremental, PageRankMethod::IncrementalFallback);
+        assert_ne!(
+            PageRankMethod::Incremental,
+            PageRankMethod::IncrementalFallback
+        );
     }
 }

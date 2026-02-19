@@ -22,11 +22,7 @@
 //! - **max_out_degree**: Highest out-degree (most items blocked) in the
 //!   original graph.
 
-use petgraph::{
-    algo::connected_components,
-    Direction,
-    visit::IntoNodeIdentifiers,
-};
+use petgraph::{Direction, algo::connected_components, visit::IntoNodeIdentifiers};
 
 use crate::graph::normalize::NormalizedGraph;
 
@@ -98,7 +94,8 @@ impl GraphStats {
                     .neighbors_directed(idx, Direction::Incoming)
                     .next()
                     .is_none()
-                    && ng.raw
+                    && ng
+                        .raw
                         .graph
                         .neighbors_directed(idx, Direction::Outgoing)
                         .next()

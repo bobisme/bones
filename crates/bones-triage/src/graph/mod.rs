@@ -48,7 +48,7 @@ pub mod stats;
 
 // Re-export primary types at module level for convenience.
 pub use build::RawGraph;
-pub use critical_path::{compute_critical_path, CriticalPathResult, ItemTiming};
-pub use cycles::{find_all_cycles, report_cycles_with_breaks, would_create_cycle, CycleReport};
+pub use critical_path::{CriticalPathResult, ItemTiming, compute_critical_path};
+pub use cycles::{CycleReport, find_all_cycles, report_cycles_with_breaks, would_create_cycle};
 pub use normalize::{NormalizedGraph, SccNode};
 pub use stats::GraphStats;

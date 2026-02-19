@@ -1,4 +1,5 @@
 use bones_core::model::item::Urgency;
+use serde::{Deserialize, Serialize};
 
 const DECAY_WINDOW_DAYS: f64 = 14.0;
 
@@ -18,16 +19,16 @@ pub struct MetricInputs {
 /// Configurable weights for the composite formula:
 ///
 /// `P(v) = alpha*CP + beta*PR + gamma*BC + delta*U + epsilon*D`
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CompositeWeights {
-    pub alpha: f64,
-    pub beta: f64,
-    pub gamma: f64,
-    pub delta: f64,
-    pub epsilon: f64,
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompositeWeights<T = f64> {
+    pub alpha: T,
+    pub beta: T,
+    pub gamma: T,
+    pub delta: T,
+    pub epsilon: T,
 }
 
-impl Default for CompositeWeights {
+impl Default for CompositeWeights<f64> {
     fn default() -> Self {
         Self {
             alpha: 0.25,

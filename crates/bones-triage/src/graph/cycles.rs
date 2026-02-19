@@ -67,10 +67,16 @@ pub fn find_all_cycles(graph: &DiGraph<String, ()>) -> Vec<Vec<String>> {
     let mut cycles: Vec<Vec<String>> = tarjan_scc(graph)
         .into_iter()
         .filter(|component| {
-            component.len() > 1 || component.first().is_some_and(|node| has_self_loop(graph, *node))
+            component.len() > 1
+                || component
+                    .first()
+                    .is_some_and(|node| has_self_loop(graph, *node))
         })
         .map(|component| {
-            let mut ids: Vec<String> = component.into_iter().map(|idx| node_id(graph, idx)).collect();
+            let mut ids: Vec<String> = component
+                .into_iter()
+                .map(|idx| node_id(graph, idx))
+                .collect();
             ids.sort_unstable();
             ids
         })
@@ -261,7 +267,9 @@ fn find_back_edges_in_scc(
             }
         } else {
             // call_stack empty — try next unvisited SCC node (for disconnected SCCs).
-            let Some(next) = extra_starts.next() else { break };
+            let Some(next) = extra_starts.next() else {
+                break;
+            };
             if !visited.contains(&next) {
                 visited.insert(next);
                 ancestor_stack.push(next);
@@ -324,10 +332,8 @@ mod tests {
     fn would_create_cycle_detects_three_node_loop() {
         // Existing: A -> B -> C
         // New edge: C -> A (creates C -> A -> B -> C)
-        let (graph, nodes) = graph_with_nodes_and_edges(
-            &["A", "B", "C"],
-            &[("A", "B"), ("B", "C")],
-        );
+        let (graph, nodes) =
+            graph_with_nodes_and_edges(&["A", "B", "C"], &[("A", "B"), ("B", "C")]);
 
         let cycle = would_create_cycle(&graph, nodes["C"], nodes["A"])
             .unwrap_or_else(|| panic!("expected cycle"));
@@ -339,10 +345,8 @@ mod tests {
     fn would_create_cycle_returns_none_for_safe_edge() {
         // Existing: A -> B -> C
         // New edge: A -> C (no cycle)
-        let (graph, nodes) = graph_with_nodes_and_edges(
-            &["A", "B", "C"],
-            &[("A", "B"), ("B", "C")],
-        );
+        let (graph, nodes) =
+            graph_with_nodes_and_edges(&["A", "B", "C"], &[("A", "B"), ("B", "C")]);
 
         assert!(would_create_cycle(&graph, nodes["A"], nodes["C"]).is_none());
     }
@@ -415,17 +419,13 @@ mod tests {
         assert_eq!(reports.len(), 1);
         let r = &reports[0];
         assert_eq!(r.members, vec!["A".to_string()]);
-        assert_eq!(
-            r.suggested_breaks,
-            vec![("A".to_string(), "A".to_string())]
-        );
+        assert_eq!(r.suggested_breaks, vec![("A".to_string(), "A".to_string())]);
     }
 
     #[test]
     fn report_cycles_two_node_cycle() {
         // A ⇄ B: back-edge is B→A (DFS enters A first, then B, B→A is back-edge).
-        let (graph, _) =
-            graph_with_nodes_and_edges(&["A", "B"], &[("A", "B"), ("B", "A")]);
+        let (graph, _) = graph_with_nodes_and_edges(&["A", "B"], &[("A", "B"), ("B", "A")]);
         let reports = report_cycles_with_breaks(&graph);
 
         assert_eq!(reports.len(), 1);
@@ -445,10 +445,8 @@ mod tests {
     #[test]
     fn report_cycles_three_node_cycle_one_break() {
         // A → B → C → A: one back-edge breaks the cycle.
-        let (graph, _) = graph_with_nodes_and_edges(
-            &["A", "B", "C"],
-            &[("A", "B"), ("B", "C"), ("C", "A")],
-        );
+        let (graph, _) =
+            graph_with_nodes_and_edges(&["A", "B", "C"], &[("A", "B"), ("B", "C"), ("C", "A")]);
         let reports = report_cycles_with_breaks(&graph);
 
         assert_eq!(reports.len(), 1);
@@ -506,10 +504,8 @@ mod tests {
     #[test]
     fn report_cycles_break_is_valid_existing_edge() {
         // For each suggested break, verify it is an actual edge in the graph.
-        let (graph, _) = graph_with_nodes_and_edges(
-            &["A", "B", "C"],
-            &[("A", "B"), ("B", "C"), ("C", "A")],
-        );
+        let (graph, _) =
+            graph_with_nodes_and_edges(&["A", "B", "C"], &[("A", "B"), ("B", "C"), ("C", "A")]);
         let reports = report_cycles_with_breaks(&graph);
 
         for report in &reports {

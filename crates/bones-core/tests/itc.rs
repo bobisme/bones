@@ -232,14 +232,23 @@ fn non_concurrent_when_one_dominates() {
     a.event();
     let joined = Stamp::join(&a, &b);
     // joined dominates a; they are not concurrent
-    assert!(!a.concurrent(&joined), "dominated stamp is not concurrent with dominator");
-    assert!(!joined.concurrent(&a), "dominator is not concurrent with dominated");
+    assert!(
+        !a.concurrent(&joined),
+        "dominated stamp is not concurrent with dominator"
+    );
+    assert!(
+        !joined.concurrent(&a),
+        "dominator is not concurrent with dominated"
+    );
 }
 
 #[test]
 fn seed_stamps_not_concurrent_with_themselves() {
     let s = Stamp::seed();
-    assert!(!s.concurrent(&s), "stamp should not be concurrent with itself");
+    assert!(
+        !s.concurrent(&s),
+        "stamp should not be concurrent with itself"
+    );
 }
 
 // ===========================================================================
@@ -255,7 +264,10 @@ fn two_agent_fork_work_retire() {
     a.event();
     b.event();
 
-    assert!(a.concurrent(&b), "after independent work, agents must be concurrent");
+    assert!(
+        a.concurrent(&b),
+        "after independent work, agents must be concurrent"
+    );
 
     let merged = Stamp::join(&a, &b);
     assert!(a.leq(&merged), "A <= merged");
@@ -314,9 +326,11 @@ fn eight_agent_scenario() {
     let (mut a7, mut a8) = q4.fork();
 
     // Each agent does (index+1) events
-    for (i, agent) in [&mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8]
-        .iter_mut()
-        .enumerate()
+    for (i, agent) in [
+        &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+    ]
+    .iter_mut()
+    .enumerate()
     {
         for _ in 0..=(i as u32) {
             agent.event();

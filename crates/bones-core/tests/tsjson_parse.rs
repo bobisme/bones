@@ -10,14 +10,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use bones_core::event::Event;
 use bones_core::event::data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DeleteData, EventData,
     LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
 };
 use bones_core::event::types::EventType;
 use bones_core::event::writer::{compute_event_hash, write_event};
-use bones_core::event::{parse_line, parse_lines, ParseError, ParsedLine};
-use bones_core::event::Event;
+use bones_core::event::{ParseError, ParsedLine, parse_line, parse_lines};
 use bones_core::model::item::{Kind, Size, State, Urgency};
 use bones_core::model::item_id::ItemId;
 
@@ -362,7 +362,11 @@ fn roundtrip_with_multiple_parents() {
 
 #[test]
 fn roundtrip_unicode_agent_name_cjk() {
-    let mut event = base_event(EventType::Comment, "bn-a7x", comment_data("Unicode agent test"));
+    let mut event = base_event(
+        EventType::Comment,
+        "bn-a7x",
+        comment_data("Unicode agent test"),
+    );
     event.agent = "gemini-日本語".into();
     let rt = roundtrip(event);
     assert_eq!(rt.agent, "gemini-日本語");
@@ -490,7 +494,11 @@ fn roundtrip_timestamp_zero() {
 
 #[test]
 fn roundtrip_timestamp_one_microsecond() {
-    let mut event = base_event(EventType::Comment, "bn-a7x", comment_data("One microsecond"));
+    let mut event = base_event(
+        EventType::Comment,
+        "bn-a7x",
+        comment_data("One microsecond"),
+    );
     event.wall_ts_us = 1;
     let rt = roundtrip(event);
     assert_eq!(rt.wall_ts_us, 1);
@@ -604,10 +612,7 @@ fn roundtrip_update_with_array_value() {
     match &rt.data {
         EventData::Update(d) => {
             assert_eq!(d.field, "labels");
-            assert_eq!(
-                d.value,
-                serde_json::json!(["security", "urgent", "p0"])
-            );
+            assert_eq!(d.value, serde_json::json!(["security", "urgent", "p0"]));
         }
         other => panic!("expected Update, got {other:?}"),
     }
@@ -817,8 +822,10 @@ fn roundtrip_extra_fields_preserved() {
 fn malformed_missing_tab() {
     // Remove one tab separator from an otherwise valid line
     // This gives wrong field count
-    let err = parse_line("1000\tagent\titc:A\t\titem.create\tbn-a7x\t{\"title\":\"T\",\"kind\":\"task\"}")
-        .expect_err("should fail with field count error");
+    let err = parse_line(
+        "1000\tagent\titc:A\t\titem.create\tbn-a7x\t{\"title\":\"T\",\"kind\":\"task\"}",
+    )
+    .expect_err("should fail with field count error");
     assert!(
         matches!(err, ParseError::FieldCount { .. }),
         "expected FieldCount, got {err:?}"
@@ -966,9 +973,7 @@ fn parse_lines_skips_comments_and_blanks() {
     let line1 = write_event(&mut e1).expect("write e1");
     let line2 = write_event(&mut e2).expect("write e2");
 
-    let input = format!(
-        "# bones event log v1\n# fields: ...\n\n{line1}\n{line2}\n"
-    );
+    let input = format!("# bones event log v1\n# fields: ...\n\n{line1}\n{line2}\n");
 
     let events = parse_lines(&input).expect("should parse all");
     assert_eq!(events.len(), 2);
@@ -1437,9 +1442,13 @@ fn golden_file_if_exists_is_still_parseable() {
 
 #[test]
 fn partial_parse_roundtrip_preserves_fixed_fields() {
-    use bones_core::event::{parse_line_partial, PartialParsedLine};
+    use bones_core::event::{PartialParsedLine, parse_line_partial};
 
-    let mut event = base_event(EventType::Create, "bn-a7x", create_data("Partial parse test"));
+    let mut event = base_event(
+        EventType::Create,
+        "bn-a7x",
+        create_data("Partial parse test"),
+    );
     event.wall_ts_us = 9_999_999;
     event.agent = "my-agent".into();
     event.itc = "itc:ZZZ".into();
@@ -1461,7 +1470,7 @@ fn partial_parse_roundtrip_preserves_fixed_fields() {
 
 #[test]
 fn partial_parse_all_11_event_types() {
-    use bones_core::event::{parse_line_partial, PartialParsedLine};
+    use bones_core::event::{PartialParsedLine, parse_line_partial};
 
     let all_events = vec![
         base_event(EventType::Create, "bn-a7x", create_data("T")),

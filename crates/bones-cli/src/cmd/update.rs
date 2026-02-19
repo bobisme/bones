@@ -137,7 +137,11 @@ pub fn run_update(
                 let msg = format!("invalid size '{}': expected xxs|xs|s|m|l|xl|xxl", s);
                 render_error(
                     output,
-                    &CliError::with_details(&msg, "Valid sizes: xxs xs s m l xl xxl", "invalid_size"),
+                    &CliError::with_details(
+                        &msg,
+                        "Valid sizes: xxs xs s m l xl xxl",
+                        "invalid_size",
+                    ),
                 )?;
                 anyhow::bail!("{}", msg);
             }
@@ -150,8 +154,7 @@ pub fn run_update(
         match u.parse::<Urgency>() {
             Ok(urg) => Some(urg),
             Err(_) => {
-                let msg =
-                    format!("invalid urgency '{}': expected punt|default|urgent", u);
+                let msg = format!("invalid urgency '{}': expected punt|default|urgent", u);
                 render_error(
                     output,
                     &CliError::with_details(
@@ -171,15 +174,10 @@ pub fn run_update(
         match k.parse::<Kind>() {
             Ok(knd) => Some(knd),
             Err(_) => {
-                let msg =
-                    format!("invalid kind '{}': expected task|bug|goal", k);
+                let msg = format!("invalid kind '{}': expected task|bug|goal", k);
                 render_error(
                     output,
-                    &CliError::with_details(
-                        &msg,
-                        "Valid kinds: task bug goal",
-                        "invalid_kind",
-                    ),
+                    &CliError::with_details(&msg, "Valid kinds: task bug goal", "invalid_kind"),
                 )?;
                 anyhow::bail!("{}", msg);
             }
@@ -241,7 +239,10 @@ pub fn run_update(
             )?;
             anyhow::bail!("{}", msg);
         }
-        pending.push(("title".to_string(), serde_json::Value::String(title.clone())));
+        pending.push((
+            "title".to_string(),
+            serde_json::Value::String(title.clone()),
+        ));
     }
 
     if let Some(ref desc) = args.description {
@@ -305,7 +306,9 @@ pub fn run_update(
             .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
 
         if let Err(e) = projector.project_event(&event) {
-            tracing::warn!("projection failed for field '{field}' (will be fixed on next rebuild): {e}");
+            tracing::warn!(
+                "projection failed for field '{field}' (will be fixed on next rebuild): {e}"
+            );
         }
 
         applied.push(FieldUpdate {
@@ -533,10 +536,12 @@ mod tests {
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("no fields specified"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no fields specified")
+        );
     }
 
     #[test]
@@ -600,10 +605,12 @@ mod tests {
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("title cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("title cannot be empty")
+        );
     }
 
     #[test]
@@ -642,7 +649,11 @@ mod tests {
             kind: None,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "partial ID update failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "partial ID update failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
@@ -697,9 +708,12 @@ mod tests {
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Not a bones project") || true);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Not a bones project")
+                || true
+        );
     }
 }

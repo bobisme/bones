@@ -28,8 +28,8 @@
 use std::collections::HashMap;
 
 use petgraph::{
-    visit::{IntoNodeIdentifiers, NodeIndexable},
     Direction,
+    visit::{IntoNodeIdentifiers, NodeIndexable},
 };
 use tracing::instrument;
 

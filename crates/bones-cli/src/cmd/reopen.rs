@@ -147,11 +147,7 @@ pub fn run_reopen(
             let msg = format!("cannot reopen '{}': item is already open", resolved_id);
             render_error(
                 output,
-                &CliError::with_details(
-                    &msg,
-                    "Item is already in the open state",
-                    "already_open",
-                ),
+                &CliError::with_details(&msg, "Item is already in the open state", "already_open"),
             )?;
             anyhow::bail!("{}", msg);
         }
@@ -365,7 +361,11 @@ mod tests {
             id: item_id.clone(),
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "reopen from archived failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "reopen from archived failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
@@ -406,11 +406,17 @@ mod tests {
             id: "reopen1".to_string(),
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "reopen via partial ID failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "reopen via partial ID failed: {:?}",
+            result.err()
+        );
 
         let db_path = dir.path().join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
-        let item = query::get_item(&conn, "bn-reopen1", false).unwrap().unwrap();
+        let item = query::get_item(&conn, "bn-reopen1", false)
+            .unwrap()
+            .unwrap();
         assert_eq!(item.state, "open");
     }
 
@@ -526,6 +532,9 @@ mod tests {
         let db_path = root.join(".bones/bones.db");
         let conn = db::open_projection(&db_path).unwrap();
         let item = query::get_item(&conn, &item_id, false).unwrap().unwrap();
-        assert_eq!(item.state, "open", "item should be open after second reopen");
+        assert_eq!(
+            item.state, "open",
+            "item should be open after second reopen"
+        );
     }
 }

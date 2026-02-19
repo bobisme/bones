@@ -26,10 +26,10 @@
 use std::collections::{HashMap, HashSet};
 
 use petgraph::{
+    Direction,
     algo::condensation,
     graph::{DiGraph, NodeIndex},
     visit::{EdgeRef, IntoNodeIdentifiers},
-    Direction,
 };
 use tracing::instrument;
 
@@ -63,10 +63,7 @@ impl SccNode {
     /// lexicographically smallest member (deterministic).
     #[must_use]
     pub fn representative(&self) -> &str {
-        self.members
-            .first()
-            .map(String::as_str)
-            .unwrap_or_default()
+        self.members.first().map(String::as_str).unwrap_or_default()
     }
 }
 
@@ -238,11 +235,7 @@ pub fn transitive_reduction<N: Clone>(g: &DiGraph<N, ()>) -> DiGraph<N, ()> {
             // for some other direct successor w ≠ v of u.
             g.neighbors_directed(u, Direction::Outgoing)
                 .filter(|&w| w != v)
-                .any(|w| {
-                    reachable
-                        .get(&w)
-                        .is_some_and(|rw| rw.contains(&v))
-                })
+                .any(|w| reachable.get(&w).is_some_and(|rw| rw.contains(&v)))
         })
         .map(|e| (e.source(), e.target()))
         .collect();
@@ -285,10 +278,8 @@ mod tests {
         let mut graph = DiGraph::<String, ()>::new();
         let mut node_map = std::collections::HashMap::new();
 
-        let all_ids: std::collections::BTreeSet<&str> = edges
-            .iter()
-            .flat_map(|(a, b)| [*a, *b])
-            .collect();
+        let all_ids: std::collections::BTreeSet<&str> =
+            edges.iter().flat_map(|(a, b)| [*a, *b]).collect();
 
         for id in all_ids {
             let idx = graph.add_node(id.to_string());

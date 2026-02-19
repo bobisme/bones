@@ -98,12 +98,12 @@ impl RawGraph {
             // If either endpoint is not already a node, add it.
             // This handles references to items not in the items table
             // (e.g., deleted items still referenced in dependencies).
-            let blocker_idx = *node_map.entry(blocker.clone()).or_insert_with(|| {
-                graph.add_node(blocker.clone())
-            });
-            let blocked_idx = *node_map.entry(blocked.clone()).or_insert_with(|| {
-                graph.add_node(blocked.clone())
-            });
+            let blocker_idx = *node_map
+                .entry(blocker.clone())
+                .or_insert_with(|| graph.add_node(blocker.clone()));
+            let blocked_idx = *node_map
+                .entry(blocked.clone())
+                .or_insert_with(|| graph.add_node(blocked.clone()));
 
             // Avoid duplicate edges (petgraph allows them by default).
             if !graph.contains_edge(blocker_idx, blocked_idx) {
@@ -331,7 +331,10 @@ mod tests {
             .expect("build graph")
             .content_hash;
 
-        assert_ne!(empty_hash, with_edge_hash, "hash must change when edges added");
+        assert_ne!(
+            empty_hash, with_edge_hash,
+            "hash must change when edges added"
+        );
     }
 
     #[test]

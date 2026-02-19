@@ -41,13 +41,7 @@ fn test_db() -> Connection {
 }
 
 /// Build a create event with computed hash (via `write_event`).
-fn make_create(
-    id: &str,
-    title: &str,
-    agent: &str,
-    ts: i64,
-    parents: &[&str],
-) -> Event {
+fn make_create(id: &str, title: &str, agent: &str, ts: i64, parents: &[&str]) -> Event {
     let mut e = Event {
         wall_ts_us: ts,
         agent: agent.into(),
@@ -73,13 +67,7 @@ fn make_create(
 }
 
 /// Build an update-title event with computed hash.
-fn make_update_title(
-    id: &str,
-    title: &str,
-    agent: &str,
-    ts: i64,
-    parents: &[&str],
-) -> Event {
+fn make_update_title(id: &str, title: &str, agent: &str, ts: i64, parents: &[&str]) -> Event {
     let mut e = Event {
         wall_ts_us: ts,
         agent: agent.into(),
@@ -99,13 +87,7 @@ fn make_update_title(
 }
 
 /// Build a move event with computed hash.
-fn make_move(
-    id: &str,
-    state: State,
-    agent: &str,
-    ts: i64,
-    parents: &[&str],
-) -> Event {
+fn make_move(id: &str, state: State, agent: &str, ts: i64, parents: &[&str]) -> Event {
     let mut e = Event {
         wall_ts_us: ts,
         agent: agent.into(),
@@ -152,13 +134,7 @@ fn make_assign(
 }
 
 /// Build a comment event with computed hash.
-fn make_comment(
-    id: &str,
-    body: &str,
-    agent: &str,
-    ts: i64,
-    parents: &[&str],
-) -> Event {
+fn make_comment(id: &str, body: &str, agent: &str, ts: i64, parents: &[&str]) -> Event {
     let mut e = Event {
         wall_ts_us: ts,
         agent: agent.into(),
@@ -250,13 +226,7 @@ fn make_delete(id: &str, agent: &str, ts: i64, parents: &[&str]) -> Event {
 }
 
 /// Build a compact event with computed hash.
-fn make_compact(
-    id: &str,
-    summary: &str,
-    agent: &str,
-    ts: i64,
-    parents: &[&str],
-) -> Event {
+fn make_compact(id: &str, summary: &str, agent: &str, ts: i64, parents: &[&str]) -> Event {
     let mut e = Event {
         wall_ts_us: ts,
         agent: agent.into(),
@@ -343,8 +313,13 @@ fn project_events(events: &[Event]) -> Connection {
 #[test]
 fn linear_create_update_move_done_projects_to_sqlite() {
     let create = make_create("bn-lin1", "Auth timeout bug", "alice", 1_000, &[]);
-    let update_title =
-        make_update_title("bn-lin1", "Auth timeout bug (confirmed)", "alice", 2_000, &[]);
+    let update_title = make_update_title(
+        "bn-lin1",
+        "Auth timeout bug (confirmed)",
+        "alice",
+        2_000,
+        &[],
+    );
     let update_desc = {
         let mut e = Event {
             wall_ts_us: 3_000,
@@ -363,20 +338,19 @@ fn linear_create_update_move_done_projects_to_sqlite() {
         write_event(&mut e).expect("hash");
         e
     };
-    let assign = make_assign(
-        "bn-lin1",
-        "bob",
-        AssignAction::Assign,
-        "alice",
-        4_000,
-        &[],
-    );
+    let assign = make_assign("bn-lin1", "bob", AssignAction::Assign, "alice", 4_000, &[]);
     let comment = make_comment("bn-lin1", "Investigating…", "bob", 5_000, &[]);
     let move_doing = make_move("bn-lin1", State::Doing, "bob", 6_000, &[]);
     let move_done = make_move("bn-lin1", State::Done, "bob", 7_000, &[]);
 
     let events = vec![
-        create, update_title, update_desc, assign, comment, move_doing, move_done,
+        create,
+        update_title,
+        update_desc,
+        assign,
+        comment,
+        move_doing,
+        move_done,
     ];
     let conn = project_events(&events);
 
@@ -443,8 +417,13 @@ fn all_11_event_types_project_to_correct_sqlite_state() {
     let create_blocker = make_create("bn-all12", "Blocker item", "alice", 1_100, &[]);
 
     // 2. Update title
-    let update_title =
-        make_update_title("bn-all11", "Full coverage item (updated)", "alice", 2_000, &[]);
+    let update_title = make_update_title(
+        "bn-all11",
+        "Full coverage item (updated)",
+        "alice",
+        2_000,
+        &[],
+    );
 
     // 3. Move → Doing
     let move_doing = make_move("bn-all11", State::Doing, "alice", 3_000, &[]);
@@ -482,7 +461,14 @@ fn all_11_event_types_project_to_correct_sqlite_state() {
 
     // 10. Redact the comment (first comment event hash)
     let comment_hash = comment.event_hash.clone();
-    let redact = make_redact("bn-all11", &comment_hash, "Accidental leak", "admin", 10_000, &[]);
+    let redact = make_redact(
+        "bn-all11",
+        &comment_hash,
+        "Accidental leak",
+        "admin",
+        10_000,
+        &[],
+    );
 
     // 11. Delete (soft)
     let delete = make_delete("bn-all11", "admin", 11_000, &[]);
@@ -611,11 +597,22 @@ fn two_agents_concurrent_close_vs_reopen_reopen_wins_crdt() {
     let to_done = make_move("bn-ep1", State::Done, "agent-a", 2_000, &[&root.event_hash]);
 
     // Agent A: closes to Archived (epoch 0, Archived)
-    let close_archived =
-        make_move("bn-ep1", State::Archived, "agent-a", 3_000, &[&to_done.event_hash]);
+    let close_archived = make_move(
+        "bn-ep1",
+        State::Archived,
+        "agent-a",
+        3_000,
+        &[&to_done.event_hash],
+    );
 
     // Agent B: reopens (epoch 1, Open)
-    let reopen = make_move("bn-ep1", State::Open, "agent-b", 3_100, &[&to_done.event_hash]);
+    let reopen = make_move(
+        "bn-ep1",
+        State::Open,
+        "agent-b",
+        3_100,
+        &[&to_done.event_hash],
+    );
 
     // Build DAG
     let dag = EventDag::from_events(&[
@@ -626,12 +623,8 @@ fn two_agents_concurrent_close_vs_reopen_reopen_wins_crdt() {
     ]);
 
     // Get merged events
-    let replay = replay_divergent(
-        &dag,
-        &close_archived.event_hash,
-        &reopen.event_hash,
-    )
-    .expect("replay");
+    let replay =
+        replay_divergent(&dag, &close_archived.event_hash, &reopen.event_hash).expect("replay");
 
     // Apply via CRDT
     let mut state = WorkItemState::new();
@@ -643,7 +636,11 @@ fn two_agents_concurrent_close_vs_reopen_reopen_wins_crdt() {
 
     // Reopen (epoch 1) wins over archived (epoch 0)
     assert_eq!(state.epoch(), 1, "reopen should increment epoch to 1");
-    assert_eq!(state.phase(), Phase::Open, "reopen should set phase to Open");
+    assert_eq!(
+        state.phase(),
+        Phase::Open,
+        "reopen should set phase to Open"
+    );
 }
 
 /// Scenario C: Two agents concurrently assign different people.
@@ -702,7 +699,13 @@ fn two_agents_concurrent_assigns_both_preserved() {
 /// G-Set semantics: both comments should be preserved in the union.
 #[test]
 fn two_agents_concurrent_comments_both_preserved() {
-    let root = make_create("bn-comments1", "Comment convergence test", "admin", 1_000, &[]);
+    let root = make_create(
+        "bn-comments1",
+        "Comment convergence test",
+        "admin",
+        1_000,
+        &[],
+    );
 
     let comment_a = make_comment(
         "bn-comments1",
@@ -778,8 +781,14 @@ fn two_agents_concurrent_label_adds_both_preserved() {
 
     state_a.merge(&state_b);
     let labels = state_a.label_names();
-    assert!(labels.contains(&"frontend".to_string()), "frontend label preserved");
-    assert!(labels.contains(&"backend".to_string()), "backend label preserved");
+    assert!(
+        labels.contains(&"frontend".to_string()),
+        "frontend label preserved"
+    );
+    assert!(
+        labels.contains(&"backend".to_string()),
+        "backend label preserved"
+    );
 }
 
 /// Scenario F: Multi-agent deep fork then converge.
@@ -824,7 +833,14 @@ fn three_items_multi_agent_link_convergence() {
     );
 
     let events = vec![
-        create1, create2, create3, link_2_to_1, link_3_to_2, assign1, assign2, assign3,
+        create1,
+        create2,
+        create3,
+        link_2_to_1,
+        link_3_to_2,
+        assign1,
+        assign2,
+        assign3,
     ];
     let conn = project_events(&events);
 
@@ -858,14 +874,7 @@ fn incremental_replay_matches_full_replay_10_events() {
         make_create("bn-inc1", "Incremental item", "alice", 1_000, &[]),
         make_update_title("bn-inc1", "Incremental item v2", "alice", 2_000, &[]),
         make_move("bn-inc1", State::Doing, "alice", 3_000, &[]),
-        make_assign(
-            "bn-inc1",
-            "bob",
-            AssignAction::Assign,
-            "alice",
-            4_000,
-            &[],
-        ),
+        make_assign("bn-inc1", "bob", AssignAction::Assign, "alice", 4_000, &[]),
         make_comment("bn-inc1", "Progress update", "bob", 5_000, &[]),
         make_create("bn-inc2", "Second item", "bob", 6_000, &[]),
         make_link("bn-inc2", "bn-inc1", "blocks", "bob", 7_000, &[]),
@@ -923,7 +932,11 @@ fn incremental_replay_matches_full_replay_10_events() {
     // Comments match
     let full_comments = query::get_comments(&conn_full, "bn-inc1").expect("comments full");
     let inc_comments = query::get_comments(&conn_inc, "bn-inc1").expect("comments inc");
-    assert_eq!(full_comments.len(), inc_comments.len(), "comment count mismatch");
+    assert_eq!(
+        full_comments.len(),
+        inc_comments.len(),
+        "comment count mismatch"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -945,9 +958,22 @@ fn five_orderings_dag_topological_order_is_identical() {
 
     // ---- item 1 chain ----
     let e01 = make_create("bn-ord1", "Order item 1", "alice", 1_000, &[]);
-    let e02 = make_update_title("bn-ord1", "Order item 1 (updated)", "alice", 2_000, &[&e01.event_hash]);
+    let e02 = make_update_title(
+        "bn-ord1",
+        "Order item 1 (updated)",
+        "alice",
+        2_000,
+        &[&e01.event_hash],
+    );
     let e03 = make_move("bn-ord1", State::Doing, "alice", 3_000, &[&e02.event_hash]);
-    let e04 = make_assign("bn-ord1", "bob", AssignAction::Assign, "alice", 4_000, &[&e03.event_hash]);
+    let e04 = make_assign(
+        "bn-ord1",
+        "bob",
+        AssignAction::Assign,
+        "alice",
+        4_000,
+        &[&e03.event_hash],
+    );
 
     // ---- item 2 chain ----
     let e05 = make_create("bn-ord2", "Order item 2", "bob", 1_100, &[]);
@@ -955,13 +981,33 @@ fn five_orderings_dag_topological_order_is_identical() {
 
     // ---- item 3 chain ----
     let e07 = make_create("bn-ord3", "Order item 3", "carol", 1_200, &[]);
-    let e08 = make_comment("bn-ord3", "Carol's note", "carol", 6_000, &[&e07.event_hash]);
+    let e08 = make_comment(
+        "bn-ord3",
+        "Carol's note",
+        "carol",
+        6_000,
+        &[&e07.event_hash],
+    );
 
     // ---- item 4 chain (links to item 1, causal deps include e01 to ensure ordering) ----
     let e09 = make_create("bn-ord4", "Order item 4", "dave", 1_300, &[]);
     // e10 depends on BOTH e09 (its item) and e01 (the link target) to enforce causal order
-    let e10 = make_link("bn-ord4", "bn-ord1", "blocks", "dave", 7_000, &[&e09.event_hash, &e01.event_hash]);
-    let e11 = make_assign("bn-ord4", "alice", AssignAction::Assign, "dave", 8_000, &[&e10.event_hash]);
+    let e10 = make_link(
+        "bn-ord4",
+        "bn-ord1",
+        "blocks",
+        "dave",
+        7_000,
+        &[&e09.event_hash, &e01.event_hash],
+    );
+    let e11 = make_assign(
+        "bn-ord4",
+        "alice",
+        AssignAction::Assign,
+        "dave",
+        8_000,
+        &[&e10.event_hash],
+    );
 
     // ---- item 5 chain ----
     let e12 = make_create("bn-ord5", "Order item 5", "eve", 1_400, &[]);
@@ -975,33 +1021,70 @@ fn five_orderings_dag_topological_order_is_identical() {
 
     // ---- cross-item operations ----
     // e18: bn-ord2 links to bn-ord3; causally depends on both items' create events
-    let e18 = make_link("bn-ord2", "bn-ord3", "related_to", "bob", 14_000, &[&e06.event_hash, &e07.event_hash]);
-    let e19 = make_assign("bn-ord3", "dave", AssignAction::Assign, "carol", 15_000, &[&e08.event_hash]);
+    let e18 = make_link(
+        "bn-ord2",
+        "bn-ord3",
+        "related_to",
+        "bob",
+        14_000,
+        &[&e06.event_hash, &e07.event_hash],
+    );
+    let e19 = make_assign(
+        "bn-ord3",
+        "dave",
+        AssignAction::Assign,
+        "carol",
+        15_000,
+        &[&e08.event_hash],
+    );
     let e20 = make_comment("bn-ord2", "Summary", "bob", 16_000, &[&e18.event_hash]);
 
     let canonical_events: Vec<Event> = vec![
-        e01.clone(), e02.clone(), e03.clone(), e04.clone(),
-        e05.clone(), e06.clone(),
-        e07.clone(), e08.clone(),
-        e09.clone(), e10.clone(), e11.clone(),
-        e12.clone(), e13.clone(), e14.clone(), e15.clone(),
-        e16.clone(), e17.clone(),
-        e18.clone(), e19.clone(), e20.clone(),
+        e01.clone(),
+        e02.clone(),
+        e03.clone(),
+        e04.clone(),
+        e05.clone(),
+        e06.clone(),
+        e07.clone(),
+        e08.clone(),
+        e09.clone(),
+        e10.clone(),
+        e11.clone(),
+        e12.clone(),
+        e13.clone(),
+        e14.clone(),
+        e15.clone(),
+        e16.clone(),
+        e17.clone(),
+        e18.clone(),
+        e19.clone(),
+        e20.clone(),
     ];
     assert_eq!(canonical_events.len(), 20);
 
     // 5 permutations of the event slice (different insertion orders into the DAG)
     let permutations: &[&[usize]] = &[
         // Original order
-        &[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
+        &[
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        ],
         // Reversed
-        &[19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0],
+        &[
+            19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+        ],
         // Interleaved by item
-        &[0,4,6,8,11,1,5,7,9,12,2,15,13,10,3,16,17,14,18,19],
+        &[
+            0, 4, 6, 8, 11, 1, 5, 7, 9, 12, 2, 15, 13, 10, 3, 16, 17, 14, 18, 19,
+        ],
         // Items in reverse, events within each item forward
-        &[11,12,13,14,8,9,10,6,7,18,4,5,17,19,0,1,2,3,15,16],
+        &[
+            11, 12, 13, 14, 8, 9, 10, 6, 7, 18, 4, 5, 17, 19, 0, 1, 2, 3, 15, 16,
+        ],
         // All creates first, then rest
-        &[0,4,6,8,11,1,2,3,5,7,9,10,12,13,14,15,16,17,18,19],
+        &[
+            0, 4, 6, 8, 11, 1, 2, 3, 5, 7, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19,
+        ],
     ];
 
     // Compute topological order from canonical DAG (baseline)
@@ -1098,7 +1181,9 @@ fn rebuild_clear_and_replay_identical_to_original() {
     assert_eq!(item_count, 0, "items table must be empty after clear");
 
     // Replay all events
-    projector.project_batch(&events).expect("rebuild projection");
+    projector
+        .project_batch(&events)
+        .expect("rebuild projection");
 
     // Verify state is identical to before
     let item1_after = query::get_item(&conn, "bn-rb1", false)
@@ -1142,7 +1227,14 @@ fn two_rebuilds_from_same_events_are_identical() {
         make_create("bn-det3", "Determinism check 3", "carol", 1_002, &[]),
         make_update_title("bn-det1", "Determinism check 1 (v2)", "alice", 2_000, &[]),
         make_move("bn-det2", State::Doing, "bob", 3_000, &[]),
-        make_assign("bn-det3", "alice", AssignAction::Assign, "carol", 4_000, &[]),
+        make_assign(
+            "bn-det3",
+            "alice",
+            AssignAction::Assign,
+            "carol",
+            4_000,
+            &[],
+        ),
         make_link("bn-det2", "bn-det1", "blocks", "bob", 5_000, &[]),
     ];
 
@@ -1224,9 +1316,8 @@ fn dag_divergent_replay_pipeline_full() {
     ]);
 
     // Divergent replay: tip_a = branch_a, tip_b = branch_b_assign
-    let replay_result =
-        replay_divergent(&dag, &branch_a.event_hash, &branch_b_assign.event_hash)
-            .expect("replay_divergent");
+    let replay_result = replay_divergent(&dag, &branch_a.event_hash, &branch_b_assign.event_hash)
+        .expect("replay_divergent");
 
     assert_eq!(replay_result.lca, root.event_hash, "LCA should be root");
 
@@ -1268,10 +1359,8 @@ fn dag_divergent_replay_pipeline_full() {
 #[test]
 fn dag_divergent_replay_is_symmetric() {
     let root = make_create("bn-sym1", "Symmetry test", "agent-root", 1_000, &[]);
-    let tip_a =
-        make_update_title("bn-sym1", "Title A", "agent-a", 2_000, &[&root.event_hash]);
-    let tip_b =
-        make_update_title("bn-sym1", "Title B", "agent-b", 2_100, &[&root.event_hash]);
+    let tip_a = make_update_title("bn-sym1", "Title A", "agent-a", 2_000, &[&root.event_hash]);
+    let tip_b = make_update_title("bn-sym1", "Title B", "agent-b", 2_100, &[&root.event_hash]);
 
     let dag = EventDag::from_events(&[root.clone(), tip_a.clone(), tip_b.clone()]);
 
@@ -1281,8 +1370,16 @@ fn dag_divergent_replay_is_symmetric() {
         replay_divergent(&dag, &tip_b.event_hash, &tip_a.event_hash).expect("replay BA");
 
     // Merged sequences must be identical (same hashes, same order)
-    let hashes_ab: Vec<&str> = replay_ab.merged.iter().map(|e| e.event_hash.as_str()).collect();
-    let hashes_ba: Vec<&str> = replay_ba.merged.iter().map(|e| e.event_hash.as_str()).collect();
+    let hashes_ab: Vec<&str> = replay_ab
+        .merged
+        .iter()
+        .map(|e| e.event_hash.as_str())
+        .collect();
+    let hashes_ba: Vec<&str> = replay_ba
+        .merged
+        .iter()
+        .map(|e| e.event_hash.as_str())
+        .collect();
     assert_eq!(hashes_ab, hashes_ba, "divergent replay must be symmetric");
 
     // Applying both in merged order must produce same CRDT state
@@ -1363,7 +1460,11 @@ fn dag_post_merge_fork_lca_is_merge_point() {
         "LCA should be the merge event for a post-merge fork"
     );
     // Only 2 divergent events: c and d
-    assert_eq!(replay.merged.len(), 2, "only 2 divergent events after merge point");
+    assert_eq!(
+        replay.merged.len(),
+        2,
+        "only 2 divergent events after merge point"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1467,7 +1568,10 @@ fn replay_20_mixed_events_correct_sqlite_state() {
 
     // bn-mix2: unlinked (no deps to mix1)
     let mix2_deps = query::get_dependencies(&conn, "bn-mix2").expect("mix2 deps");
-    assert!(mix2_deps.is_empty(), "bn-mix2's link to bn-mix1 was removed");
+    assert!(
+        mix2_deps.is_empty(),
+        "bn-mix2's link to bn-mix1 was removed"
+    );
 
     // bn-mix3: compact summary set, deleted
     let mix3 = query::get_item(&conn, "bn-mix3", true)
