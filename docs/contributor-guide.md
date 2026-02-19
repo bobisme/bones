@@ -24,6 +24,19 @@ cargo fmt --all
 cargo clippy --all-targets --all-features
 ```
 
+## Event Merge Conflict Workaround (maw + jj)
+
+Until maw supports union-style auto resolution for `.bones/events` (`bd-17vr`), resolve event-file conflicts with the bones merge tool:
+
+```bash
+bn merge-tool --setup
+jj resolve --tool bones
+```
+
+Notes:
+- `.beads/**` can still use take-main auto resolution.
+- Do **not** restore `.bones/events` from main; that can discard local events.
+
 ## How to Add a New Event Type
 
 1. Add/extend the event type definition in `bones-core`.
