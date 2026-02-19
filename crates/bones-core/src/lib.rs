@@ -7,6 +7,7 @@ pub mod error;
 pub mod event;
 pub mod lock;
 pub mod model;
+pub mod shard;
 
 use tracing::{info, instrument};
 

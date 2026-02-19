@@ -27,4 +27,5 @@ serde_json = "1.0"
 tracing = "0.1"
 thiserror = "1.0"
 tracing-subscriber = "0.3"
+tempfile = "3.10"
 terseid = { git = "https://github.com/bobisme/terseid.git" }

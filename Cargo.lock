@@ -182,6 +182,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "terseid",
  "thiserror 1.0.69",
  "tracing",
