@@ -36,3 +36,4 @@ pub mod basic;
 pub mod betweenness;
 pub mod eigenvector;
 pub mod hits;
+pub mod pagerank;
