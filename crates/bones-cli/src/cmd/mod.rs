@@ -2,6 +2,7 @@ pub mod archive;
 pub mod close;
 pub mod completions;
 pub mod create;
+pub mod diagnose;
 pub mod do_cmd;
 pub mod done;
 pub mod import;

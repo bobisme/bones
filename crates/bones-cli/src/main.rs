@@ -204,6 +204,14 @@ enum Commands {
     },
 
     #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Run repository diagnostics",
+        long_about = "Summarize event-log health, integrity anomalies, and projection drift indicators.",
+        after_help = "EXAMPLES:\n    # Human-readable diagnostics\n    bn diagnose\n\n    # Machine-readable diagnostics\n    bn diagnose --json"
+    )]
+    Diagnose,
+
+    #[command(
         next_help_heading = "Sync",
         about = "Synchronize local and remote state",
         long_about = "Synchronize with remote: git pull, rebuild projection, then git push.",
@@ -485,6 +493,9 @@ fn main() -> anyhow::Result<()> {
                 cmd::verify::run_verify(&project_root, regenerate_missing)
             }
         }),
+        Commands::Diagnose => timing::timed("cmd.diagnose", || {
+            cmd::diagnose::run_diagnose(output, &project_root)
+        }),
         Commands::Rebuild { incremental } => timing::timed("cmd.rebuild", || {
             cmd::rebuild::run_rebuild(&project_root, incremental)
         }),
@@ -634,6 +645,12 @@ mod tests {
     }
 
     #[test]
+    fn diagnose_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "diagnose"]);
+        assert!(matches!(cli.command, Commands::Diagnose));
+    }
+
+    #[test]
     fn tag_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "tag", "item-123", "bug", "urgent"]);
         assert!(matches!(cli.command, Commands::Tag(_)));
@@ -680,6 +697,7 @@ mod tests {
             vec!["bn", "untag", "x", "l"],
             vec!["bn", "move", "x", "--parent", "p"],
             vec!["bn", "completions", "bash"],
+            vec!["bn", "diagnose"],
         ];
         for args in &subcommands {
             let result = Cli::try_parse_from(args.iter());
