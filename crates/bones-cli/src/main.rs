@@ -45,6 +45,12 @@ enum Commands {
         staged: bool,
     },
 
+    /// Synchronize with remote: git pull → rebuild projection → git push.
+    ///
+    /// Also ensures `.gitattributes` and `.gitignore` are correctly configured
+    /// for the bones-events merge driver and derived-file ignores.
+    Sync(cmd::sync::SyncArgs),
+
     /// Rebuild the projection (currently a placeholder command for hook integration).
     Rebuild {
         /// Rebuild incrementally from the last projection cursor.
@@ -232,6 +238,9 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init(args) => {
             cmd::init::run_init(&args, &project_root)?;
+        }
+        Commands::Sync(args) => {
+            cmd::sync::run_sync(&args, &project_root)?;
         }
         Commands::Hooks {
             command: HookCommand::Install,
