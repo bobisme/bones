@@ -32,6 +32,7 @@
 //! let ev = eigenvector_centrality(&ng, 100, 1e-6);
 //! ```
 
+pub mod basic;
 pub mod betweenness;
 pub mod eigenvector;
 pub mod hits;
