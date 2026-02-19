@@ -4,6 +4,7 @@ pub mod done;
 pub mod import;
 pub mod init;
 pub mod list;
+pub mod migrate;
 pub mod move_cmd;
 pub mod rebuild;
 pub mod show;

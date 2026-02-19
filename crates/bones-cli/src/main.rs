@@ -177,6 +177,14 @@ enum Commands {
     Import(cmd::import::ImportArgs),
 
     #[command(
+        next_help_heading = "Sync",
+        about = "Migrate from a beads project",
+        long_about = "Migrate an existing beads project database into bones events.",
+        after_help = "EXAMPLES:\n    # Migrate from a beads SQLite database\n    bn migrate-from-beads --source beads.db\n\n    # Emit machine-readable output\n    bn migrate-from-beads --source beads.db --json"
+    )]
+    MigrateFromBeads(cmd::migrate::MigrateArgs),
+
+    #[command(
         next_help_heading = "Project Maintenance",
         about = "Rebuild the projection",
         long_about = "Rebuild the local projection database from append-only event shards.",
@@ -403,6 +411,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Import(args) => timing::timed("cmd.import", || {
             cmd::import::run_import(&args, &project_root)
+        }),
+        Commands::MigrateFromBeads(args) => timing::timed("cmd.migrate_from_beads", || {
+            cmd::migrate::run_migrate(&args, &project_root)
         }),
         Commands::Hooks {
             command: HookCommand::Install,
