@@ -742,10 +742,7 @@ mod tests {
         let mgr = ShardManager::new("/repo/.bones");
         assert_eq!(mgr.events_dir(), PathBuf::from("/repo/.bones/events"));
         assert_eq!(mgr.lock_path(), PathBuf::from("/repo/.bones/lock"));
-        assert_eq!(
-            mgr.clock_path(),
-            PathBuf::from("/repo/.bones/cache/clock")
-        );
+        assert_eq!(mgr.clock_path(), PathBuf::from("/repo/.bones/cache/clock"));
         assert_eq!(
             mgr.current_symlink(),
             PathBuf::from("/repo/.bones/events/current.events")
@@ -1305,10 +1302,7 @@ mod tests {
         #[cfg(unix)]
         {
             let target = fs::read_link(mgr.current_symlink()).expect("readlink");
-            assert_eq!(
-                target,
-                PathBuf::from(ShardManager::shard_filename(ey, em))
-            );
+            assert_eq!(target, PathBuf::from(ShardManager::shard_filename(ey, em)));
         }
     }
 

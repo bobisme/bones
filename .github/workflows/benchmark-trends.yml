@@ -1,0 +1,26 @@
+name: Benchmark Trends
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+  BONES_BENCH_MAX_EVENTS: 25000
+
+jobs:
+  benchmark:
+    name: Tiered benchmark snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run benchmark harness
+        run: cargo bench -p bones-core --bench operations --bench report -- --noplot
+      - name: Upload criterion output
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-output
+          path: target/criterion
+          if-no-files-found: warn

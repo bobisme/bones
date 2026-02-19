@@ -46,9 +46,7 @@ fn sum_id(a: &Id, b: &Id) -> Id {
     match (a, b) {
         (Id::Zero, _) => b.clone(),
         (_, Id::Zero) => a.clone(),
-        (Id::Branch(al, ar), Id::Branch(bl, br)) => {
-            Id::branch(sum_id(al, bl), sum_id(ar, br))
-        }
+        (Id::Branch(al, ar), Id::Branch(bl, br)) => Id::branch(sum_id(al, bl), sum_id(ar, br)),
         // (One, anything-non-zero) or (anything-non-zero, One) — both own some
         // part, and since ITC invariant says intervals don't overlap, this
         // can only happen when merging complementary halves → result is One.
@@ -124,8 +122,7 @@ fn leq_event(a: &Event, b: &Event) -> bool {
                 true
             } else {
                 let remainder = na - nb;
-                leq_event(&Event::leaf(remainder), bl)
-                    && leq_event(&Event::leaf(remainder), br)
+                leq_event(&Event::leaf(remainder), bl) && leq_event(&Event::leaf(remainder), br)
             }
         }
         (Event::Branch(_na, _al, _ar), Event::Leaf(nb)) => {
@@ -214,12 +211,8 @@ fn grow(id: &Id, event: &Event) -> Option<(Event, u32)> {
                         Some((Event::branch(*n, (**l).clone(), new_r), cr))
                     }
                 }
-                (Some((new_l, cl)), None) => {
-                    Some((Event::branch(*n, new_l, (**r).clone()), cl))
-                }
-                (None, Some((new_r, cr))) => {
-                    Some((Event::branch(*n, (**l).clone(), new_r), cr))
-                }
+                (Some((new_l, cl)), None) => Some((Event::branch(*n, new_l, (**r).clone()), cl)),
+                (None, Some((new_r, cr))) => Some((Event::branch(*n, (**l).clone(), new_r), cr)),
                 (None, None) => None,
             }
         }
@@ -255,12 +248,8 @@ fn grow(id: &Id, event: &Event) -> Option<(Event, u32)> {
                         Some((Event::branch(*n, (**el).clone(), new_r), cr))
                     }
                 }
-                (Some((new_l, cl)), None) => {
-                    Some((Event::branch(*n, new_l, (**er).clone()), cl))
-                }
-                (None, Some((new_r, cr))) => {
-                    Some((Event::branch(*n, (**el).clone(), new_r), cr))
-                }
+                (Some((new_l, cl)), None) => Some((Event::branch(*n, new_l, (**er).clone()), cl)),
+                (None, Some((new_r, cr))) => Some((Event::branch(*n, (**el).clone(), new_r), cr)),
                 (None, None) => None,
             }
         }
@@ -720,7 +709,9 @@ mod tests {
         let (mut a5, mut a6) = q3.fork();
         let (mut a7, mut a8) = q4.fork();
 
-        let mut agents = [&mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8];
+        let mut agents = [
+            &mut a1, &mut a2, &mut a3, &mut a4, &mut a5, &mut a6, &mut a7, &mut a8,
+        ];
 
         // Each agent does (i+1) events
         for (i, agent) in agents.iter_mut().enumerate() {

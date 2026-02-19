@@ -19,5 +19,18 @@ terseid = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
+
+[[bench]]
+name = "corpus"
+harness = false
+
+[[bench]]
+name = "operations"
+harness = false
+
+[[bench]]
+name = "report"
+harness = false
