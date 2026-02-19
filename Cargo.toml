@@ -8,6 +8,13 @@ members = [
     "crates/bones-sim",
 ]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A CRDT-native issue tracker for distributed teams and AI agents"
+repository = "https://github.com/bobisme/bones"
+
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
@@ -30,4 +37,5 @@ tracing-subscriber = "0.3"
 tempfile = "3.10"
 terseid = { git = "https://github.com/bobisme/terseid.git" }
 criterion = "0.5"
+clap_complete = "4.5"
 petgraph = "0.6"

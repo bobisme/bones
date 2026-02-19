@@ -7,7 +7,7 @@ mod output;
 mod validate;
 
 use bones_core::timing;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use output::OutputMode;
 use std::env;
 use std::fs;
@@ -137,6 +137,14 @@ enum Commands {
         after_help = "EXAMPLES:\n    # Move under a goal\n    bn move bn-task --parent bn-goal\n\n    # Emit machine-readable output\n    bn move bn-task --parent bn-goal --json"
     )]
     Move(cmd::move_cmd::MoveArgs),
+
+    #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Generate shell completion scripts",
+        long_about = "Generate shell completion scripts for supported shells.",
+        after_help = "EXAMPLES:\n    # Generate bash completions\n    bn completions bash\n\n    # Generate zsh completions\n    bn completions zsh"
+    )]
+    Completions(cmd::completions::CompletionsArgs),
 
     #[command(next_help_heading = "Project Maintenance", about = "Manage optional git hooks")]
     Hooks {
@@ -452,6 +460,11 @@ fn main() -> anyhow::Result<()> {
             merge_files(&base, &left, &right, &output)
         }),
 
+        Commands::Completions(args) => timing::timed("cmd.completions", || {
+            let mut command = Cli::command();
+            cmd::completions::run_completions(args.shell, &mut command)
+        }),
+
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
             git::merge_driver::merge_driver_main(&base, &ours, &theirs)
         }),
@@ -586,6 +599,17 @@ mod tests {
     }
 
     #[test]
+    fn completions_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "completions", "bash"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Completions(cmd::completions::CompletionsArgs {
+                shell: clap_complete::Shell::Bash,
+            })
+        ));
+    }
+
+    #[test]
     fn all_subcommands_listed() {
         // Verify all planned lifecycle subcommands exist by parsing each
         let subcommands = [
@@ -598,6 +622,7 @@ mod tests {
             vec!["bn", "tag", "x", "l"],
             vec!["bn", "untag", "x", "l"],
             vec!["bn", "move", "x", "--parent", "p"],
+            vec!["bn", "completions", "bash"],
         ];
         for args in &subcommands {
             let result = Cli::try_parse_from(args.iter());

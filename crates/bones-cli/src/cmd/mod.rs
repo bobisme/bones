@@ -1,3 +1,4 @@
+pub mod completions;
 pub mod create;
 pub mod do_cmd;
 pub mod done;
