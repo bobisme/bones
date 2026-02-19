@@ -65,40 +65,90 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Initialize a new bones project in the current directory.
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Initialize a bones project",
+        long_about = "Initialize a bones project in the current directory.",
+        after_help = "EXAMPLES:\n    # Initialize a project in the current directory\n    bn init\n\n    # Emit machine-readable output\n    bn init --json"
+    )]
     Init(cmd::init::InitArgs),
 
-    /// Create a new work item.
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Create a new work item",
+        long_about = "Create a new work item and append an item.create event.",
+        after_help = "EXAMPLES:\n    # Create a task\n    bn create --title \"Fix login timeout\"\n\n    # Create a goal\n    bn create --title \"Launch v2\" --kind goal\n\n    # Emit machine-readable output\n    bn create --title \"Fix login timeout\" --json"
+    )]
     Create(cmd::create::CreateArgs),
 
-    /// List work items with optional filters.
+    #[command(
+        next_help_heading = "Read",
+        about = "List work items",
+        long_about = "List work items with optional filters and sort order.",
+        after_help = "EXAMPLES:\n    # List open items (default)\n    bn list\n\n    # Filter by state and label\n    bn list --state doing --label backend\n\n    # Emit machine-readable output\n    bn list --json"
+    )]
     List(cmd::list::ListArgs),
 
-    /// Show details of a single work item.
+    #[command(
+        next_help_heading = "Read",
+        about = "Show one work item",
+        long_about = "Show full details for a single work item by ID.",
+        after_help = "EXAMPLES:\n    # Show an item\n    bn show bn-abc\n\n    # Use a short prefix when unique\n    bn show abc\n\n    # Emit machine-readable output\n    bn show bn-abc --json"
+    )]
     Show(cmd::show::ShowArgs),
 
-    /// Transition an item to "doing" state.
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Mark item as doing",
+        long_about = "Transition a work item to the doing state.",
+        after_help = "EXAMPLES:\n    # Start work on an item\n    bn do bn-abc\n\n    # Emit machine-readable output\n    bn do bn-abc --json"
+    )]
     Do(cmd::do_cmd::DoArgs),
 
-    /// Mark an item as "done".
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Mark item as done",
+        long_about = "Transition a work item to the done state.",
+        after_help = "EXAMPLES:\n    # Complete an item\n    bn done bn-abc\n\n    # Emit machine-readable output\n    bn done bn-abc --json"
+    )]
     Done(cmd::done::DoneArgs),
 
-    /// Add labels to a work item.
+    #[command(
+        next_help_heading = "Metadata",
+        about = "Add labels to an item",
+        long_about = "Attach one or more labels to an existing work item.",
+        after_help = "EXAMPLES:\n    # Add labels\n    bn tag bn-abc bug urgent\n\n    # Emit machine-readable output\n    bn tag bn-abc bug --json"
+    )]
     Tag(cmd::tag::TagArgs),
 
-    /// Remove labels from a work item.
+    #[command(
+        next_help_heading = "Metadata",
+        about = "Remove labels from an item",
+        long_about = "Remove one or more labels from an existing work item.",
+        after_help = "EXAMPLES:\n    # Remove a label\n    bn untag bn-abc urgent\n\n    # Emit machine-readable output\n    bn untag bn-abc urgent --json"
+    )]
     Untag(cmd::tag::UntagArgs),
 
-    /// Move a work item under a different parent.
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Move item under a parent",
+        long_about = "Change a work item's parent to reorganize hierarchy.",
+        after_help = "EXAMPLES:\n    # Move under a goal\n    bn move bn-task --parent bn-goal\n\n    # Emit machine-readable output\n    bn move bn-task --parent bn-goal --json"
+    )]
     Move(cmd::move_cmd::MoveArgs),
 
-    /// Install optional git hooks for projection refresh and staged event validation.
+    #[command(next_help_heading = "Project Maintenance", about = "Manage optional git hooks")]
     Hooks {
         #[command(subcommand)]
         command: HookCommand,
     },
 
-    /// Verify shard manifests and event integrity.
+    #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Verify event and manifest integrity",
+        long_about = "Verify shard manifests and event integrity checks for this project.",
+        after_help = "EXAMPLES:\n    # Verify all shard files\n    bn verify\n\n    # Verify only staged files\n    bn verify --staged\n\n    # Emit machine-readable output\n    bn verify --json"
+    )]
     Verify {
         /// Validate only staged files.
         #[arg(long)]
@@ -109,23 +159,40 @@ enum Commands {
         regenerate_missing: bool,
     },
 
-    /// Synchronize with remote: git pull → rebuild projection → git push.
-    ///
-    /// Also ensures `.gitattributes` and `.gitignore` are correctly configured
-    /// for the bones-events merge driver and derived-file ignores.
+    #[command(
+        next_help_heading = "Sync",
+        about = "Synchronize local and remote state",
+        long_about = "Synchronize with remote: git pull, rebuild projection, then git push.",
+        after_help = "EXAMPLES:\n    # Sync from and to remote\n    bn sync\n\n    # Emit machine-readable output\n    bn sync --json"
+    )]
     Sync(cmd::sync::SyncArgs),
 
-    /// Import data from external trackers.
+    #[command(
+        next_help_heading = "Interoperability",
+        about = "Import external tracker data",
+        long_about = "Import issues and metadata from supported external tracker formats.",
+        after_help = "EXAMPLES:\n    # Import from a JSON export\n    bn import --from linear --file linear.json\n\n    # Emit machine-readable output\n    bn import --from linear --file linear.json --json"
+    )]
     Import(cmd::import::ImportArgs),
 
-    /// Rebuild the projection (currently a placeholder command for hook integration).
+    #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Rebuild the projection",
+        long_about = "Rebuild the local projection database from append-only event shards.",
+        after_help = "EXAMPLES:\n    # Full rebuild\n    bn rebuild\n\n    # Incremental rebuild\n    bn rebuild --incremental\n\n    # Emit machine-readable output\n    bn rebuild --json"
+    )]
     Rebuild {
         /// Rebuild incrementally from the last projection cursor.
         #[arg(long)]
         incremental: bool,
     },
 
-    /// Merge tool for jj conflict resolution on append-only event files
+    #[command(
+        next_help_heading = "Merge Integration",
+        about = "Run merge tool for event files",
+        long_about = "Run the merge tool used for append-only .events conflict resolution.",
+        after_help = "EXAMPLES:\n    # Configure jj to use this merge tool\n    bn merge-tool --setup\n\n    # Run merge tool directly\n    bn merge-tool base.events left.events right.events out.events"
+    )]
     MergeTool {
         /// Configure jj to use bones as a merge tool
         #[arg(long)]
@@ -148,19 +215,12 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
-    /// Git merge driver for *.events shard files.
-    ///
-    /// Invoked automatically by git when merging `.events` files.
-    /// Registered via `.gitattributes` and `.git/config`:
-    ///
-    ///   .gitattributes:  *.events merge=bones-events
-    ///   .git/config:     [merge "bones-events"]
-    ///                        driver = bn merge-driver %O %A %B
-    ///
-    /// Reads base (%O), ours (%A), and theirs (%B) versions of a shard file,
-    /// merges ours and theirs using CRDT union semantics (dedup by hash,
-    /// sort by timestamp/agent/hash), and writes the merged result to the
-    /// ours path (%A). Exits 0 on success.
+    #[command(
+        next_help_heading = "Merge Integration",
+        about = "Run git merge driver for .events",
+        long_about = "Internal command invoked by git merge driver for .events shard files.",
+        after_help = "EXAMPLES:\n    # Invoked by git; not typically run manually\n    bn merge-driver %O %A %B"
+    )]
     MergeDriver {
         /// Base file — the common ancestor version (git %O placeholder).
         #[arg(value_name = "BASE")]
@@ -178,7 +238,10 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum HookCommand {
-    /// Install optional git hooks (`post-merge`, `pre-commit`).
+    #[command(
+        about = "Install optional git hooks",
+        after_help = "EXAMPLES:\n    # Install post-merge and pre-commit hooks\n    bn hooks install"
+    )]
     Install,
 }
 
