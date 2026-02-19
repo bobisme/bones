@@ -1,4 +1,5 @@
 pub mod gset;
+pub mod lww;
 pub mod merge;
 pub mod orset;
 pub mod state;
