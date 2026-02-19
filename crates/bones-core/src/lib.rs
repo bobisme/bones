@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod crdt;
+pub mod dag;
 pub mod error;
 pub mod event;
 pub mod lock;
