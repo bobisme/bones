@@ -121,6 +121,164 @@ fn node_id(graph: &DiGraph<String, ()>, idx: NodeIndex) -> String {
         .unwrap_or_else(|| format!("#{}", idx.index()))
 }
 
+// ---------------------------------------------------------------------------
+// Cycle break suggestions
+// ---------------------------------------------------------------------------
+
+/// A detected dependency cycle with suggested edges to remove to break it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleReport {
+    /// Sorted item IDs that form this cycle (members of the SCC).
+    pub members: Vec<String>,
+    /// Suggested `(blocker, blocked)` edges to remove to break the cycle.
+    ///
+    /// These are back-edges identified by DFS within the SCC.  Removing all
+    /// suggested edges will make the SCC acyclic.  In most cases a single
+    /// edge is sufficient.
+    pub suggested_breaks: Vec<(String, String)>,
+}
+
+/// Detect all cycles and, for each, suggest edges to remove to break them.
+///
+/// Internally uses Tarjan's SCC to identify cycle members, then runs a DFS
+/// within each SCC sub-graph to collect back-edges.  Back-edges are the
+/// canonical set to remove to make an SCC acyclic.
+///
+/// Self-loops are reported with the single edge `(id, id)` as the break.
+#[must_use]
+pub fn report_cycles_with_breaks(graph: &DiGraph<String, ()>) -> Vec<CycleReport> {
+    let scc_list = tarjan_scc(graph);
+
+    let mut reports: Vec<CycleReport> = scc_list
+        .into_iter()
+        .filter(|component| {
+            component.len() > 1
+                || component
+                    .first()
+                    .is_some_and(|node| has_self_loop(graph, *node))
+        })
+        .map(|component| {
+            let mut members: Vec<String> =
+                component.iter().map(|&idx| node_id(graph, idx)).collect();
+            members.sort_unstable();
+
+            // Self-loop: single node with an edge to itself.
+            if component.len() == 1 {
+                let id = members[0].clone();
+                return CycleReport {
+                    members,
+                    suggested_breaks: vec![(id.clone(), id)],
+                };
+            }
+
+            // Find back-edges within this SCC via DFS.
+            let member_set: HashSet<NodeIndex> = component.iter().copied().collect();
+            let suggested_breaks = find_back_edges_in_scc(graph, &component, &member_set);
+
+            CycleReport {
+                members,
+                suggested_breaks,
+            }
+        })
+        .collect();
+
+    reports.sort_unstable_by(|a, b| a.members.cmp(&b.members));
+    reports
+}
+
+/// Run DFS within the nodes of an SCC and collect back-edges.
+///
+/// A back-edge `(u, v)` is an edge to an ancestor in the DFS tree — removing
+/// it eliminates the cycle it closes.
+///
+/// Uses iterative DFS with an explicit ancestor set for correctness on large
+/// cycles without stack overflow risk.
+fn find_back_edges_in_scc(
+    graph: &DiGraph<String, ()>,
+    component: &[NodeIndex],
+    member_set: &HashSet<NodeIndex>,
+) -> Vec<(String, String)> {
+    // Start DFS from the lexicographically smallest node for determinism.
+    let start = component
+        .iter()
+        .min_by_key(|&&idx| node_id(graph, idx))
+        .copied()
+        .expect("component non-empty");
+
+    let mut visited: HashSet<NodeIndex> = HashSet::new();
+    let mut ancestor_stack: Vec<NodeIndex> = Vec::new(); // current DFS path
+    let mut ancestor_set: HashSet<NodeIndex> = HashSet::new(); // for O(1) ancestor lookup
+    let mut back_edges: Vec<(String, String)> = Vec::new();
+
+    // Each stack entry: (node, index into its neighbor list).
+    let mut call_stack: Vec<(NodeIndex, Vec<NodeIndex>, usize)> = Vec::new();
+
+    // Bootstrap: push the start node.
+    if !visited.contains(&start) {
+        visited.insert(start);
+        ancestor_stack.push(start);
+        ancestor_set.insert(start);
+        let neighbors: Vec<NodeIndex> = graph
+            .neighbors_directed(start, petgraph::Direction::Outgoing)
+            .filter(|n| member_set.contains(n))
+            .collect();
+        call_stack.push((start, neighbors, 0));
+    }
+
+    // Run DFS over all SCC nodes (handles disconnected sub-components).
+    let mut all_starts: Vec<NodeIndex> = component.to_vec();
+    all_starts.sort_unstable_by_key(|&idx| node_id(graph, idx));
+    let mut extra_starts = all_starts.into_iter().peekable();
+
+    loop {
+        if let Some(frame) = call_stack.last_mut() {
+            let current = frame.0;
+            let neighbors = &frame.1;
+            let idx = &mut frame.2;
+
+            if *idx < neighbors.len() {
+                let neighbor = neighbors[*idx];
+                *idx += 1;
+
+                if ancestor_set.contains(&neighbor) {
+                    // Back-edge: current → neighbor (neighbor is an ancestor).
+                    back_edges.push((node_id(graph, current), node_id(graph, neighbor)));
+                } else if !visited.contains(&neighbor) {
+                    visited.insert(neighbor);
+                    ancestor_stack.push(neighbor);
+                    ancestor_set.insert(neighbor);
+                    let next_neighbors: Vec<NodeIndex> = graph
+                        .neighbors_directed(neighbor, petgraph::Direction::Outgoing)
+                        .filter(|n| member_set.contains(n))
+                        .collect();
+                    call_stack.push((neighbor, next_neighbors, 0));
+                }
+            } else {
+                // Pop this frame; current node is on top of ancestor_stack.
+                call_stack.pop();
+                ancestor_stack.pop(); // current is always the top when we finish it
+                ancestor_set.remove(&current);
+            }
+        } else {
+            // call_stack empty — try next unvisited SCC node (for disconnected SCCs).
+            let Some(next) = extra_starts.next() else { break };
+            if !visited.contains(&next) {
+                visited.insert(next);
+                ancestor_stack.push(next);
+                ancestor_set.insert(next);
+                let neighbors: Vec<NodeIndex> = graph
+                    .neighbors_directed(next, petgraph::Direction::Outgoing)
+                    .filter(|n| member_set.contains(n))
+                    .collect();
+                call_stack.push((next, neighbors, 0));
+            }
+        }
+    }
+
+    back_edges.sort_unstable();
+    back_edges
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -229,5 +387,146 @@ mod tests {
     fn find_all_cycles_empty_graph() {
         let (graph, _) = graph_with_nodes_and_edges(&[], &[]);
         assert!(find_all_cycles(&graph).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // report_cycles_with_breaks tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn report_cycles_empty_graph() {
+        let (graph, _) = graph_with_nodes_and_edges(&[], &[]);
+        let reports = report_cycles_with_breaks(&graph);
+        assert!(reports.is_empty(), "no cycles in empty graph");
+    }
+
+    #[test]
+    fn report_cycles_acyclic_graph() {
+        let (graph, _) = graph_with_nodes_and_edges(&["A", "B", "C"], &[("A", "B"), ("B", "C")]);
+        let reports = report_cycles_with_breaks(&graph);
+        assert!(reports.is_empty(), "no cycles in acyclic graph");
+    }
+
+    #[test]
+    fn report_cycles_self_loop() {
+        let (graph, _) = graph_with_nodes_and_edges(&["A"], &[("A", "A")]);
+        let reports = report_cycles_with_breaks(&graph);
+
+        assert_eq!(reports.len(), 1);
+        let r = &reports[0];
+        assert_eq!(r.members, vec!["A".to_string()]);
+        assert_eq!(
+            r.suggested_breaks,
+            vec![("A".to_string(), "A".to_string())]
+        );
+    }
+
+    #[test]
+    fn report_cycles_two_node_cycle() {
+        // A ⇄ B: back-edge is B→A (DFS enters A first, then B, B→A is back-edge).
+        let (graph, _) =
+            graph_with_nodes_and_edges(&["A", "B"], &[("A", "B"), ("B", "A")]);
+        let reports = report_cycles_with_breaks(&graph);
+
+        assert_eq!(reports.len(), 1);
+        let r = &reports[0];
+        assert_eq!(r.members, vec!["A".to_string(), "B".to_string()]);
+
+        // Exactly one back-edge should be suggested.
+        assert_eq!(r.suggested_breaks.len(), 1, "one break needed for 2-cycle");
+
+        // The suggested break should be a valid edge in the graph.
+        let (from, to) = &r.suggested_breaks[0];
+        // It must be either A→B or B→A.
+        let is_valid = (from == "B" && to == "A") || (from == "A" && to == "B");
+        assert!(is_valid, "break must be an existing edge, got {from}→{to}");
+    }
+
+    #[test]
+    fn report_cycles_three_node_cycle_one_break() {
+        // A → B → C → A: one back-edge breaks the cycle.
+        let (graph, _) = graph_with_nodes_and_edges(
+            &["A", "B", "C"],
+            &[("A", "B"), ("B", "C"), ("C", "A")],
+        );
+        let reports = report_cycles_with_breaks(&graph);
+
+        assert_eq!(reports.len(), 1);
+        let r = &reports[0];
+        assert_eq!(
+            r.members,
+            vec!["A".to_string(), "B".to_string(), "C".to_string()]
+        );
+        // One back-edge (C→A) should be detected.
+        assert_eq!(r.suggested_breaks.len(), 1);
+        assert_eq!(
+            r.suggested_breaks[0],
+            ("C".to_string(), "A".to_string()),
+            "back-edge in A→B→C→A is C→A"
+        );
+    }
+
+    #[test]
+    fn report_cycles_multiple_independent_cycles() {
+        // Cycle 1: A ⇄ B
+        // Cycle 2: C → D → E → C
+        // Cycle 3: F → F (self-loop)
+        let (graph, _) = graph_with_nodes_and_edges(
+            &["A", "B", "C", "D", "E", "F", "G"],
+            &[
+                ("A", "B"),
+                ("B", "A"),
+                ("C", "D"),
+                ("D", "E"),
+                ("E", "C"),
+                ("F", "F"),
+            ],
+        );
+        let reports = report_cycles_with_breaks(&graph);
+
+        assert_eq!(reports.len(), 3, "three separate cycles");
+
+        // Check members (reports sorted by members).
+        assert_eq!(reports[0].members, vec!["A", "B"]);
+        assert_eq!(reports[1].members, vec!["C", "D", "E"]);
+        assert_eq!(reports[2].members, vec!["F"]);
+
+        // Each cycle should have at least one suggested break.
+        assert!(!reports[0].suggested_breaks.is_empty());
+        assert!(!reports[1].suggested_breaks.is_empty());
+        assert!(!reports[2].suggested_breaks.is_empty());
+
+        // Self-loop break should be F→F.
+        assert_eq!(
+            reports[2].suggested_breaks,
+            vec![("F".to_string(), "F".to_string())]
+        );
+    }
+
+    #[test]
+    fn report_cycles_break_is_valid_existing_edge() {
+        // For each suggested break, verify it is an actual edge in the graph.
+        let (graph, _) = graph_with_nodes_and_edges(
+            &["A", "B", "C"],
+            &[("A", "B"), ("B", "C"), ("C", "A")],
+        );
+        let reports = report_cycles_with_breaks(&graph);
+
+        for report in &reports {
+            for (from, to) in &report.suggested_breaks {
+                let from_idx = graph
+                    .node_indices()
+                    .find(|&i| graph.node_weight(i).map(String::as_str) == Some(from.as_str()))
+                    .expect("from node exists");
+                let to_idx = graph
+                    .node_indices()
+                    .find(|&i| graph.node_weight(i).map(String::as_str) == Some(to.as_str()))
+                    .expect("to node exists");
+                assert!(
+                    graph.contains_edge(from_idx, to_idx),
+                    "suggested break {from}→{to} must be an existing edge"
+                );
+            }
+        }
     }
 }
