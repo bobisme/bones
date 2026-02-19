@@ -98,6 +98,22 @@ enum Commands {
     Show(cmd::show::ShowArgs),
 
     #[command(
+        next_help_heading = "Read",
+        about = "List known agents",
+        long_about = "List all known agents with current assignment counts and last-activity timestamps.",
+        after_help = "EXAMPLES:\n    # List known agents\n    bn agents\n\n    # Machine-readable output\n    bn agents --json"
+    )]
+    Agents(cmd::agents::AgentsArgs),
+
+    #[command(
+        next_help_heading = "Read",
+        about = "List items assigned to the current agent",
+        long_about = "Shortcut for `bn list --assignee <resolved-agent>` using the standard agent identity resolution chain.",
+        after_help = "EXAMPLES:\n    # List my open items\n    bn mine\n\n    # Include done items\n    bn mine --state done\n\n    # Machine-readable output\n    bn mine --json"
+    )]
+    Mine(cmd::mine::MineArgs),
+
+    #[command(
         next_help_heading = "Search",
         about = "Search items using full-text search",
         long_about = "Search work items using SQLite FTS5 lexical full-text search with BM25 ranking.\n\n\
@@ -198,6 +214,22 @@ enum Commands {
     Untag(cmd::tag::UntagArgs),
 
     #[command(
+        next_help_heading = "Metadata",
+        about = "Assign an item to an agent",
+        long_about = "Assign an item to an agent by emitting an item.assign event.",
+        after_help = "EXAMPLES:\n    # Assign item to alice\n    bn assign bn-abc alice\n\n    # Emit machine-readable output\n    bn assign bn-abc alice --json"
+    )]
+    Assign(cmd::assign::AssignArgs),
+
+    #[command(
+        next_help_heading = "Metadata",
+        about = "Unassign the current agent from an item",
+        long_about = "Remove the current resolved agent from the item's assignee OR-Set.",
+        after_help = "EXAMPLES:\n    # Unassign yourself from an item\n    bn --agent alice unassign bn-abc\n\n    # Emit machine-readable output\n    bn --agent alice unassign bn-abc --json"
+    )]
+    Unassign(cmd::assign::UnassignArgs),
+
+    #[command(
         next_help_heading = "Lifecycle",
         about = "Move item under a parent",
         long_about = "Change a work item's parent to reorganize hierarchy.",
@@ -220,6 +252,46 @@ enum Commands {
         after_help = "EXAMPLES:\n    # Show full graph for an item\n    bn graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn graph bn-abc --down\n\n    # Project summary\n    bn graph\n\n    # Emit machine-readable output\n    bn graph bn-abc --json"
     )]
     Graph(cmd::graph::GraphArgs),
+
+    #[command(
+        next_help_heading = "Triage",
+        about = "Show the highest-priority unblocked item",
+        long_about = "Compute composite priority scores and return the best unblocked candidate.\n\nUse '--agent N' to request N parallel assignments (multi-agent mode).",
+        after_help = "EXAMPLES:\n    # Single best next item\n    bn next\n\n    # Multi-agent assignment (N slots)\n    bn next --agent 3\n\n    # Emit machine-readable output\n    bn next --json"
+    )]
+    Next(cmd::next::NextArgs),
+
+    #[command(
+        next_help_heading = "Triage",
+        about = "Show a full triage report",
+        long_about = "Compute graph metrics and composite scores, grouped into Top Picks, Blockers, Quick Wins, and Cycles.",
+        after_help = "EXAMPLES:\n    # Human-readable triage report\n    bn triage\n\n    # Emit machine-readable output\n    bn triage --json"
+    )]
+    Triage(cmd::triage::TriageArgs),
+
+    #[command(
+        next_help_heading = "Triage",
+        about = "Compute parallel execution layers",
+        long_about = "Compute topological dependency layers where each layer can be worked in parallel.",
+        after_help = "EXAMPLES:\n    # Project-wide plan\n    bn plan\n\n    # Scope to one goal's children\n    bn plan bn-goal\n\n    # Emit machine-readable output\n    bn plan --json"
+    )]
+    Plan(cmd::plan::PlanArgs),
+
+    #[command(
+        next_help_heading = "Triage",
+        about = "Show project health metrics",
+        long_about = "Summarize dependency graph health metrics: density, SCC count, critical path length, and blocker count.",
+        after_help = "EXAMPLES:\n    # Human-readable dashboard\n    bn health\n\n    # Emit machine-readable output\n    bn health --json"
+    )]
+    Health(cmd::health::HealthArgs),
+
+    #[command(
+        next_help_heading = "Triage",
+        about = "List dependency cycles",
+        long_about = "List strongly connected components that represent dependency cycles.",
+        after_help = "EXAMPLES:\n    # Human-readable cycle groups\n    bn cycles\n\n    # Emit machine-readable output\n    bn cycles --json"
+    )]
+    Cycles(cmd::cycles::CyclesArgs),
 
     #[command(
         next_help_heading = "Project Maintenance",
@@ -490,6 +562,12 @@ fn main() -> anyhow::Result<()> {
         Commands::List(ref args) => timing::timed("cmd.list", || {
             cmd::list::run_list(args, output, &project_root)
         }),
+        Commands::Agents(ref args) => timing::timed("cmd.agents", || {
+            cmd::agents::run_agents(args, output, &project_root)
+        }),
+        Commands::Mine(ref args) => timing::timed("cmd.mine", || {
+            cmd::mine::run_mine(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Show(ref args) => timing::timed("cmd.show", || {
             cmd::show::run_show(args, output, &project_root)
         }),
@@ -529,6 +607,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Untag(ref args) => timing::timed("cmd.untag", || {
             cmd::tag::run_untag(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Assign(ref args) => timing::timed("cmd.assign", || {
+            cmd::assign::run_assign(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Unassign(ref args) => timing::timed("cmd.unassign", || {
+            cmd::assign::run_unassign(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Move(ref args) => timing::timed("cmd.move", || {
             cmd::move_cmd::run_move(args, cli.agent_flag(), output, &project_root)
         }),
@@ -537,6 +621,21 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Graph(ref args) => timing::timed("cmd.graph", || {
             cmd::graph::run_graph(args, output, &project_root)
+        }),
+        Commands::Next(ref args) => timing::timed("cmd.next", || {
+            cmd::next::run_next(args, output, cli.agent_flag(), &project_root)
+        }),
+        Commands::Triage(ref args) => timing::timed("cmd.triage", || {
+            cmd::triage::run_triage(args, output, &project_root)
+        }),
+        Commands::Plan(ref args) => timing::timed("cmd.plan", || {
+            cmd::plan::run_plan(args, output, &project_root)
+        }),
+        Commands::Health(ref args) => timing::timed("cmd.health", || {
+            cmd::health::run_health(args, output, &project_root)
+        }),
+        Commands::Cycles(ref args) => timing::timed("cmd.cycles", || {
+            cmd::cycles::run_cycles(args, output, &project_root)
         }),
         Commands::Sync(args) => {
             timing::timed("cmd.sync", || cmd::sync::run_sync(&args, &project_root))
@@ -903,5 +1002,66 @@ mod tests {
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "move", "x", "--parent", "p"]);
         assert_eq!(cli.agent_flag(), Some("me"));
+    }
+
+    #[test]
+    fn agents_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "agents"]);
+        assert!(matches!(cli.command, Commands::Agents(_)));
+    }
+
+    #[test]
+    fn mine_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "mine"]);
+        assert!(matches!(cli.command, Commands::Mine(_)));
+    }
+
+    #[test]
+    fn assign_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "assign", "bn-abc", "alice"]);
+        assert!(matches!(cli.command, Commands::Assign(_)));
+    }
+
+    #[test]
+    fn unassign_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "--agent", "alice", "unassign", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Unassign(_)));
+    }
+
+    #[test]
+    fn plan_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "plan"]);
+        assert!(matches!(cli.command, Commands::Plan(_)));
+    }
+
+    #[test]
+    fn health_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "health"]);
+        assert!(matches!(cli.command, Commands::Health(_)));
+    }
+
+    #[test]
+    fn cycles_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "cycles"]);
+        assert!(matches!(cli.command, Commands::Cycles(_)));
+    }
+
+    #[test]
+    fn next_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "next"]);
+        assert!(matches!(cli.command, Commands::Next(_)));
+    }
+
+    #[test]
+    fn triage_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "triage"]);
+        assert!(matches!(cli.command, Commands::Triage(_)));
+    }
+
+    #[test]
+    fn next_supports_agent_slot_flag() {
+        let cli = Cli::parse_from(["bn", "next", "--agent", "3"]);
+        assert!(matches!(cli.command, Commands::Next(_)));
+        assert_eq!(cli.agent_flag(), Some("3"));
     }
 }

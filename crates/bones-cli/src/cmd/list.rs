@@ -10,7 +10,7 @@ use clap::Args;
 use serde::Serialize;
 use std::io::Write;
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone, Default)]
 pub struct ListArgs {
     /// Filter by state: open, doing, done, archived.
     /// Default: open (when no other filters are set).
@@ -32,6 +32,10 @@ pub struct ListArgs {
     /// Filter by parent item ID.
     #[arg(long)]
     pub parent: Option<String>,
+
+    /// Filter by assignee agent name.
+    #[arg(long)]
+    pub assignee: Option<String>,
 
     /// Maximum number of items to show (0 = all).
     #[arg(short = 'n', long, default_value = "50")]
@@ -151,6 +155,7 @@ pub fn run_list(
         urgency: args.urgency.clone(),
         label: primary_label,
         parent_id: args.parent.clone(),
+        assignee: args.assignee.clone(),
         limit: if args.limit > 0 {
             Some(u32::try_from(args.limit).unwrap_or(u32::MAX))
         } else {
@@ -419,6 +424,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -435,6 +441,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -450,6 +457,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -466,6 +474,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -483,6 +492,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -498,6 +508,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "updated_desc".into(),
         };
@@ -513,6 +524,7 @@ mod tests {
             label: vec![],
             urgency: None,
             parent: None,
+            assignee: None,
             limit: 50,
             sort: "bogus_sort".into(),
         };
