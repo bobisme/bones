@@ -3,6 +3,7 @@
 
 pub mod crdt;
 pub mod lock;
+pub mod model;
 
 /// # Conventions
 ///
