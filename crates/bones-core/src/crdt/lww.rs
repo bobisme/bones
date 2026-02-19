@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::clock::itc::Stamp;
+use crate::crdt::trace::{merge_tracing_enabled, MergeTrace, TieBreakStep};
+use tracing::debug;
 
 // ---------------------------------------------------------------------------
 // LwwRegister
@@ -86,8 +88,63 @@ impl<T: Clone> LwwRegister<T> {
         }
     }
 
+    /// Merge and optionally emit structured decision trace.
+    ///
+    /// If tracing is disabled via environment toggles, returns a no-op trace
+    /// payload and preserves the normal low-overhead merge path.
+    pub fn merge_with_trace(&mut self, other: &Self, field: &str) -> MergeTrace
+    where
+        T: fmt::Display,
+    {
+        let (self_wins, step) = self.compare(other);
+
+        let trace = if merge_tracing_enabled() {
+            let winner = if self_wins {
+                self.value.to_string()
+            } else {
+                other.value.to_string()
+            };
+
+            let trace = MergeTrace {
+                field: field.to_string(),
+                values: (self.value.to_string(), other.value.to_string()),
+                winner,
+                step,
+                correlation_id: format!("{}..{}", self.event_hash, other.event_hash),
+                enabled: true,
+            };
+
+            debug!(
+                target: "bones_core::crdt::merge_trace",
+                field = trace.field,
+                winner = trace.winner,
+                step = ?trace.step,
+                correlation_id = trace.correlation_id,
+                "LWW merge decision"
+            );
+
+            trace
+        } else {
+            MergeTrace::disabled()
+        };
+
+        if !self_wins {
+            self.value = other.value.clone();
+            self.stamp = other.stamp.clone();
+            self.wall_ts = other.wall_ts;
+            self.agent_id = other.agent_id.clone();
+            self.event_hash = other.event_hash.clone();
+        }
+
+        trace
+    }
+
     /// Returns `true` if `self` wins over `other` in the tie-breaking chain.
     fn wins_over(&self, other: &Self) -> bool {
+        self.compare(other).0
+    }
+
+    fn compare(&self, other: &Self) -> (bool, TieBreakStep) {
         // Step 1: ITC causal dominance
         let self_leq_other = self.stamp.leq(&other.stamp);
         let other_leq_self = other.stamp.leq(&self.stamp);
@@ -95,15 +152,15 @@ impl<T: Clone> LwwRegister<T> {
         match (self_leq_other, other_leq_self) {
             (true, false) => {
                 // other causally dominates self → other wins
-                return false;
+                return (false, TieBreakStep::ItcCausal);
             }
             (false, true) => {
                 // self causally dominates other → self wins
-                return true;
+                return (true, TieBreakStep::ItcCausal);
             }
             (true, true) => {
                 // They are equal (both leq each other) → self wins (idempotent)
-                return true;
+                return (true, TieBreakStep::Equal);
             }
             (false, false) => {
                 // Concurrent — fall through to tie-breaking
@@ -112,20 +169,20 @@ impl<T: Clone> LwwRegister<T> {
 
         // Step 2: Wall-clock timestamp (higher wins)
         match self.wall_ts.cmp(&other.wall_ts) {
-            std::cmp::Ordering::Greater => return true,
-            std::cmp::Ordering::Less => return false,
+            std::cmp::Ordering::Greater => return (true, TieBreakStep::WallTimestamp),
+            std::cmp::Ordering::Less => return (false, TieBreakStep::WallTimestamp),
             std::cmp::Ordering::Equal => {}
         }
 
         // Step 3: Agent ID (lexicographically greater wins)
         match self.agent_id.cmp(&other.agent_id) {
-            std::cmp::Ordering::Greater => return true,
-            std::cmp::Ordering::Less => return false,
+            std::cmp::Ordering::Greater => return (true, TieBreakStep::AgentId),
+            std::cmp::Ordering::Less => return (false, TieBreakStep::AgentId),
             std::cmp::Ordering::Equal => {}
         }
 
         // Step 4: Event hash (lexicographically greater wins — guaranteed unique)
-        self.event_hash >= other.event_hash
+        (self.event_hash >= other.event_hash, TieBreakStep::EventHash)
     }
 }
 
@@ -142,7 +199,7 @@ impl<T: fmt::Display> fmt::Display for LwwRegister<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::itc::{Event, Id, Stamp};
+    use crate::clock::itc::Stamp;
 
     /// Helper: create a stamp with a specific event counter (seed identity).
     fn make_stamp(counter: u64) -> Stamp {
@@ -398,6 +455,39 @@ mod tests {
         let b = LwwRegister::new(99u64, s2, 200, "bob".to_string(), "h2".to_string());
         a.merge(&b);
         assert_eq!(a.value, 99);
+    }
+
+    #[test]
+    fn merge_with_trace_disabled_by_default_has_no_payload() {
+        let s1 = make_stamp(1);
+        let s2 = make_stamp(2);
+
+        let mut a = reg("old", s1, 100, "alice", "aaa");
+        let b = reg("new", s2, 100, "alice", "bbb");
+
+        let trace = a.merge_with_trace(&b, "title");
+        assert_eq!(a.value, "new");
+        assert!(!trace.enabled);
+        assert_eq!(trace.step, TieBreakStep::Equal);
+        assert!(trace.field.is_empty());
+    }
+
+    #[test]
+    fn merge_with_trace_reports_decisive_step_when_enabled() {
+        if !merge_tracing_enabled() {
+            return;
+        }
+
+        let (sa, sb) = make_forked_stamps(1, 1);
+        let mut a = reg("alice-val", sa, 100, "alice", "aaa");
+        let b = reg("bob-val", sb, 200, "bob", "bbb");
+
+        let trace = a.merge_with_trace(&b, "title");
+        assert!(trace.enabled);
+        assert_eq!(trace.field, "title");
+        assert_eq!(trace.winner, "bob-val");
+        assert_eq!(trace.step, TieBreakStep::WallTimestamp);
+        assert!(!trace.correlation_id.is_empty());
     }
 
     #[test]

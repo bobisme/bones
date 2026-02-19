@@ -4,6 +4,7 @@ pub mod lww;
 pub mod merge;
 pub mod orset;
 pub mod state;
+pub mod trace;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
