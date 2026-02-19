@@ -18,6 +18,12 @@
 //!
 //! - [`hash`]: Hash verification and parent chain validation.
 //!   ([`verify_event_hash`], [`verify_chain`])
+//! - [`graph`]: In-memory DAG structure with parent/descendant traversal.
+//!   ([`EventDag`], [`DagNode`])
+//! - [`lca`]: Lowest Common Ancestor finding for divergent branches.
+//!   ([`find_lca`], [`find_all_lcas`])
+//! - [`replay`]: Divergent-branch replay for CRDT state reconstruction.
+//!   ([`replay_divergent`], [`replay_divergent_for_item`])
 //!
 //! # Related Modules
 //!
@@ -27,6 +33,5 @@
 
 pub mod graph;
 pub mod hash;
-
-pub use graph::{DagNode, EventDag};
-pub use hash::{HashError, HashErrorCode, verify_chain, verify_event_hash};
+pub mod lca;
+pub mod replay;
