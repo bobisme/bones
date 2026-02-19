@@ -104,6 +104,33 @@ pub fn render_error(mode: OutputMode, error: &CliError) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Render a [`BonesError`] to stderr, adapting format to the output mode.
+///
+/// In JSON mode, outputs `{"error": {"error_code": "...", "message": "...", "suggestion": "..."}}`.
+/// In human mode, outputs `error: <message>\n  suggestion: <suggestion>`.
+pub fn render_bones_error(
+    mode: OutputMode,
+    error: &bones_core::error::BonesError,
+) -> anyhow::Result<()> {
+    let cli_error = CliError {
+        message: error.to_string(),
+        suggestion: Some(error.suggestion()),
+        error_code: Some(error.error_code().to_string()),
+    };
+    render_error(mode, &cli_error)
+}
+
+/// Convert a [`BonesError`] into a [`CliError`].
+impl From<&bones_core::error::BonesError> for CliError {
+    fn from(err: &bones_core::error::BonesError) -> Self {
+        Self {
+            message: err.to_string(),
+            suggestion: Some(err.suggestion()),
+            error_code: Some(err.error_code().to_string()),
+        }
+    }
+}
+
 /// Render a success message to stdout.
 pub fn render_success(mode: OutputMode, message: &str) -> anyhow::Result<()> {
     let stdout = io::stdout();
@@ -211,6 +238,41 @@ mod tests {
     #[test]
     fn render_success_human() {
         let result = render_success(OutputMode::Human, "it worked");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn cli_error_from_bones_error() {
+        let err = bones_core::error::BonesError::Model(
+            bones_core::error::ModelError::ItemNotFound {
+                item_id: "test123".into(),
+            },
+        );
+        let cli_err = CliError::from(&err);
+        assert!(cli_err.message.contains("test123"));
+        assert!(cli_err.suggestion.is_some());
+        assert_eq!(cli_err.error_code.as_deref(), Some("E2001"));
+    }
+
+    #[test]
+    fn render_bones_error_json() {
+        let err = bones_core::error::BonesError::Model(
+            bones_core::error::ModelError::ItemNotFound {
+                item_id: "abc".into(),
+            },
+        );
+        let result = render_bones_error(OutputMode::Json, &err);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn render_bones_error_human() {
+        let err = bones_core::error::BonesError::Model(
+            bones_core::error::ModelError::ItemNotFound {
+                item_id: "abc".into(),
+            },
+        );
+        let result = render_bones_error(OutputMode::Human, &err);
         assert!(result.is_ok());
     }
 }
