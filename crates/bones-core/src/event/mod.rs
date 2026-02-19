@@ -17,9 +17,14 @@
 
 pub mod canonical;
 pub mod data;
+pub mod parser;
 pub mod types;
 
 pub use canonical::{canonicalize_json, canonicalize_json_str};
+pub use parser::{
+    parse_line, parse_line_partial, parse_lines, ParseError, ParsedLine, PartialEvent,
+    PartialParsedLine, FIELD_COMMENT, SHARD_HEADER,
+};
 pub use data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DataParseError, DeleteData,
     EventData, LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,

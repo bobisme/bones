@@ -16,6 +16,7 @@ unnecessary_wraps = "allow" # main returning anyhow::Result is common/desired
 
 [workspace.dependencies]
 anyhow = "1.0"
+blake3 = "1.5"
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive"] }
 fs2 = "0.4"
