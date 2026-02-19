@@ -128,9 +128,8 @@ pub fn merge_driver_main(base: &Path, ours: &Path, theirs: &Path) -> Result<()> 
 
     // Write each merged event as a TSJSON line
     for event in &merge_result.events {
-        let line = write_line(event).with_context(|| {
-            format!("failed to serialize event: {}", event.event_hash)
-        })?;
+        let line = write_line(event)
+            .with_context(|| format!("failed to serialize event: {}", event.event_hash))?;
         output
             .write_all(line.as_bytes())
             .context("failed to write event line")?;
@@ -316,7 +315,10 @@ mod tests {
 
         assert_eq!(merged_events.len(), 3);
         assert_eq!(merged_events[0].wall_ts_us, 1000, "first event has ts=1000");
-        assert_eq!(merged_events[1].wall_ts_us, 2000, "second event has ts=2000");
+        assert_eq!(
+            merged_events[1].wall_ts_us, 2000,
+            "second event has ts=2000"
+        );
         assert_eq!(merged_events[2].wall_ts_us, 3000, "third event has ts=3000");
     }
 
@@ -338,7 +340,11 @@ mod tests {
         let merged_content = fs::read_to_string(&ours).expect("read merged output");
         let merged_events = parse_lines(&merged_content).expect("parse merged output");
 
-        assert_eq!(merged_events.len(), 1, "theirs event should appear in merged output");
+        assert_eq!(
+            merged_events.len(),
+            1,
+            "theirs event should appear in merged output"
+        );
     }
 
     #[test]
@@ -377,7 +383,10 @@ mod tests {
 
         let merged_content = fs::read_to_string(&ours).expect("read merged output");
         // Should have header but no events
-        assert!(merged_content.contains("# bones event log v1"), "missing header");
+        assert!(
+            merged_content.contains("# bones event log v1"),
+            "missing header"
+        );
         let merged_events = parse_lines(&merged_content).expect("parse merged output");
         assert!(merged_events.is_empty(), "no events expected");
     }
@@ -434,18 +443,12 @@ mod tests {
         let events_first = parse_lines(&after_first).expect("parse first");
         let events_second = parse_lines(&after_second).expect("parse second");
 
-        let hashes_first: Vec<&str> = events_first
-            .iter()
-            .map(|e| e.event_hash.as_str())
-            .collect();
+        let hashes_first: Vec<&str> = events_first.iter().map(|e| e.event_hash.as_str()).collect();
         let hashes_second: Vec<&str> = events_second
             .iter()
             .map(|e| e.event_hash.as_str())
             .collect();
-        assert_eq!(
-            hashes_first, hashes_second,
-            "merge should be idempotent"
-        );
+        assert_eq!(hashes_first, hashes_second, "merge should be idempotent");
     }
 
     #[test]
@@ -473,6 +476,9 @@ mod tests {
         write_shard(&ours, &[]);
 
         let result = merge_driver_main(&base, &ours, &theirs);
-        assert!(result.is_err(), "missing theirs file should return an error");
+        assert!(
+            result.is_err(),
+            "missing theirs file should return an error"
+        );
     }
 }

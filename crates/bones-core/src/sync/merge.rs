@@ -181,7 +181,10 @@ mod tests {
 
     #[test]
     fn merge_local_only() {
-        let local = vec![make_event(1000, "alice", "aaa"), make_event(2000, "alice", "bbb")];
+        let local = vec![
+            make_event(1000, "alice", "aaa"),
+            make_event(2000, "alice", "bbb"),
+        ];
         let result = merge_event_sets(&local, &[]);
         assert_eq!(result.events.len(), 2);
         assert_eq!(result.events[0].event_hash, "blake3:aaa");
@@ -190,7 +193,10 @@ mod tests {
 
     #[test]
     fn merge_remote_only() {
-        let remote = vec![make_event(1000, "bob", "ccc"), make_event(2000, "bob", "ddd")];
+        let remote = vec![
+            make_event(1000, "bob", "ccc"),
+            make_event(2000, "bob", "ddd"),
+        ];
         let result = merge_event_sets(&[], &remote);
         assert_eq!(result.events.len(), 2);
         assert_eq!(result.events[0].event_hash, "blake3:ccc");
@@ -226,7 +232,11 @@ mod tests {
         let local = vec![e1.clone(), e2.clone()];
         let remote = vec![e1, e2, e3];
         let result = merge_event_sets(&local, &remote);
-        assert_eq!(result.events.len(), 3, "shared events deduped, remote-only kept");
+        assert_eq!(
+            result.events.len(),
+            3,
+            "shared events deduped, remote-only kept"
+        );
     }
 
     #[test]
@@ -234,18 +244,16 @@ mod tests {
         // If two events happen to have the same hash (content-identical),
         // only one should appear regardless of which side they came from.
         let e = make_event(5000, "agent", "zzz");
-        let local = vec![
-            make_event(1000, "alice", "aaa"),
-            e.clone(),
-        ];
-        let remote = vec![
-            e,
-            make_event(9000, "bob", "bbb"),
-        ];
+        let local = vec![make_event(1000, "alice", "aaa"), e.clone()];
+        let remote = vec![e, make_event(9000, "bob", "bbb")];
         let result = merge_event_sets(&local, &remote);
         assert_eq!(result.events.len(), 3);
         // Should contain aaa, zzz, bbb — zzz only once
-        let hashes: Vec<&str> = result.events.iter().map(|e| e.event_hash.as_str()).collect();
+        let hashes: Vec<&str> = result
+            .events
+            .iter()
+            .map(|e| e.event_hash.as_str())
+            .collect();
         let zzz_count = hashes.iter().filter(|&&h| h == "blake3:zzz").count();
         assert_eq!(zzz_count, 1, "zzz event should appear exactly once");
     }
@@ -370,13 +378,19 @@ mod tests {
         let h2: Vec<&str> = r2.events.iter().map(|e| e.event_hash.as_str()).collect();
 
         assert_eq!(r1.events.len(), 100, "50 + 50 events, no duplicates");
-        assert_eq!(h1, h2, "merge must be commutative (same output regardless of which is local/remote)");
+        assert_eq!(
+            h1, h2,
+            "merge must be commutative (same output regardless of which is local/remote)"
+        );
     }
 
     #[test]
     fn idempotent_merge() {
         // Merging a result with itself or with one of its inputs should be stable
-        let local = vec![make_event(1000, "alice", "aaa"), make_event(2000, "alice", "bbb")];
+        let local = vec![
+            make_event(1000, "alice", "aaa"),
+            make_event(2000, "alice", "bbb"),
+        ];
         let remote = vec![make_event(1500, "bob", "ccc")];
 
         let r1 = merge_event_sets(&local, &remote);

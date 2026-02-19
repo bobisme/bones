@@ -39,9 +39,7 @@ pub enum HashErrorCode {
 #[derive(Debug, thiserror::Error)]
 pub enum HashError {
     /// The stored event hash does not match the recomputed hash.
-    #[error(
-        "event hash mismatch: stored={stored} expected={expected}"
-    )]
+    #[error("event hash mismatch: stored={stored} expected={expected}")]
     HashMismatch {
         /// The hash stored on the event (which is wrong).
         stored: String,
@@ -50,9 +48,7 @@ pub enum HashError {
     },
 
     /// A parent hash referenced by an event is not found in the event set.
-    #[error(
-        "event {event_hash} references unknown parent {parent_hash}"
-    )]
+    #[error("event {event_hash} references unknown parent {parent_hash}")]
     UnknownParent {
         /// The hash of the event that has the bad parent reference.
         event_hash: String,
@@ -122,10 +118,7 @@ pub fn verify_event_hash(event: &Event) -> Result<bool, HashError> {
 /// are checked is not guaranteed.
 pub fn verify_chain(events: &[&Event]) -> Result<(), HashError> {
     // Build a lookup table of all known event hashes in this collection.
-    let known: HashMap<&str, ()> = events
-        .iter()
-        .map(|e| (e.event_hash.as_str(), ()))
-        .collect();
+    let known: HashMap<&str, ()> = events.iter().map(|e| (e.event_hash.as_str(), ())).collect();
 
     for event in events {
         // 1. Verify each event's stored hash matches its computed hash.
@@ -160,12 +153,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::event::Event;
     use crate::event::data::{CreateData, EventData, MoveData};
     use crate::event::types::EventType;
     use crate::event::writer::write_event;
-    use crate::event::Event;
-    use crate::model::item_id::ItemId;
     use crate::model::item::{Kind, State, Urgency};
+    use crate::model::item_id::ItemId;
 
     // -------------------------------------------------------------------
     // Helpers
@@ -282,8 +275,7 @@ mod tests {
         let child = make_child(2_000_000, &root.event_hash);
         let grandchild = make_child(3_000_000, &child.event_hash);
 
-        verify_chain(&[&root, &child, &grandchild])
-            .expect("valid 3-event chain should pass");
+        verify_chain(&[&root, &child, &grandchild]).expect("valid 3-event chain should pass");
     }
 
     #[test]
@@ -292,8 +284,7 @@ mod tests {
         let root = make_root(1_000_000);
         let child = make_child(2_000_000, &root.event_hash);
 
-        verify_chain(&[&child, &root])
-            .expect("order should not matter for verify_chain");
+        verify_chain(&[&child, &root]).expect("order should not matter for verify_chain");
     }
 
     #[test]
@@ -304,8 +295,8 @@ mod tests {
         // Tamper root content (leave its stored hash unchanged).
         root.wall_ts_us += 999;
 
-        let err = verify_chain(&[&root, &child])
-            .expect_err("tampered root should cause chain failure");
+        let err =
+            verify_chain(&[&root, &child]).expect_err("tampered root should cause chain failure");
         assert_eq!(err.code(), HashErrorCode::HashMismatch);
     }
 
@@ -317,8 +308,8 @@ mod tests {
         // Tamper child content (leave its stored hash unchanged).
         child.agent = "impersonator".into();
 
-        let err = verify_chain(&[&root, &child])
-            .expect_err("tampered child should cause chain failure");
+        let err =
+            verify_chain(&[&root, &child]).expect_err("tampered child should cause chain failure");
         assert_eq!(err.code(), HashErrorCode::HashMismatch);
     }
 
@@ -328,8 +319,8 @@ mod tests {
         // Note: child.event_hash is valid for child's own fields; only its
         // parent reference is unresolvable.
 
-        let err = verify_chain(&[&child])
-            .expect_err("unresolvable parent should cause chain failure");
+        let err =
+            verify_chain(&[&child]).expect_err("unresolvable parent should cause chain failure");
         assert_eq!(err.code(), HashErrorCode::UnknownParent);
     }
 
@@ -341,15 +332,13 @@ mod tests {
         let grandchild = make_child(3_000_000, &child.event_hash);
 
         // Chain is valid before tampering.
-        verify_chain(&[&root, &child, &grandchild])
-            .expect("chain is initially valid");
+        verify_chain(&[&root, &child, &grandchild]).expect("chain is initially valid");
 
         // Now simulate an ancestor modification:
         // Modify root and correctly recompute its hash (as an attacker would).
         let mut modified_root = root.clone();
         modified_root.wall_ts_us += 1;
-        let new_root_hash = compute_event_hash(&modified_root)
-            .expect("hash compute");
+        let new_root_hash = compute_event_hash(&modified_root).expect("hash compute");
         modified_root.event_hash = new_root_hash.clone();
 
         // modified_root now has a valid-looking hash, but child still references

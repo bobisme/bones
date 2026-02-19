@@ -32,6 +32,26 @@ enum Commands {
     /// Initialize a new bones project in the current directory.
     Init(cmd::init::InitArgs),
 
+    /// Install optional git hooks for projection refresh and staged event validation.
+    Hooks {
+        #[command(subcommand)]
+        command: HookCommand,
+    },
+
+    /// Validate staged `.events` files in the current git index.
+    Verify {
+        /// Validate only staged files.
+        #[arg(long)]
+        staged: bool,
+    },
+
+    /// Rebuild the projection (currently a placeholder command for hook integration).
+    Rebuild {
+        /// Rebuild incrementally from the last projection cursor.
+        #[arg(long)]
+        incremental: bool,
+    },
+
     /// Merge tool for jj conflict resolution on append-only event files
     MergeTool {
         /// Configure jj to use bones as a merge tool
@@ -81,6 +101,12 @@ enum Commands {
         #[arg(value_name = "THEIRS")]
         theirs: PathBuf,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum HookCommand {
+    /// Install optional git hooks (`post-merge`, `pre-commit`).
+    Install,
 }
 
 fn init_tracing() {
@@ -206,6 +232,23 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init(args) => {
             cmd::init::run_init(&args, &project_root)?;
+        }
+        Commands::Hooks {
+            command: HookCommand::Install,
+        } => {
+            git::hooks::install_hooks(&project_root)?;
+        }
+        Commands::Verify { staged } => {
+            if staged {
+                git::hooks::verify_staged_events()?;
+            }
+        }
+        Commands::Rebuild { incremental } => {
+            if incremental {
+                println!("[bn] incremental rebuild requested (currently a CLI placeholder).\n");
+            } else {
+                println!("[bn] rebuild requested (currently a CLI placeholder).\n");
+            }
         }
         Commands::MergeTool {
             setup,

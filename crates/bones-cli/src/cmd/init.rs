@@ -1,3 +1,4 @@
+use crate::git;
 use anyhow::{Context as _, Result};
 use chrono::Local;
 use clap::Args;
@@ -8,6 +9,10 @@ pub struct InitArgs {
     /// Force re-initialization even if `.bones/` already exists.
     #[arg(long)]
     pub force: bool,
+
+    /// Install optional git hooks (`post-merge`, `pre-commit`) during initialization.
+    #[arg(long)]
+    pub hooks: bool,
 }
 
 const CONFIG_TOML: &str = "[goals]\n\
@@ -57,6 +62,10 @@ pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
         eprintln!("      Git integration features (merge driver, hooks, push/pull) will be");
         eprintln!("      unavailable until you run `git init` and then `bn init --force`.");
         eprintln!();
+
+        if args.hooks {
+            anyhow::bail!("--hooks requires a git repository; initialize git first.");
+        }
     }
 
     // Create directory structure
@@ -93,6 +102,10 @@ pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
     std::fs::write(&gitignore_path, GITIGNORE)
         .with_context(|| format!("Failed to write .gitignore: {}", gitignore_path.display()))?;
 
+    if args.hooks {
+        git::hooks::install_hooks(project_root)?;
+    }
+
     // Onboarding hints
     println!("✓ Initialized .bones/ project structure.");
     println!();
@@ -128,7 +141,10 @@ mod tests {
     #[test]
     fn fresh_init_creates_structure() {
         let root = make_temp_dir("fresh");
-        let args = InitArgs { force: false };
+        let args = InitArgs {
+            force: false,
+            hooks: false,
+        };
         run_init(&args, &root).expect("init should succeed");
 
         assert!(root.join(".bones").is_dir());
@@ -155,7 +171,10 @@ mod tests {
     #[test]
     fn reinit_without_force_fails() {
         let root = make_temp_dir("no-force");
-        let args = InitArgs { force: false };
+        let args = InitArgs {
+            force: false,
+            hooks: false,
+        };
         run_init(&args, &root).expect("first init should succeed");
 
         let result = run_init(&args, &root);
@@ -167,8 +186,22 @@ mod tests {
     #[test]
     fn reinit_with_force_succeeds() {
         let root = make_temp_dir("with-force");
-        run_init(&InitArgs { force: false }, &root).expect("first init should succeed");
-        run_init(&InitArgs { force: true }, &root).expect("reinit --force should succeed");
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("first init should succeed");
+        run_init(
+            &InitArgs {
+                force: true,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("reinit --force should succeed");
 
         assert!(root.join(".bones/config.toml").is_file());
         let _ = fs::remove_dir_all(&root);
@@ -177,7 +210,14 @@ mod tests {
     #[test]
     fn config_toml_has_required_sections() {
         let root = make_temp_dir("config");
-        run_init(&InitArgs { force: false }, &root).expect("init should succeed");
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("init should succeed");
 
         let content =
             fs::read_to_string(root.join(".bones/config.toml")).expect("config.toml readable");
@@ -203,7 +243,14 @@ mod tests {
     #[test]
     fn gitignore_covers_derived_files() {
         let root = make_temp_dir("gitignore");
-        run_init(&InitArgs { force: false }, &root).expect("init should succeed");
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("init should succeed");
 
         let content =
             fs::read_to_string(root.join(".bones/.gitignore")).expect(".gitignore readable");
@@ -220,7 +267,14 @@ mod tests {
     #[test]
     fn shard_has_correct_header() {
         let root = make_temp_dir("shard-header");
-        run_init(&InitArgs { force: false }, &root).expect("init should succeed");
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("init should succeed");
 
         // Read via the symlink so we confirm the symlink is wired correctly
         let symlink = root.join(".bones/events/current.events");
@@ -240,7 +294,14 @@ mod tests {
     #[test]
     fn shard_name_matches_current_month() {
         let root = make_temp_dir("shard-name");
-        run_init(&InitArgs { force: false }, &root).expect("init should succeed");
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            &root,
+        )
+        .expect("init should succeed");
 
         let expected_name = Local::now().format("%Y-%m.events").to_string();
         let shard_path = root.join(".bones/events").join(&expected_name);
