@@ -25,6 +25,8 @@
 //!   for an event. Used internally by [`hash::verify_event_hash`] and
 //!   [`hash::verify_chain`].
 
+pub mod graph;
 pub mod hash;
 
+pub use graph::{DagNode, EventDag};
 pub use hash::{HashError, HashErrorCode, verify_chain, verify_event_hash};
