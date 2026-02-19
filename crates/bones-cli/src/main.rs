@@ -51,6 +51,9 @@ enum Commands {
     /// for the bones-events merge driver and derived-file ignores.
     Sync(cmd::sync::SyncArgs),
 
+    /// Import data from external trackers.
+    Import(cmd::import::ImportArgs),
+
     /// Rebuild the projection (currently a placeholder command for hook integration).
     Rebuild {
         /// Rebuild incrementally from the last projection cursor.
@@ -241,6 +244,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Sync(args) => {
             cmd::sync::run_sync(&args, &project_root)?;
+        }
+        Commands::Import(args) => {
+            cmd::import::run_import(&args, &project_root)?;
         }
         Commands::Hooks {
             command: HookCommand::Install,
