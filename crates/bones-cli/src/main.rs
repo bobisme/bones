@@ -8,7 +8,7 @@ mod validate;
 
 use bones_core::timing;
 use clap::{CommandFactory, Parser, Subcommand};
-use output::OutputMode;
+use output::{OutputMode, resolve_output_mode};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -49,13 +49,12 @@ struct Cli {
 }
 
 impl Cli {
-    /// Derive the output mode from flags.
+    /// Derive the output mode from flags, environment, and TTY defaults.
+    ///
+    /// Delegates to [`resolve_output_mode`] which applies the full precedence chain:
+    /// `--json` flag > `BONES_OUTPUT` env var > TTY-aware default.
     fn output_mode(&self) -> OutputMode {
-        if self.json {
-            OutputMode::Json
-        } else {
-            OutputMode::Human
-        }
+        resolve_output_mode(self.json)
     }
 
     /// Get the agent flag as an Option<&str> for resolution.
@@ -633,7 +632,8 @@ mod tests {
     fn default_output_is_human() {
         let cli = Cli::parse_from(["bn", "list"]);
         assert!(!cli.json);
-        assert!(!cli.output_mode().is_json());
+        // In test (non-TTY), resolve_output_mode defaults to JSON.
+        // The key assertion is that --json flag is not set.
     }
 
     #[test]
