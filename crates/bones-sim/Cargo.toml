@@ -3,6 +3,9 @@ name = "bones-sim"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }

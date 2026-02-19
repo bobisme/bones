@@ -8,6 +8,12 @@ members = [
     "crates/bones-sim",
 ]
 
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+unnecessary_wraps = "allow" # main returning anyhow::Result is common/desired
+
 [workspace.dependencies]
 anyhow = "1.0"
 chrono = "0.4"
