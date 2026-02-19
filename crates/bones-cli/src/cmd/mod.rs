@@ -8,6 +8,7 @@ pub mod diagnose;
 pub mod do_cmd;
 pub mod done;
 pub mod dup;
+pub mod feedback;
 pub mod graph;
 pub mod import;
 pub mod init;

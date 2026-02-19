@@ -134,6 +134,22 @@ enum Commands {
     Done(cmd::done::DoneArgs),
 
     #[command(
+        next_help_heading = "Feedback",
+        about = "Record that you worked on this item (positive feedback)",
+        long_about = "Record positive feedback: you acted on the triage recommendation and worked on this item.\n\nAppends a feedback entry to .bones/feedback.jsonl and updates the Thompson Sampling posterior for your agent profile.",
+        after_help = "EXAMPLES:\n    # Record that you worked on bn-abc\n    bn did bn-abc\n\n    # With explicit agent identity\n    bn --agent alice did bn-abc\n\n    # Emit machine-readable output\n    bn did bn-abc --json"
+    )]
+    Did(cmd::feedback::DidArgs),
+
+    #[command(
+        next_help_heading = "Feedback",
+        about = "Record that you skipped this item (negative feedback)",
+        long_about = "Record negative feedback: the triage recommendation was not followed and you skipped this item.\n\nAppends a feedback entry to .bones/feedback.jsonl and updates the Thompson Sampling posterior for your agent profile.",
+        after_help = "EXAMPLES:\n    # Record that you skipped bn-abc\n    bn skip bn-abc\n\n    # With explicit agent identity\n    bn --agent alice skip bn-abc\n\n    # Emit machine-readable output\n    bn skip bn-abc --json"
+    )]
+    Skip(cmd::feedback::SkipArgs),
+
+    #[command(
         next_help_heading = "Lifecycle",
         about = "Archive done items",
         long_about = "Archive a done work item, or bulk-archive stale done items.",
@@ -489,6 +505,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Done(ref args) => timing::timed("cmd.done", || {
             cmd::done::run_done(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Did(ref args) => timing::timed("cmd.did", || {
+            cmd::feedback::run_did(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Skip(ref args) => timing::timed("cmd.skip", || {
+            cmd::feedback::run_skip(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Archive(ref args) => timing::timed("cmd.archive", || {
             cmd::archive::run_archive(args, cli.agent_flag(), output, &project_root)
         }),
@@ -737,6 +759,8 @@ mod tests {
             vec!["bn", "show", "x"],
             vec!["bn", "do", "x"],
             vec!["bn", "done", "x"],
+            vec!["bn", "did", "x"],
+            vec!["bn", "skip", "x"],
             vec!["bn", "archive", "x"],
             vec!["bn", "update", "x", "--title", "t"],
             vec!["bn", "close", "x"],
@@ -756,6 +780,38 @@ mod tests {
                 result.err()
             );
         }
+    }
+
+    #[test]
+    fn did_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "did", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Did(_)));
+        if let Commands::Did(ref args) = cli.command {
+            assert_eq!(args.id, "bn-abc");
+        }
+    }
+
+    #[test]
+    fn skip_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "skip", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Skip(_)));
+        if let Commands::Skip(ref args) = cli.command {
+            assert_eq!(args.id, "bn-abc");
+        }
+    }
+
+    #[test]
+    fn did_accepts_agent_flag() {
+        let cli = Cli::parse_from(["bn", "--agent", "alice", "did", "bn-abc"]);
+        assert_eq!(cli.agent_flag(), Some("alice"));
+        assert!(matches!(cli.command, Commands::Did(_)));
+    }
+
+    #[test]
+    fn skip_accepts_agent_flag() {
+        let cli = Cli::parse_from(["bn", "--agent", "alice", "skip", "bn-abc"]);
+        assert_eq!(cli.agent_flag(), Some("alice"));
+        assert!(matches!(cli.command, Commands::Skip(_)));
     }
 
     #[test]
