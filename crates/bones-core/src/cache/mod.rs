@@ -35,10 +35,12 @@ pub use codec::{
     ColumnCodec, EventTypeCodec, InternedStringCodec, ItemIdCodec, RawBytesCodec, TimestampCodec,
     ValueCodec,
 };
-pub use columns::{CacheColumns, ColumnRow, COLUMN_COUNT};
+pub use columns::{COLUMN_COUNT, CacheColumns, ColumnRow};
 
 use crate::event::Event;
-use columns::{COL_AGENTS, COL_EVENT_TYPES, COL_ITC, COL_ITEM_IDS, COL_PARENTS, COL_TIMESTAMPS, COL_VALUES};
+use columns::{
+    COL_AGENTS, COL_EVENT_TYPES, COL_ITC, COL_ITEM_IDS, COL_PARENTS, COL_TIMESTAMPS, COL_VALUES,
+};
 
 // ---------------------------------------------------------------------------
 // Magic bytes and format constants
@@ -264,7 +266,8 @@ impl CacheHeader {
         let mut offsets: Vec<u64> = Vec::with_capacity(column_count);
         for i in 0..column_count {
             let start = offsets_start + i * 8;
-            let offset = u64::from_le_bytes(data[start..start + 8].try_into().expect("slice is 8 bytes"));
+            let offset =
+                u64::from_le_bytes(data[start..start + 8].try_into().expect("slice is 8 bytes"));
             offsets.push(offset);
         }
 
@@ -594,7 +597,8 @@ mod tests {
 
     #[test]
     fn decode_corrupted_crc() {
-        let mut bytes = encode_events(&[make_event(1_000, "a", EventType::Create, "bn-a7x")], 0).unwrap();
+        let mut bytes =
+            encode_events(&[make_event(1_000, "a", EventType::Create, "bn-a7x")], 0).unwrap();
         // Flip a byte in the column data (after header + offsets)
         let col_start = HEADER_SIZE + COLUMN_COUNT * 8;
         if col_start < bytes.len() {
@@ -610,7 +614,8 @@ mod tests {
 
     #[test]
     fn decode_truncated_data() {
-        let bytes = encode_events(&[make_event(1_000, "a", EventType::Create, "bn-a7x")], 0).unwrap();
+        let bytes =
+            encode_events(&[make_event(1_000, "a", EventType::Create, "bn-a7x")], 0).unwrap();
         let truncated = &bytes[..bytes.len() / 2];
         let err = decode_events(truncated).unwrap_err();
         assert!(
@@ -631,8 +636,18 @@ mod tests {
             .map(|i| {
                 make_event(
                     i as i64 * 1000,
-                    if i % 3 == 0 { "alice" } else if i % 3 == 1 { "bob" } else { "carol" },
-                    if i % 2 == 0 { EventType::Create } else { EventType::Move },
+                    if i % 3 == 0 {
+                        "alice"
+                    } else if i % 3 == 1 {
+                        "bob"
+                    } else {
+                        "carol"
+                    },
+                    if i % 2 == 0 {
+                        EventType::Create
+                    } else {
+                        EventType::Move
+                    },
                     &format!("bn-{:03}", i % 50),
                 )
             })

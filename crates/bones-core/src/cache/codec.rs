@@ -178,8 +178,7 @@ impl ColumnCodec for InternedStringCodec {
     fn encode(items: &[String], buf: &mut Vec<u8>) -> Result<(), CacheError> {
         // Build string table (insertion order = index)
         let mut table: Vec<&str> = Vec::new();
-        let mut index_of: std::collections::HashMap<&str, u16> =
-            std::collections::HashMap::new();
+        let mut index_of: std::collections::HashMap<&str, u16> = std::collections::HashMap::new();
         let mut indices: Vec<u16> = Vec::with_capacity(items.len());
 
         for item in items {
@@ -236,9 +235,8 @@ impl ColumnCodec for InternedStringCodec {
             if pos + 2 > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
-            let len =
-                u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
-                    as usize;
+            let len = u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
+                as usize;
             pos += 2;
             if pos + len > data.len() {
                 return Err(CacheError::UnexpectedEof);
@@ -267,9 +265,8 @@ impl ColumnCodec for InternedStringCodec {
                 u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
                     as usize;
             pos += 2;
-            let idx =
-                u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
-                    as usize;
+            let idx = u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
+                as usize;
             pos += 2;
             let s = table.get(idx).ok_or_else(|| {
                 CacheError::DataCorrupted(format!("string index {idx} out of range"))
@@ -473,8 +470,7 @@ impl ColumnCodec for ItemIdCodec {
     fn encode(items: &[String], buf: &mut Vec<u8>) -> Result<(), CacheError> {
         // Build dictionary
         let mut dict: Vec<&str> = Vec::new();
-        let mut index_of: std::collections::HashMap<&str, u32> =
-            std::collections::HashMap::new();
+        let mut index_of: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
         let mut indices: Vec<u32> = Vec::with_capacity(items.len());
 
         for item in items {
@@ -531,9 +527,8 @@ impl ColumnCodec for ItemIdCodec {
             if pos + 2 > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
-            let len =
-                u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
-                    as usize;
+            let len = u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
+                as usize;
             pos += 2;
             if pos + len > data.len() {
                 return Err(CacheError::UnexpectedEof);
@@ -562,9 +557,8 @@ impl ColumnCodec for ItemIdCodec {
                 u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
                     as usize;
             pos += 2;
-            let idx =
-                u32::from_le_bytes(data[pos..pos + 4].try_into().expect("slice is 4 bytes"))
-                    as usize;
+            let idx = u32::from_le_bytes(data[pos..pos + 4].try_into().expect("slice is 4 bytes"))
+                as usize;
             pos += 4;
             let s = dict.get(idx).ok_or_else(|| {
                 CacheError::DataCorrupted(format!("item ID index {idx} out of range"))
@@ -607,8 +601,9 @@ impl ColumnCodec for RawBytesCodec {
 
     fn encode(items: &[String], buf: &mut Vec<u8>) -> Result<(), CacheError> {
         for s in items {
-            let len = u16::try_from(s.len())
-                .map_err(|_| CacheError::DataCorrupted("string too long for u16 length prefix".into()))?;
+            let len = u16::try_from(s.len()).map_err(|_| {
+                CacheError::DataCorrupted("string too long for u16 length prefix".into())
+            })?;
             buf.extend_from_slice(&len.to_le_bytes());
             buf.extend_from_slice(s.as_bytes());
         }
@@ -622,17 +617,14 @@ impl ColumnCodec for RawBytesCodec {
             if pos + 2 > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
-            let len =
-                u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
-                    as usize;
+            let len = u16::from_le_bytes(data[pos..pos + 2].try_into().expect("slice is 2 bytes"))
+                as usize;
             pos += 2;
             if pos + len > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
             let s = std::str::from_utf8(&data[pos..pos + len])
-                .map_err(|e| {
-                    CacheError::DataCorrupted(format!("invalid UTF-8 in raw bytes: {e}"))
-                })?
+                .map_err(|e| CacheError::DataCorrupted(format!("invalid UTF-8 in raw bytes: {e}")))?
                 .to_string();
             result.push(s);
             pos += len;
@@ -663,8 +655,9 @@ impl ColumnCodec for ValueCodec {
 
     fn encode(items: &[String], buf: &mut Vec<u8>) -> Result<(), CacheError> {
         for s in items {
-            let len = u32::try_from(s.len())
-                .map_err(|_| CacheError::DataCorrupted("payload too large for u32 length prefix".into()))?;
+            let len = u32::try_from(s.len()).map_err(|_| {
+                CacheError::DataCorrupted("payload too large for u32 length prefix".into())
+            })?;
             buf.extend_from_slice(&len.to_le_bytes());
             buf.extend_from_slice(s.as_bytes());
         }
@@ -678,9 +671,8 @@ impl ColumnCodec for ValueCodec {
             if pos + 4 > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
-            let len =
-                u32::from_le_bytes(data[pos..pos + 4].try_into().expect("slice is 4 bytes"))
-                    as usize;
+            let len = u32::from_le_bytes(data[pos..pos + 4].try_into().expect("slice is 4 bytes"))
+                as usize;
             pos += 4;
             if pos + len > data.len() {
                 return Err(CacheError::UnexpectedEof);
@@ -881,10 +873,16 @@ mod tests {
 
     #[test]
     fn interned_string_roundtrip_repeated() {
-        let items: Vec<String> = ["claude-abc", "gemini-xyz", "claude-abc", "claude-abc", "gemini-xyz"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let items: Vec<String> = [
+            "claude-abc",
+            "gemini-xyz",
+            "claude-abc",
+            "claude-abc",
+            "gemini-xyz",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let mut buf = Vec::new();
         InternedStringCodec::encode(&items, &mut buf).unwrap();
         let (decoded, consumed) = InternedStringCodec::decode(&buf, items.len()).unwrap();
@@ -896,13 +894,23 @@ mod tests {
     fn interned_string_compresses_repeated_values() {
         // 1000 entries: 500 "agent-one" followed by 500 "agent-two" → 2 RLE runs
         let items: Vec<String> = (0..1000)
-            .map(|i| if i < 500 { "agent-one".to_string() } else { "agent-two".to_string() })
+            .map(|i| {
+                if i < 500 {
+                    "agent-one".to_string()
+                } else {
+                    "agent-two".to_string()
+                }
+            })
             .collect();
         let mut buf = Vec::new();
         InternedStringCodec::encode(&items, &mut buf).unwrap();
         // 2 strings (9 bytes each ≈ 22 bytes) + table header (4) + 2 runs (8 bytes) + run header (4)
         // ≈ 38 bytes total vs 9000 bytes raw
-        assert!(buf.len() < 60, "should compress well: got {} bytes", buf.len());
+        assert!(
+            buf.len() < 60,
+            "should compress well: got {} bytes",
+            buf.len()
+        );
         let (decoded, _) = InternedStringCodec::decode(&buf, 1000).unwrap();
         assert_eq!(decoded, items);
     }
@@ -953,7 +961,11 @@ mod tests {
         let mut buf = Vec::new();
         EventTypeCodec::encode(&items, &mut buf).unwrap();
         // 500 packed bytes RLE into ~5 runs, each 2 bytes = ~10 bytes + headers
-        assert!(buf.len() < 50, "expected compact encoding: {} bytes", buf.len());
+        assert!(
+            buf.len() < 50,
+            "expected compact encoding: {} bytes",
+            buf.len()
+        );
         let (decoded, _) = EventTypeCodec::decode(&buf, 1000).unwrap();
         assert_eq!(decoded, items);
     }
@@ -996,7 +1008,11 @@ mod tests {
 
     #[test]
     fn raw_bytes_roundtrip() {
-        let items: Vec<String> = vec!["itc:AQ".to_string(), "itc:AQ.1".to_string(), "itc:Bg".to_string()];
+        let items: Vec<String> = vec![
+            "itc:AQ".to_string(),
+            "itc:AQ.1".to_string(),
+            "itc:Bg".to_string(),
+        ];
         let mut buf = Vec::new();
         RawBytesCodec::encode(&items, &mut buf).unwrap();
         let (decoded, consumed) = RawBytesCodec::decode(&buf, items.len()).unwrap();

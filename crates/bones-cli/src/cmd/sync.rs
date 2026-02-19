@@ -165,10 +165,8 @@ pub fn ensure_gitignore(repo_dir: &Path) -> Result<()> {
 /// Entry point wired from `main.rs`.
 pub fn run_sync(args: &SyncArgs, project_root: &Path) -> Result<()> {
     // Always ensure git configuration is up-to-date
-    ensure_gitattributes(project_root)
-        .context("Failed to update .gitattributes")?;
-    ensure_gitignore(project_root)
-        .context("Failed to update .gitignore")?;
+    ensure_gitattributes(project_root).context("Failed to update .gitattributes")?;
+    ensure_gitignore(project_root).context("Failed to update .gitignore")?;
 
     if args.config_only {
         if args.json {
@@ -240,10 +238,7 @@ fn run_rebuild(repo_dir: &Path) -> Result<()> {
     match status {
         Ok(s) if s.success() => return Ok(()),
         Ok(s) => {
-            anyhow::bail!(
-                "bn rebuild exited with code {}",
-                s.code().unwrap_or(-1)
-            );
+            anyhow::bail!("bn rebuild exited with code {}", s.code().unwrap_or(-1));
         }
         Err(_) => {
             // `bn` not on PATH — treat as non-fatal and warn caller
@@ -273,7 +268,11 @@ fn print_report(report: &SyncReport) {
     let check = |ok: bool| if ok { "✓" } else { "✗" };
 
     println!("bn sync");
-    println!("  {} git pull  ({} event file(s) merged)", check(report.pulled), report.events_merged);
+    println!(
+        "  {} git pull  ({} event file(s) merged)",
+        check(report.pulled),
+        report.events_merged
+    );
     println!("  {} bn rebuild --incremental", check(report.rebuilt));
     println!("  {} git push", check(report.pushed));
 
@@ -405,10 +404,7 @@ mod tests {
         ensure_gitignore(&root).expect("second call");
 
         let content = fs::read_to_string(root.join(".gitignore")).unwrap();
-        let count = content
-            .lines()
-            .filter(|l| l.trim() == "bones.db")
-            .count();
+        let count = content.lines().filter(|l| l.trim() == "bones.db").count();
         assert_eq!(count, 1, "bones.db duplicated: {content}");
         let _ = fs::remove_dir_all(&root);
     }
@@ -417,19 +413,12 @@ mod tests {
     fn gitignore_no_duplicate_when_already_present() {
         let root = tmp("gi-no-dup");
         let path = root.join(".gitignore");
-        fs::write(
-            &path,
-            "bones.db\n.bones/feedback.jsonl\n.bones/cache/\n",
-        )
-        .unwrap();
+        fs::write(&path, "bones.db\n.bones/feedback.jsonl\n.bones/cache/\n").unwrap();
 
         ensure_gitignore(&root).expect("should succeed");
 
         let content = fs::read_to_string(&path).unwrap();
-        let count = content
-            .lines()
-            .filter(|l| l.trim() == "bones.db")
-            .count();
+        let count = content.lines().filter(|l| l.trim() == "bones.db").count();
         assert_eq!(count, 1, "bones.db duplicated: {content}");
         let _ = fs::remove_dir_all(&root);
     }
@@ -446,10 +435,7 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains(".bones/feedback.jsonl"));
         assert!(content.contains(".bones/cache/"));
-        let count = content
-            .lines()
-            .filter(|l| l.trim() == "bones.db")
-            .count();
+        let count = content.lines().filter(|l| l.trim() == "bones.db").count();
         assert_eq!(count, 1, "bones.db duplicated during partial update");
         let _ = fs::remove_dir_all(&root);
     }

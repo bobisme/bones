@@ -103,7 +103,9 @@ impl CacheColumns {
             if len == n {
                 Ok(())
             } else {
-                Err(format!("column '{name}' length {len} != timestamps length {n}"))
+                Err(format!(
+                    "column '{name}' length {len} != timestamps length {n}"
+                ))
             }
         };
         check_len("agents", self.agents.len())?;
@@ -221,8 +223,8 @@ impl CacheColumns {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::data::{CommentData, CreateData, MoveData};
     use crate::event::{Event, EventData, EventType};
-    use crate::event::data::{CreateData, MoveData, CommentData};
     use crate::model::item::{Kind, State, Urgency};
     use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
@@ -462,10 +464,7 @@ mod tests {
             make_move_event(2_000, "bob", "bn-a7x", "blake3:abc"),
         ];
         let cols = CacheColumns::from_events(&events).unwrap();
-        assert_eq!(
-            cols.event_types(),
-            &[EventType::Create, EventType::Move]
-        );
+        assert_eq!(cols.event_types(), &[EventType::Create, EventType::Move]);
     }
 
     #[test]

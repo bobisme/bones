@@ -767,8 +767,16 @@ mod tests {
 
         let dag = EventDag::from_events(&[root.clone(), left.clone(), right.clone()]);
 
-        let order1: Vec<_> = dag.topological_order().iter().map(|e| e.event_hash.clone()).collect();
-        let order2: Vec<_> = dag.topological_order().iter().map(|e| e.event_hash.clone()).collect();
+        let order1: Vec<_> = dag
+            .topological_order()
+            .iter()
+            .map(|e| e.event_hash.clone())
+            .collect();
+        let order2: Vec<_> = dag
+            .topological_order()
+            .iter()
+            .map(|e| e.event_hash.clone())
+            .collect();
 
         assert_eq!(order1, order2, "topological order must be deterministic");
     }
