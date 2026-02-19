@@ -4,6 +4,7 @@
 pub mod clock;
 pub mod crdt;
 pub mod error;
+pub mod event;
 pub mod lock;
 pub mod model;
 
