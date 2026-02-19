@@ -1,3 +1,4 @@
+use crate::error::ErrorCode;
 use fs2::FileExt;
 use std::{
     fs::{self, File, OpenOptions},
@@ -20,6 +21,43 @@ impl From<io::Error> for LockError {
     }
 }
 
+impl LockError {
+    /// Machine-readable code associated with this lock error.
+    #[must_use]
+    pub const fn code(&self) -> ErrorCode {
+        match self {
+            Self::Timeout { .. } => ErrorCode::LockContention,
+            Self::IoError(_) => ErrorCode::EventFileWriteFailed,
+        }
+    }
+
+    /// Optional remediation hint for operators and agents.
+    #[must_use]
+    pub const fn hint(&self) -> Option<&'static str> {
+        self.code().hint()
+    }
+}
+
+impl std::fmt::Display for LockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout { path, waited } => {
+                write!(
+                    f,
+                    "{}: lock timed out after {:?} at {}",
+                    self.code().code(),
+                    waited,
+                    path.display()
+                )
+            }
+            Self::IoError(err) => write!(f, "{}: {}", self.code().code(), err),
+        }
+    }
+}
+
+impl std::error::Error for LockError {}
+
+#[derive(Clone, Copy)]
 enum LockKind {
     Shared,
     Exclusive,
@@ -161,6 +199,7 @@ impl DbWriteLock {
 #[cfg(test)]
 mod tests {
     use super::{DbReadLock, DbWriteLock, LockError, ShardLock};
+    use crate::error::ErrorCode;
     use std::{
         path::PathBuf,
         sync::{Arc, Barrier},
@@ -191,6 +230,16 @@ mod tests {
         let err = ShardLock::acquire(&path, Duration::from_millis(20)).unwrap_err();
 
         assert!(matches!(err, LockError::Timeout { path: p, .. } if p == path));
+    }
+
+    #[test]
+    fn lock_error_maps_to_machine_code() {
+        let timeout = LockError::Timeout {
+            path: lock_path("code.lock"),
+            waited: Duration::from_millis(10),
+        };
+        assert_eq!(timeout.code(), ErrorCode::LockContention);
+        assert!(timeout.hint().is_some());
     }
 
     #[test]

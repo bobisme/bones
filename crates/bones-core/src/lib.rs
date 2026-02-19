@@ -2,6 +2,7 @@
 //! bones-core library.
 
 pub mod crdt;
+pub mod error;
 pub mod lock;
 pub mod model;
 
