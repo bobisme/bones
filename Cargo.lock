@@ -167,6 +167,7 @@ name = "bones-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bones-core",
  "chrono",
  "clap",
  "serde",

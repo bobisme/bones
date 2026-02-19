@@ -9,6 +9,7 @@ pub mod event;
 pub mod lock;
 pub mod model;
 pub mod shard;
+pub mod sync;
 
 use tracing::{info, instrument};
 

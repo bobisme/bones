@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod cmd;
+mod git;
 
 use clap::{Parser, Subcommand};
 use std::env;
@@ -52,6 +53,33 @@ enum Commands {
         /// Output file (merged result)
         #[arg(value_name = "OUTPUT")]
         output: Option<PathBuf>,
+    },
+
+    /// Git merge driver for *.events shard files.
+    ///
+    /// Invoked automatically by git when merging `.events` files.
+    /// Registered via `.gitattributes` and `.git/config`:
+    ///
+    ///   .gitattributes:  *.events merge=bones-events
+    ///   .git/config:     [merge "bones-events"]
+    ///                        driver = bn merge-driver %O %A %B
+    ///
+    /// Reads base (%O), ours (%A), and theirs (%B) versions of a shard file,
+    /// merges ours and theirs using CRDT union semantics (dedup by hash,
+    /// sort by timestamp/agent/hash), and writes the merged result to the
+    /// ours path (%A). Exits 0 on success.
+    MergeDriver {
+        /// Base file — the common ancestor version (git %O placeholder).
+        #[arg(value_name = "BASE")]
+        base: PathBuf,
+
+        /// Ours file — the local branch version; also the output path (git %A placeholder).
+        #[arg(value_name = "OURS")]
+        ours: PathBuf,
+
+        /// Theirs file — the remote branch version (git %B placeholder).
+        #[arg(value_name = "THEIRS")]
+        theirs: PathBuf,
     },
 }
 
@@ -196,6 +224,10 @@ fn main() -> anyhow::Result<()> {
             let output = output.ok_or_else(|| anyhow::anyhow!("Missing output file argument"))?;
 
             merge_files(&base, &left, &right, &output)?;
+        }
+
+        Commands::MergeDriver { base, ours, theirs } => {
+            git::merge_driver::merge_driver_main(&base, &ours, &theirs)?;
         }
     }
 

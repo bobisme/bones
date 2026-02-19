@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+bones-core = { path = "../bones-core" }
 chrono = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
