@@ -8,6 +8,7 @@ pub mod dag;
 pub mod db;
 pub mod error;
 pub mod event;
+pub mod graph;
 pub mod lock;
 pub mod model;
 pub mod shard;
