@@ -7,6 +7,7 @@
 //! - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
 pub mod graph;
+pub mod metrics;
 
 use tracing::{info, instrument};
 
