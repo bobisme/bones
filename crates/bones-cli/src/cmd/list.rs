@@ -1,14 +1,18 @@
 //! `bn list` — list work items with filtering.
 //!
 //! By default, shows all open items (state = "open"). Filters can be
-//! combined. Supports both human-readable table and JSON array output.
+//! combined. Supports both human-readable table and JSON output.
 
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
-use bones_core::db::query::{self, ItemFilter, SortOrder};
+use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};
+use bones_core::model::item::Urgency;
 use clap::Args;
 use serde::Serialize;
+use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::io::Write;
+use std::str::FromStr;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct ListArgs {
@@ -37,12 +41,31 @@ pub struct ListArgs {
     #[arg(long)]
     pub assignee: Option<String>,
 
+    /// Filter to items updated at or after this datetime.
+    ///
+    /// Accepts RFC3339 (2026-02-20T12:00:00Z), epoch seconds, or epoch microseconds.
+    #[arg(long)]
+    pub since: Option<String>,
+
+    /// Filter to items updated at or before this datetime.
+    ///
+    /// Accepts RFC3339 (2026-02-20T12:00:00Z), epoch seconds, or epoch microseconds.
+    #[arg(long)]
+    pub until: Option<String>,
+
     /// Maximum number of items to show (0 = all).
     #[arg(short = 'n', long, default_value = "50")]
     pub limit: usize,
 
-    /// Sort order: updated_desc, updated_asc, created_desc, created_asc, priority.
-    #[arg(long, default_value = "updated_desc")]
+    /// Pagination offset.
+    #[arg(long, default_value = "0")]
+    pub offset: usize,
+
+    /// Sort order: priority, created, updated, state.
+    ///
+    /// Legacy values are also accepted: created_desc, created_asc,
+    /// updated_desc, updated_asc.
+    #[arg(long, default_value = "updated")]
     pub sort: String,
 }
 
@@ -63,10 +86,49 @@ pub struct ListItem {
     pub updated_at_us: i64,
 }
 
+/// JSON response payload for list results.
+#[derive(Debug, Serialize)]
+struct ListResponse {
+    items: Vec<ListItem>,
+    total: usize,
+    limit: usize,
+    offset: usize,
+    has_more: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ListSort {
+    Priority,
+    CreatedAsc,
+    CreatedDesc,
+    UpdatedAsc,
+    #[default]
+    UpdatedDesc,
+    State,
+}
+
+impl FromStr for ListSort {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "priority" | "triage" => Ok(Self::Priority),
+            "created" | "created_asc" | "created-asc" | "oldest" => Ok(Self::CreatedAsc),
+            "created_desc" | "created-desc" | "newest" => Ok(Self::CreatedDesc),
+            "updated" | "updated_desc" | "updated-desc" | "recent" => Ok(Self::UpdatedDesc),
+            "updated_asc" | "updated-asc" | "stale" => Ok(Self::UpdatedAsc),
+            "state" => Ok(Self::State),
+            other => anyhow::bail!(
+                "unknown sort order '{other}': expected one of priority, created, updated, state"
+            ),
+        }
+    }
+}
+
 /// Execute `bn list`.
 ///
 /// Opens the projection database, applies filter criteria, and renders
-/// the result as a table (human mode) or JSON array (JSON mode).
+/// the result as a table (human mode) or JSON object (JSON mode).
 ///
 /// Returns an empty result when the projection database has not yet been
 /// built (rather than an error), so that `bn list` is safe to run in a
@@ -86,6 +148,17 @@ pub fn run_list(
     let conn = match query::try_open_projection(&db_path)? {
         Some(c) => c,
         None => {
+            if output.is_json() {
+                let response = ListResponse {
+                    items: Vec::new(),
+                    total: 0,
+                    limit: effective_limit(args.limit, 0, args.offset),
+                    offset: args.offset,
+                    has_more: false,
+                };
+                return render(output, &response, |_, _| Ok(()));
+            }
+
             let items: Vec<ListItem> = Vec::new();
             return render(output, &items, |_, w| {
                 writeln!(w, "(projection not found — run `bn rebuild` to initialize)")
@@ -94,14 +167,14 @@ pub fn run_list(
     };
 
     // Validate sort order
-    let sort = match args.sort.parse::<SortOrder>() {
+    let sort = match args.sort.parse::<ListSort>() {
         Ok(s) => s,
         Err(e) => {
             render_error(
                 output,
                 &CliError::with_details(
                     format!("invalid --sort value: {e}"),
-                    "valid values: updated_desc, updated_asc, created_desc, created_asc, priority",
+                    "valid values: priority, created, updated, state",
                     "invalid_sort_order",
                 ),
             )?;
@@ -127,62 +200,166 @@ pub fn run_list(
             anyhow::bail!("{}", e.reason);
         }
     }
+    if let Some(ref urgency) = args.urgency {
+        if urgency.parse::<Urgency>().is_err() {
+            render_error(
+                output,
+                &CliError::with_details(
+                    format!("invalid urgency '{urgency}'"),
+                    "use --urgency urgent|default|punt",
+                    "invalid_urgency",
+                ),
+            )?;
+            anyhow::bail!("invalid urgency");
+        }
+    }
     if let Some(ref parent) = args.parent {
         if let Err(e) = validate::validate_item_id(parent) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
     }
+    if let Some(ref assignee) = args.assignee {
+        if let Err(e) = validate::validate_agent(assignee) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
 
-    // Default to showing open items unless any filter is explicitly set
+    let since_us = match args.since.as_deref() {
+        Some(raw) => match parse_datetime_to_micros(raw) {
+            Some(value) => Some(value),
+            None => {
+                render_error(
+                    output,
+                    &CliError::with_details(
+                        format!("invalid --since value '{raw}'"),
+                        "use RFC3339, epoch seconds, or epoch microseconds",
+                        "invalid_datetime",
+                    ),
+                )?;
+                anyhow::bail!("invalid --since value");
+            }
+        },
+        None => None,
+    };
+
+    let until_us = match args.until.as_deref() {
+        Some(raw) => match parse_datetime_to_micros(raw) {
+            Some(value) => Some(value),
+            None => {
+                render_error(
+                    output,
+                    &CliError::with_details(
+                        format!("invalid --until value '{raw}'"),
+                        "use RFC3339, epoch seconds, or epoch microseconds",
+                        "invalid_datetime",
+                    ),
+                )?;
+                anyhow::bail!("invalid --until value");
+            }
+        },
+        None => None,
+    };
+
+    if let (Some(since), Some(until)) = (since_us, until_us)
+        && since > until
+    {
+        render_error(
+            output,
+            &CliError::with_details(
+                "invalid date range: --since must be <= --until",
+                "swap the values or remove one bound",
+                "invalid_date_range",
+            ),
+        )?;
+        anyhow::bail!("invalid date range");
+    }
+
+    let response = build_list_response(&conn, args, sort, since_us, until_us)?;
+
+    if output.is_json() {
+        render(output, &response, |_, _| Ok(()))
+    } else {
+        render(output, &response.items, |items, w| {
+            render_list_human(items, w)
+        })
+    }
+}
+
+fn build_list_response(
+    conn: &rusqlite::Connection,
+    args: &ListArgs,
+    sort: ListSort,
+    since_us: Option<i64>,
+    until_us: Option<i64>,
+) -> anyhow::Result<ListResponse> {
+    // Default to showing open items unless any filter is explicitly set.
+    // Pagination/sort alone should not disable this default behavior.
     let has_any_filter = args.state.is_some()
         || args.kind.is_some()
         || !args.label.is_empty()
         || args.urgency.is_some()
-        || args.parent.is_some();
+        || args.parent.is_some()
+        || args.assignee.is_some()
+        || since_us.is_some()
+        || until_us.is_some();
+
     let state_filter = if has_any_filter {
         args.state.clone()
     } else {
         Some("open".to_string())
     };
 
-    // ItemFilter supports a single label; we do AND post-filtering for extras
-    let primary_label = args.label.first().cloned();
-
+    // Fetch an unpaginated set first, then apply deterministic sort + pagination
+    // in Rust so metadata remains consistent even with composite label filters.
     let filter = ItemFilter {
         state: state_filter,
         kind: args.kind.clone(),
         urgency: args.urgency.clone(),
-        label: primary_label,
+        label: args.label.first().cloned(),
         parent_id: args.parent.clone(),
         assignee: args.assignee.clone(),
-        limit: if args.limit > 0 {
-            Some(u32::try_from(args.limit).unwrap_or(u32::MAX))
-        } else {
-            None
-        },
-        sort,
+        limit: None,
+        offset: None,
+        sort: SortOrder::UpdatedDesc,
         ..Default::default()
     };
 
-    let mut raw = query::list_items(&conn, &filter)?;
+    let mut raw = query::list_items(conn, &filter)?;
 
-    // AND-filter for additional labels beyond the first
-    if args.label.len() > 1 {
-        let extra_labels: Vec<&str> = args.label.iter().skip(1).map(String::as_str).collect();
+    // AND-filter labels when multiple --label values are supplied.
+    if !args.label.is_empty() {
+        let required_labels: HashSet<&str> = args.label.iter().map(String::as_str).collect();
         raw.retain(|item| {
-            let labels = query::get_labels(&conn, &item.item_id).unwrap_or_default();
-            let label_set: std::collections::HashSet<&str> =
-                labels.iter().map(|l| l.label.as_str()).collect();
-            extra_labels.iter().all(|&req| label_set.contains(req))
+            let labels = query::get_labels(conn, &item.item_id).unwrap_or_default();
+            let present: HashSet<&str> = labels.iter().map(|l| l.label.as_str()).collect();
+            required_labels.iter().all(|label| present.contains(label))
         });
     }
 
-    // Enrich each raw item with its label set
-    let items: anyhow::Result<Vec<ListItem>> = raw
+    if let Some(since) = since_us {
+        raw.retain(|item| item.updated_at_us >= since);
+    }
+    if let Some(until) = until_us {
+        raw.retain(|item| item.updated_at_us <= until);
+    }
+
+    sort_query_items(&mut raw, sort);
+
+    let total = raw.len();
+    let start = args.offset.min(total);
+    let end = if args.limit == 0 {
+        total
+    } else {
+        start.saturating_add(args.limit).min(total)
+    };
+    let has_more = args.limit > 0 && end < total;
+
+    let items: anyhow::Result<Vec<ListItem>> = raw[start..end]
         .iter()
         .map(|qi| {
-            let labels = query::get_labels(&conn, &qi.item_id)
+            let labels = query::get_labels(conn, &qi.item_id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|l| l.label)
@@ -200,9 +377,92 @@ pub fn run_list(
             })
         })
         .collect();
-    let items = items?;
 
-    render(output, &items, |items, w| render_list_human(items, w))
+    Ok(ListResponse {
+        items: items?,
+        total,
+        limit: effective_limit(args.limit, total, args.offset),
+        offset: args.offset,
+        has_more,
+    })
+}
+
+fn sort_query_items(items: &mut [QueryItem], sort: ListSort) {
+    items.sort_by(|a, b| compare_query_items(a, b, sort));
+}
+
+fn compare_query_items(a: &QueryItem, b: &QueryItem, sort: ListSort) -> Ordering {
+    match sort {
+        ListSort::Priority => urgency_rank(&a.urgency)
+            .cmp(&urgency_rank(&b.urgency))
+            .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+        ListSort::State => state_rank(&a.state)
+            .cmp(&state_rank(&b.state))
+            .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+        ListSort::CreatedAsc => a
+            .created_at_us
+            .cmp(&b.created_at_us)
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+        ListSort::CreatedDesc => b
+            .created_at_us
+            .cmp(&a.created_at_us)
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+        ListSort::UpdatedAsc => a
+            .updated_at_us
+            .cmp(&b.updated_at_us)
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+        ListSort::UpdatedDesc => b
+            .updated_at_us
+            .cmp(&a.updated_at_us)
+            .then_with(|| a.item_id.cmp(&b.item_id)),
+    }
+}
+
+fn urgency_rank(value: &str) -> u8 {
+    match value {
+        "urgent" => 0,
+        "default" => 1,
+        "punt" => 2,
+        _ => 3,
+    }
+}
+
+fn state_rank(value: &str) -> u8 {
+    match value {
+        "open" => 0,
+        "doing" => 1,
+        "done" => 2,
+        "archived" => 3,
+        _ => 4,
+    }
+}
+
+fn parse_datetime_to_micros(raw: &str) -> Option<i64> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    if let Ok(num) = raw.parse::<i64>() {
+        if num > 1_000_000_000_000 {
+            return Some(num);
+        }
+        return Some(num.saturating_mul(1_000_000));
+    }
+
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.timestamp_micros())
+}
+
+fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
+    if limit == 0 {
+        total.saturating_sub(offset)
+    } else {
+        limit
+    }
 }
 
 /// Render the item list as a human-readable table.
@@ -251,8 +511,25 @@ mod tests {
     use super::*;
     use crate::output::OutputMode;
     use bones_core::db::migrations;
+    use clap::Parser;
     use rusqlite::Connection;
     use std::path::PathBuf;
+
+    fn default_args() -> ListArgs {
+        ListArgs {
+            state: None,
+            kind: None,
+            label: vec![],
+            urgency: None,
+            parent: None,
+            assignee: None,
+            since: None,
+            until: None,
+            limit: 50,
+            offset: 0,
+            sort: "updated".into(),
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Arg parsing
@@ -260,8 +537,6 @@ mod tests {
 
     #[test]
     fn list_args_defaults() {
-        use clap::Parser;
-
         #[derive(Parser)]
         struct Wrapper {
             #[command(flatten)]
@@ -273,14 +548,16 @@ mod tests {
         assert!(w.args.label.is_empty());
         assert!(w.args.urgency.is_none());
         assert!(w.args.parent.is_none());
+        assert!(w.args.assignee.is_none());
+        assert!(w.args.since.is_none());
+        assert!(w.args.until.is_none());
         assert_eq!(w.args.limit, 50);
-        assert_eq!(w.args.sort, "updated_desc");
+        assert_eq!(w.args.offset, 0);
+        assert_eq!(w.args.sort, "updated");
     }
 
     #[test]
     fn list_args_all_flags() {
-        use clap::Parser;
-
         #[derive(Parser)]
         struct Wrapper {
             #[command(flatten)]
@@ -300,8 +577,16 @@ mod tests {
             "urgent",
             "--parent",
             "bn-abc",
+            "--assignee",
+            "alice",
+            "--since",
+            "2026-02-20T00:00:00Z",
+            "--until",
+            "2026-02-21T00:00:00Z",
             "-n",
             "10",
+            "--offset",
+            "5",
             "--sort",
             "priority",
         ]);
@@ -310,8 +595,91 @@ mod tests {
         assert_eq!(w.args.label, vec!["backend", "urgent"]);
         assert_eq!(w.args.urgency.as_deref(), Some("urgent"));
         assert_eq!(w.args.parent.as_deref(), Some("bn-abc"));
+        assert_eq!(w.args.assignee.as_deref(), Some("alice"));
+        assert_eq!(w.args.since.as_deref(), Some("2026-02-20T00:00:00Z"));
+        assert_eq!(w.args.until.as_deref(), Some("2026-02-21T00:00:00Z"));
         assert_eq!(w.args.limit, 10);
+        assert_eq!(w.args.offset, 5);
         assert_eq!(w.args.sort, "priority");
+    }
+
+    // -----------------------------------------------------------------------
+    // Sort and datetime helpers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_sort_parses_new_and_legacy_values() {
+        assert_eq!("priority".parse::<ListSort>().unwrap(), ListSort::Priority);
+        assert_eq!("created".parse::<ListSort>().unwrap(), ListSort::CreatedAsc);
+        assert_eq!(
+            "created_desc".parse::<ListSort>().unwrap(),
+            ListSort::CreatedDesc
+        );
+        assert_eq!(
+            "updated".parse::<ListSort>().unwrap(),
+            ListSort::UpdatedDesc
+        );
+        assert_eq!(
+            "updated_asc".parse::<ListSort>().unwrap(),
+            ListSort::UpdatedAsc
+        );
+        assert_eq!("state".parse::<ListSort>().unwrap(), ListSort::State);
+    }
+
+    #[test]
+    fn parse_datetime_accepts_seconds_micros_and_rfc3339() {
+        assert_eq!(
+            parse_datetime_to_micros("1700000000"),
+            Some(1_700_000_000_000_000)
+        );
+        assert_eq!(
+            parse_datetime_to_micros("1700000000000000"),
+            Some(1_700_000_000_000_000)
+        );
+        assert!(parse_datetime_to_micros("2026-02-20T00:00:00Z").is_some());
+        assert!(parse_datetime_to_micros("not-a-date").is_none());
+    }
+
+    #[test]
+    fn sort_tie_breaks_by_id_for_stability() {
+        let mut items = vec![
+            QueryItem {
+                item_id: "bn-zzz".into(),
+                title: "A".into(),
+                description: None,
+                kind: "task".into(),
+                state: "open".into(),
+                urgency: "default".into(),
+                size: None,
+                parent_id: None,
+                compact_summary: None,
+                is_deleted: false,
+                deleted_at_us: None,
+                search_labels: "".into(),
+                created_at_us: 100,
+                updated_at_us: 200,
+            },
+            QueryItem {
+                item_id: "bn-aaa".into(),
+                title: "B".into(),
+                description: None,
+                kind: "task".into(),
+                state: "open".into(),
+                urgency: "default".into(),
+                size: None,
+                parent_id: None,
+                compact_summary: None,
+                is_deleted: false,
+                deleted_at_us: None,
+                search_labels: "".into(),
+                created_at_us: 100,
+                updated_at_us: 200,
+            },
+        ];
+
+        sort_query_items(&mut items, ListSort::UpdatedDesc);
+        assert_eq!(items[0].item_id, "bn-aaa");
+        assert_eq!(items[1].item_id, "bn-zzz");
     }
 
     // -----------------------------------------------------------------------
@@ -371,7 +739,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Integration: run_list against an in-memory DB via temp file
+    // Integration: run_list / build_list_response against a temp DB
     // -----------------------------------------------------------------------
 
     fn setup_test_db() -> (tempfile::TempDir, PathBuf) {
@@ -416,68 +784,90 @@ mod tests {
     }
 
     #[test]
+    fn build_list_response_includes_pagination_metadata() {
+        let (_dir, root) = setup_test_db();
+        let db_path = root.join(".bones/bones.db");
+        let conn = Connection::open(db_path).unwrap();
+
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, \
+             search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-004', 'Open extra 1', 'task', 'open', 'default', 0, '', 1003, 2003)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, \
+             search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-005', 'Open extra 2', 'task', 'open', 'default', 0, '', 1004, 2004)",
+            [],
+        )
+        .unwrap();
+
+        let mut args = default_args();
+        args.limit = 2;
+        args.offset = 1;
+        args.sort = "created".into();
+
+        let response = build_list_response(&conn, &args, ListSort::CreatedAsc, None, None).unwrap();
+        // Default filter is state=open; we inserted 3 open rows total.
+        assert_eq!(response.total, 3);
+        assert_eq!(response.limit, 2);
+        assert_eq!(response.offset, 1);
+        assert_eq!(response.items.len(), 2);
+        assert!(!response.has_more);
+    }
+
+    #[test]
+    fn build_list_response_supports_since_until() {
+        let (_dir, root) = setup_test_db();
+        let db_path = root.join(".bones/bones.db");
+        let conn = Connection::open(db_path).unwrap();
+
+        let mut args = default_args();
+        args.state = Some("doing".into());
+
+        // bn-002 has updated_at_us=2001
+        let response =
+            build_list_response(&conn, &args, ListSort::UpdatedDesc, Some(2000), Some(2001))
+                .unwrap();
+        assert_eq!(response.total, 1);
+        assert_eq!(response.items[0].id, "bn-002");
+
+        let response_none =
+            build_list_response(&conn, &args, ListSort::UpdatedDesc, Some(2002), None).unwrap();
+        assert_eq!(response_none.total, 0);
+    }
+
+    #[test]
     fn run_list_defaults_to_open_items() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: None,
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
-        // Should not error and should list only open items
+        let args = default_args();
+        // Should not error and should list only open items by default
         run_list(&args, OutputMode::Human, &root).unwrap();
     }
 
     #[test]
     fn run_list_with_state_filter() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: Some("doing".into()),
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
+        let mut args = default_args();
+        args.state = Some("doing".into());
         run_list(&args, OutputMode::Human, &root).unwrap();
     }
 
     #[test]
     fn run_list_empty_returns_no_items_message() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: Some("archived".into()),
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
+        let mut args = default_args();
+        args.state = Some("archived".into());
         // No archived items → should succeed with empty result
         run_list(&args, OutputMode::Human, &root).unwrap();
     }
 
     #[test]
-    fn run_list_json_output_is_array() {
+    fn run_list_json_output_is_object() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: None,
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
+        let args = default_args();
         // JSON mode should not panic
         run_list(&args, OutputMode::Json, &root).unwrap();
     }
@@ -486,49 +876,53 @@ mod tests {
     fn run_list_missing_projection_returns_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
         // No .bones/bones.db — should return gracefully
-        let args = ListArgs {
-            state: None,
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
+        let args = default_args();
         run_list(&args, OutputMode::Human, dir.path()).unwrap();
     }
 
     #[test]
     fn run_list_filter_by_kind() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: Some("doing".into()),
-            kind: Some("bug".into()),
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "updated_desc".into(),
-        };
+        let mut args = default_args();
+        args.state = Some("doing".into());
+        args.kind = Some("bug".into());
         run_list(&args, OutputMode::Human, &root).unwrap();
     }
 
     #[test]
     fn run_list_invalid_sort_returns_error() {
         let (_dir, root) = setup_test_db();
-        let args = ListArgs {
-            state: None,
-            kind: None,
-            label: vec![],
-            urgency: None,
-            parent: None,
-            assignee: None,
-            limit: 50,
-            sort: "bogus_sort".into(),
-        };
+        let mut args = default_args();
+        args.sort = "bogus_sort".into();
         assert!(run_list(&args, OutputMode::Human, &root).is_err());
+    }
+
+    #[test]
+    fn list_json_serialization_includes_metadata() {
+        let response = ListResponse {
+            items: vec![ListItem {
+                id: "bn-001".into(),
+                title: "Test item".into(),
+                kind: "task".into(),
+                state: "open".into(),
+                urgency: "default".into(),
+                size: None,
+                parent_id: None,
+                labels: vec!["auth".into()],
+                updated_at_us: 1000,
+            }],
+            total: 1,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json["items"].is_array());
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["limit"], 50);
+        assert_eq!(json["offset"], 0);
+        assert_eq!(json["has_more"], false);
     }
 
     #[test]

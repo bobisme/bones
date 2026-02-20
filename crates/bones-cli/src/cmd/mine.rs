@@ -88,8 +88,11 @@ mod tests {
                 urgency: None,
                 assignee: Some("someone-else".to_string()),
                 parent: None,
+                since: None,
+                until: None,
                 limit: 50,
-                sort: "updated_desc".to_string(),
+                offset: 0,
+                sort: "updated".to_string(),
             },
         };
 
@@ -128,8 +131,11 @@ mod tests {
                 urgency: None,
                 assignee: None,
                 parent: None,
+                since: None,
+                until: None,
                 limit: 50,
-                sort: "updated_desc".to_string(),
+                offset: 0,
+                sort: "updated".to_string(),
             },
         };
 
