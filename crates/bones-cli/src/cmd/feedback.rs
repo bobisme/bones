@@ -135,10 +135,7 @@ fn run_feedback(
         .as_secs();
 
     // 6. Determine project root for feedback storage (parent of .bones/)
-    let feedback_root = bones_dir
-        .parent()
-        .unwrap_or(project_root)
-        .to_path_buf();
+    let feedback_root = bones_dir.parent().unwrap_or(project_root).to_path_buf();
 
     // 7. Build and record the feedback entry
     let item_id = bones_core::model::item_id::ItemId::new_unchecked(&resolved_id);
@@ -186,7 +183,13 @@ pub fn run_did(
     output: OutputMode,
     project_root: &Path,
 ) -> anyhow::Result<()> {
-    run_feedback(&args.id, FeedbackKind::Did, agent_flag, output, project_root)
+    run_feedback(
+        &args.id,
+        FeedbackKind::Did,
+        agent_flag,
+        output,
+        project_root,
+    )
 }
 
 /// Run `bn skip <id>` — record negative feedback.
@@ -365,7 +368,10 @@ mod tests {
             id: "bn-feed1".to_string(),
         };
         let result = run_did(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_err(), "expected error for non-bones-project directory");
+        assert!(
+            result.is_err(),
+            "expected error for non-bones-project directory"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("bones project") || msg.contains(".bones"),
@@ -431,7 +437,11 @@ mod tests {
             id: "feed1".to_string(),
         };
         let result = run_did(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "partial ID resolution failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "partial ID resolution failed: {:?}",
+            result.err()
+        );
 
         let events = load_feedback_events(dir.path()).unwrap();
         assert_eq!(events.len(), 1);
@@ -445,7 +455,11 @@ mod tests {
             id: "feed1".to_string(),
         };
         let result = run_skip(&args, Some("test-agent"), OutputMode::Json, dir.path());
-        assert!(result.is_ok(), "partial ID resolution failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "partial ID resolution failed: {:?}",
+            result.err()
+        );
 
         let events = load_feedback_events(dir.path()).unwrap();
         assert_eq!(events.len(), 1);
@@ -457,21 +471,27 @@ mod tests {
         let (dir, item_id) = setup_project();
 
         run_did(
-            &DidArgs { id: item_id.clone() },
+            &DidArgs {
+                id: item_id.clone(),
+            },
             Some("test-agent"),
             OutputMode::Json,
             dir.path(),
         )
         .unwrap();
         run_skip(
-            &SkipArgs { id: item_id.clone() },
+            &SkipArgs {
+                id: item_id.clone(),
+            },
             Some("test-agent"),
             OutputMode::Json,
             dir.path(),
         )
         .unwrap();
         run_did(
-            &DidArgs { id: item_id.clone() },
+            &DidArgs {
+                id: item_id.clone(),
+            },
             Some("test-agent"),
             OutputMode::Json,
             dir.path(),

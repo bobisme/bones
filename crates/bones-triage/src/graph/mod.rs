@@ -42,8 +42,8 @@
 
 pub mod build;
 pub mod critical_path;
-pub mod diagnostics;
 pub mod cycles;
+pub mod diagnostics;
 pub mod normalize;
 pub mod stats;
 
@@ -51,6 +51,6 @@ pub mod stats;
 pub use build::RawGraph;
 pub use critical_path::{CriticalPathResult, ItemTiming, compute_critical_path};
 pub use cycles::{CycleReport, find_all_cycles, report_cycles_with_breaks, would_create_cycle};
-pub use normalize::{NormalizedGraph, SccNode};
 pub use diagnostics::{DiGraph, HealthMetrics, find_sccs, health_metrics, topological_layers};
+pub use normalize::{NormalizedGraph, SccNode};
 pub use stats::GraphStats;

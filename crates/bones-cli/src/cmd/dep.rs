@@ -136,8 +136,7 @@ fn emit_event(
         event_hash: String::new(),
     };
 
-    let line =
-        write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
+    let line = write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
 
     shard_mgr
         .append(&line, false, Duration::from_secs(5))
@@ -231,7 +230,11 @@ fn run_dep_add(
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{}", msg)
@@ -254,7 +257,9 @@ fn run_dep_add(
 
         // 6. Cycle check for blocking links
         if link_type == "blocks" {
-            if let Err(cycle_msg) = check_would_create_cycle(&conn, from_id.as_str(), to_id.as_str()) {
+            if let Err(cycle_msg) =
+                check_would_create_cycle(&conn, from_id.as_str(), to_id.as_str())
+            {
                 render_error(output, &CliError::new(&cycle_msg))?;
                 anyhow::bail!("{}", cycle_msg);
             }
@@ -289,7 +294,11 @@ fn run_dep_add(
 
     render(output, &result, |r, w| {
         use std::io::Write;
-        let arrow = if r.link_type == "blocks" { "blocks" } else { "relates to" };
+        let arrow = if r.link_type == "blocks" {
+            "blocks"
+        } else {
+            "relates to"
+        };
         writeln!(w, "✓ {} {} {}", r.from, arrow, r.to)
     })?;
 
@@ -306,8 +315,8 @@ fn check_would_create_cycle(
 ) -> Result<(), String> {
     use bones_triage::graph::{RawGraph, would_create_cycle};
 
-    let raw = RawGraph::from_sqlite(conn)
-        .map_err(|e| format!("failed to load dependency graph: {e}"))?;
+    let raw =
+        RawGraph::from_sqlite(conn).map_err(|e| format!("failed to load dependency graph: {e}"))?;
 
     // Get or insert node indices for from and to
     let from_idx = match raw.node_index(from) {
@@ -371,7 +380,11 @@ fn run_dep_rm(
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{}", msg)
@@ -532,7 +545,9 @@ mod tests {
                 event_hash: String::new(),
             };
             let line = write_event(&mut evt).expect("write");
-            shard_mgr.append(&line, false, Duration::from_secs(5)).expect("append");
+            shard_mgr
+                .append(&line, false, Duration::from_secs(5))
+                .expect("append");
         }
 
         // Rebuild projection
@@ -572,7 +587,8 @@ mod tests {
         let conn = bones_core::db::query::try_open_projection(&db_path)
             .expect("open db")
             .expect("db exists");
-        let deps_after = bones_core::db::query::get_dependencies(&conn, "bn-bbb").expect("get deps");
+        let deps_after =
+            bones_core::db::query::get_dependencies(&conn, "bn-bbb").expect("get deps");
         assert!(deps_after.is_empty(), "dep should be removed");
     }
 
@@ -618,7 +634,9 @@ mod tests {
                 event_hash: String::new(),
             };
             let line = write_event(&mut evt).expect("write");
-            shard_mgr.append(&line, false, Duration::from_secs(5)).expect("append");
+            shard_mgr
+                .append(&line, false, Duration::from_secs(5))
+                .expect("append");
         }
 
         // Add A blocks B, B blocks C
@@ -643,8 +661,7 @@ mod tests {
             blocks: Some("bn-ca1".into()),
             relates: None,
         };
-        let result =
-            run_dep_add(&cycle_args, Some("test-agent"), OutputMode::Human, &root);
+        let result = run_dep_add(&cycle_args, Some("test-agent"), OutputMode::Human, &root);
         assert!(result.is_err(), "cycle should be rejected");
         let err_str = result.unwrap_err().to_string();
         assert!(

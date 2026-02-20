@@ -17,10 +17,10 @@ use clap::Args;
 use serde::Serialize;
 use serde_json::json;
 
-use bones_core::db::query::{
-    get_item, item_exists, list_items, try_open_projection, ItemFilter,
+use bones_core::db::query::{ItemFilter, get_item, item_exists, list_items, try_open_projection};
+use bones_triage::graph::{
+    build::RawGraph, find_all_cycles, normalize::NormalizedGraph, stats::GraphStats,
 };
-use bones_triage::graph::{build::RawGraph, normalize::NormalizedGraph, stats::GraphStats, find_all_cycles};
 
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
@@ -129,10 +129,7 @@ fn render_tree(
     };
 
     // Check if there are any edges in this direction
-    let neighbors: Vec<_> = raw
-        .graph
-        .neighbors_directed(root_idx, direction)
-        .collect();
+    let neighbors: Vec<_> = raw.graph.neighbors_directed(root_idx, direction).collect();
 
     if neighbors.is_empty() {
         let _ = writeln!(out, "  (none)");
@@ -186,7 +183,10 @@ fn render_tree_nodes(
             .unwrap_or_default();
 
         if visited.contains(id) {
-            let _ = writeln!(out, "{prefix}{connector}[{state_mark}] {id}{title} [⟳ cycle]");
+            let _ = writeln!(
+                out,
+                "{prefix}{connector}[{state_mark}] {id}{title} [⟳ cycle]"
+            );
         } else {
             let _ = writeln!(out, "{prefix}{connector}[{state_mark}] {id}{title}");
             visited.insert(id.to_string());
@@ -218,10 +218,7 @@ fn render_tree_nodes(
                 }
             } else if let Some(idx) = raw.node_index(id) {
                 // Check if there are more children we're not showing
-                let child_count = raw
-                    .graph
-                    .neighbors_directed(idx, direction)
-                    .count();
+                let child_count = raw.graph.neighbors_directed(idx, direction).count();
                 if child_count > 0 {
                     let _ = writeln!(
                         out,
@@ -239,11 +236,7 @@ fn render_tree_nodes(
 // Command runner
 // ---------------------------------------------------------------------------
 
-pub fn run_graph(
-    args: &GraphArgs,
-    output: OutputMode,
-    project_root: &Path,
-) -> anyhow::Result<()> {
+pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     // Validate item ID if given
     if let Some(ref id) = args.id {
         if let Err(e) = validate::validate_item_id(id) {
@@ -257,7 +250,11 @@ pub fn run_graph(
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a new project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{}", msg)
@@ -299,16 +296,12 @@ fn run_graph_item(
     }
 
     // Load metadata for all nodes
-    let all_ids: Vec<String> = raw
-        .graph
-        .node_weights()
-        .cloned()
-        .collect();
+    let all_ids: Vec<String> = raw.graph.node_weights().cloned().collect();
     let meta = load_item_meta(conn, all_ids.into_iter());
 
     // Determine which directions to show
-    let show_up = !args.down;   // show upstream unless --down only
-    let show_down = !args.up;   // show downstream unless --up only
+    let show_up = !args.down; // show upstream unless --down only
+    let show_down = !args.up; // show downstream unless --up only
 
     if output.is_json() {
         // JSON output: return lists of up/down deps
@@ -358,20 +351,38 @@ fn run_graph_item(
 
     // Human output
     let root_meta = meta.get(id);
-    let title_str = root_meta.map(|m| format!(" — {}", m.title)).unwrap_or_default();
-    let state_str = root_meta.map(|m| format!("[{}]", m.state)).unwrap_or_default();
+    let title_str = root_meta
+        .map(|m| format!(" — {}", m.title))
+        .unwrap_or_default();
+    let state_str = root_meta
+        .map(|m| format!("[{}]", m.state))
+        .unwrap_or_default();
 
     let mut out = String::new();
     let _ = writeln!(out, "{id}{title_str} {state_str}");
 
     if show_up {
         let _ = writeln!(out, "\nblocked by (must complete first):");
-        render_tree(raw, &meta, id, petgraph::Direction::Incoming, args.depth, &mut out);
+        render_tree(
+            raw,
+            &meta,
+            id,
+            petgraph::Direction::Incoming,
+            args.depth,
+            &mut out,
+        );
     }
 
     if show_down {
         let _ = writeln!(out, "\nblocks (waiting for this):");
-        render_tree(raw, &meta, id, petgraph::Direction::Outgoing, args.depth, &mut out);
+        render_tree(
+            raw,
+            &meta,
+            id,
+            petgraph::Direction::Outgoing,
+            args.depth,
+            &mut out,
+        );
     }
 
     print!("{out}");
@@ -625,7 +636,10 @@ mod tests {
             &mut out,
         );
         assert!(out.contains("bn-bbb"), "should show b at depth 0: {out}");
-        assert!(!out.contains("bn-ccc"), "should NOT show c at depth 1: {out}");
+        assert!(
+            !out.contains("bn-ccc"),
+            "should NOT show c at depth 1: {out}"
+        );
     }
 
     #[test]
@@ -693,7 +707,9 @@ mod tests {
                 event_hash: String::new(),
             };
             let line = write_event(&mut evt).expect("write");
-            shard_mgr.append(&line, false, Duration::from_secs(5)).expect("append");
+            shard_mgr
+                .append(&line, false, Duration::from_secs(5))
+                .expect("append");
         }
 
         // A blocks B: event.item_id = B, target = A
@@ -714,7 +730,9 @@ mod tests {
                 event_hash: String::new(),
             };
             let line = write_event(&mut evt).expect("write");
-            shard_mgr.append(&line, false, Duration::from_secs(5)).expect("append");
+            shard_mgr
+                .append(&line, false, Duration::from_secs(5))
+                .expect("append");
         }
 
         // Rebuild

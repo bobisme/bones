@@ -131,9 +131,7 @@ pub fn run_search(
         results,
     };
 
-    render(output, &search_output, |out, w| {
-        render_search_human(out, w)
-    })
+    render(output, &search_output, |out, w| render_search_human(out, w))
 }
 
 /// Render search results in human-readable format.
@@ -143,19 +141,11 @@ fn render_search_human(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result
         return Ok(());
     }
 
-    writeln!(
-        w,
-        "{} result(s) for '{}':",
-        out.count, out.query
-    )?;
+    writeln!(w, "{} result(s) for '{}':", out.count, out.query)?;
     writeln!(w, "{:-<60}", "")?;
 
     for result in &out.results {
-        writeln!(
-            w,
-            "  {}  [{}]  {}",
-            result.id, result.state, result.title
-        )?;
+        writeln!(w, "  {}  [{}]  {}", result.id, result.state, result.title)?;
     }
 
     Ok(())
@@ -185,7 +175,13 @@ mod tests {
         conn
     }
 
-    fn make_create(id: &str, title: &str, desc: Option<&str>, labels: &[&str], hash: &str) -> Event {
+    fn make_create(
+        id: &str,
+        title: &str,
+        desc: Option<&str>,
+        labels: &[&str],
+        hash: &str,
+    ) -> Event {
         Event {
             wall_ts_us: 1000,
             agent: "test-agent".into(),

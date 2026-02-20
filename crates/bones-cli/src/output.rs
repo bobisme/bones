@@ -635,11 +635,10 @@ mod tests {
 
     #[test]
     fn cli_error_from_bones_error() {
-        let err = bones_core::error::BonesError::Model(
-            bones_core::error::ModelError::ItemNotFound {
+        let err =
+            bones_core::error::BonesError::Model(bones_core::error::ModelError::ItemNotFound {
                 item_id: "test123".into(),
-            },
-        );
+            });
         let cli_err = CliError::from(&err);
         assert!(cli_err.message.contains("test123"));
         assert!(cli_err.suggestion.is_some());
@@ -648,22 +647,20 @@ mod tests {
 
     #[test]
     fn render_bones_error_json() {
-        let err = bones_core::error::BonesError::Model(
-            bones_core::error::ModelError::ItemNotFound {
+        let err =
+            bones_core::error::BonesError::Model(bones_core::error::ModelError::ItemNotFound {
                 item_id: "abc".into(),
-            },
-        );
+            });
         let result = render_bones_error(OutputMode::Json, &err);
         assert!(result.is_ok());
     }
 
     #[test]
     fn render_bones_error_human() {
-        let err = bones_core::error::BonesError::Model(
-            bones_core::error::ModelError::ItemNotFound {
+        let err =
+            bones_core::error::BonesError::Model(bones_core::error::ModelError::ItemNotFound {
                 item_id: "abc".into(),
-            },
-        );
+            });
         let result = render_bones_error(OutputMode::Human, &err);
         assert!(result.is_ok());
     }

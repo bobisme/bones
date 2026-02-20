@@ -191,6 +191,14 @@ enum Commands {
 
     #[command(
         next_help_heading = "Lifecycle",
+        about = "Soft-delete a work item",
+        long_about = "Soft-delete a work item by appending an item.delete tombstone event.",
+        after_help = "EXAMPLES:\n    # Delete an item (TTY asks for confirmation)\n    bn delete bn-abc\n\n    # Delete with reason and skip confirmation\n    bn delete bn-abc --reason \"Duplicate\" --force\n\n    # Emit machine-readable output\n    bn delete bn-abc --json"
+    )]
+    Delete(cmd::delete::DeleteArgs),
+
+    #[command(
+        next_help_heading = "Lifecycle",
         about = "Reopen a closed or archived item",
         long_about = "Transition a done or archived work item back to the open state.",
         after_help = "EXAMPLES:\n    # Reopen an item\n    bn reopen bn-abc\n\n    # Emit machine-readable output\n    bn reopen bn-abc --json"
@@ -574,9 +582,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Search(ref args) => timing::timed("cmd.search", || {
             cmd::search::run_search(args, output, &project_root)
         }),
-        Commands::Dup(ref args) => timing::timed("cmd.dup", || {
-            cmd::dup::run_dup(args, output, &project_root)
-        }),
+        Commands::Dup(ref args) => {
+            timing::timed("cmd.dup", || cmd::dup::run_dup(args, output, &project_root))
+        }
         Commands::Do(ref args) => timing::timed("cmd.do", || {
             cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)
         }),
@@ -597,6 +605,9 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Close(ref args) => timing::timed("cmd.close", || {
             cmd::close::run_close(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Delete(ref args) => timing::timed("cmd.delete", || {
+            cmd::delete::run_delete(args, cli.agent_flag(), output, &project_root)
         }),
         Commands::Reopen(ref args) => timing::timed("cmd.reopen", || {
             cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
@@ -863,6 +874,7 @@ mod tests {
             vec!["bn", "archive", "x"],
             vec!["bn", "update", "x", "--title", "t"],
             vec!["bn", "close", "x"],
+            vec!["bn", "delete", "x", "--force"],
             vec!["bn", "reopen", "x"],
             vec!["bn", "tag", "x", "l"],
             vec!["bn", "untag", "x", "l"],
@@ -956,6 +968,17 @@ mod tests {
     }
 
     #[test]
+    fn delete_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "delete", "item-1", "--reason", "Duplicate", "--force"]);
+        assert!(matches!(cli.command, Commands::Delete(_)));
+        if let Commands::Delete(ref args) = cli.command {
+            assert_eq!(args.id, "item-1");
+            assert_eq!(args.reason.as_deref(), Some("Duplicate"));
+            assert!(args.force);
+        }
+    }
+
+    #[test]
     fn reopen_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "reopen", "item-1"]);
         assert!(matches!(cli.command, Commands::Reopen(_)));
@@ -992,6 +1015,9 @@ mod tests {
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "close", "x"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "delete", "x", "--force"]);
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "reopen", "x"]);

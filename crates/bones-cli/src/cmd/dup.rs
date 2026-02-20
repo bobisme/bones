@@ -209,9 +209,7 @@ pub fn run_dup(
         .map(|h| h.rank)
         .unwrap_or_else(|| {
             // Fallback: use the best rank from all hits
-            hits.iter()
-                .map(|h| h.rank)
-                .fold(f64::INFINITY, f64::min)
+            hits.iter().map(|h| h.rank).fold(f64::INFINITY, f64::min)
         });
 
     // BM25 ranks are negative; source_rank should be the most negative.
@@ -324,7 +322,11 @@ pub fn build_fts_query(title: &str, description: Option<&str>) -> String {
 
 /// Render duplicate candidates in human-readable format.
 fn render_dup_human(out: &DupOutput, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(w, "Duplicate check for: {} — {}", out.source_id, out.source_title)?;
+    writeln!(
+        w,
+        "Duplicate check for: {} — {}",
+        out.source_id, out.source_title
+    )?;
     writeln!(
         w,
         "Thresholds: likely_duplicate ≥ {:.0}%, possibly_related ≥ {:.0}%",
@@ -378,7 +380,13 @@ mod tests {
         conn
     }
 
-    fn make_create(id: &str, title: &str, desc: Option<&str>, labels: &[&str], hash: &str) -> Event {
+    fn make_create(
+        id: &str,
+        title: &str,
+        desc: Option<&str>,
+        labels: &[&str],
+        hash: &str,
+    ) -> Event {
         Event {
             wall_ts_us: 1000,
             agent: "test-agent".into(),
