@@ -334,6 +334,22 @@ enum Commands {
     Triage(cmd::triage::TriageArgs),
 
     #[command(
+        next_help_heading = "Read",
+        about = "Quick agent/human orientation",
+        long_about = "Show agent identity, assigned items, and project-level counts.\n\nDesigned as a fast \"where am I?\" command after crash/restart.",
+        after_help = "EXAMPLES:\n    # Human-readable status\n    bn status\n\n    # With explicit agent\n    bn --agent alice status\n\n    # Machine-readable output\n    bn status --json"
+    )]
+    Status(cmd::status::StatusArgs),
+
+    #[command(
+        next_help_heading = "Read",
+        about = "Show goal completion progress",
+        long_about = "Show a focused goal-progress view with child tree and progress bars.\n\nDistinct from `bn show` — this is focused on completion status of a goal and its children.",
+        after_help = "EXAMPLES:\n    # Show progress for a goal\n    bn progress bn-p1\n\n    # Machine-readable output\n    bn progress bn-p1 --json"
+    )]
+    Progress(cmd::progress::ProgressArgs),
+
+    #[command(
         next_help_heading = "Triage",
         about = "Compute parallel execution layers",
         long_about = "Compute topological dependency layers where each layer can be worked in parallel.",
@@ -726,6 +742,12 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Triage(ref args) => timing::timed("cmd.triage", || {
             cmd::triage::run_triage(args, output, &project_root)
+        }),
+        Commands::Status(ref args) => timing::timed("cmd.status", || {
+            cmd::status::run_status(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Progress(ref args) => timing::timed("cmd.progress", || {
+            cmd::progress::run_progress(args, output, &project_root)
         }),
         Commands::Plan(ref args) => timing::timed("cmd.plan", || {
             cmd::plan::run_plan(args, output, &project_root)
