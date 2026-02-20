@@ -7,7 +7,7 @@
 //!   lexical cohort and dependency graph
 
 use crate::fusion::scoring::rrf_fuse;
-use crate::semantic::{SemanticModel, knn_search};
+use crate::semantic::{SemanticModel, knn_search, sync_projection_embeddings};
 use crate::structural::structural_similarity;
 use anyhow::{Context, Result};
 use bones_core::db::fts::search_bm25;
@@ -15,10 +15,12 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, warn};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::warn;
 
 const MAX_STRUCTURAL_SEEDS: usize = 16;
 const MAX_STRUCTURAL_CANDIDATES: usize = 128;
+static SEMANTIC_DEGRADED_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Unified fused result with per-layer explanation fields.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,19 +76,16 @@ fn hybrid_search_inner(
     let lexical_ranked: Vec<&str> = lexical_ranked_owned.iter().map(String::as_str).collect();
 
     let semantic_ranked_owned = if let Some(model) = model {
-        if !semantic_layer_ready(db) {
-            debug!("semantic layer skipped: sqlite-vec runtime or vec tables unavailable");
-            Vec::new()
-        } else {
-            match model
-                .embed(query)
-                .and_then(|embedding| knn_search(db, &embedding, limit))
-            {
-                Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
-                Err(e) => {
-                    warn!("semantic layer unavailable, falling back to lexical-only fusion: {e}");
-                    Vec::new()
+        match sync_projection_embeddings(db, model)
+            .and_then(|_| model.embed(query))
+            .and_then(|embedding| knn_search(db, &embedding, limit))
+        {
+            Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
+            Err(e) => {
+                if !SEMANTIC_DEGRADED_WARNED.swap(true, Ordering::SeqCst) {
+                    warn!("semantic layer unavailable; using lexical+structural ranking: {e}");
                 }
+                Vec::new()
             }
         }
     } else {
@@ -247,35 +246,6 @@ fn derive_structural_ranked(
         .take(limit)
         .map(|(item_id, _)| item_id)
         .collect()
-}
-
-fn semantic_layer_ready(db: &Connection) -> bool {
-    let vectors_loaded = db
-        .query_row("SELECT vec_version()", [], |row| row.get::<_, String>(0))
-        .is_ok();
-    if !vectors_loaded {
-        return false;
-    }
-
-    let has_vec_items = db
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vec_items'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .unwrap_or(false);
-    if !has_vec_items {
-        return false;
-    }
-
-    db.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vec_item_map'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|count| count > 0)
-    .unwrap_or(false)
 }
 
 fn build_dependency_graph(db: &Connection) -> Result<DiGraph<String, ()>> {
@@ -531,11 +501,5 @@ mod tests {
             results.iter().any(|r| r.structural_score > 0.0),
             "expected at least one non-zero structural score"
         );
-    }
-
-    #[test]
-    fn semantic_layer_ready_is_false_without_vec_runtime() {
-        let conn = setup_db();
-        assert!(!semantic_layer_ready(&conn));
     }
 }

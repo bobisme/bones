@@ -103,7 +103,15 @@ pub fn run_search(
 
     let cfg = load_project_config(project_root).unwrap_or_default();
     let semantic_model = if cfg.search.semantic {
-        SemanticModel::load().ok()
+        match SemanticModel::load() {
+            Ok(model) => Some(model),
+            Err(err) => {
+                tracing::warn!(
+                    "semantic model unavailable; using lexical+structural search only: {err}"
+                );
+                None
+            }
+        }
     } else {
         None
     };

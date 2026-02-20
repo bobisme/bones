@@ -164,7 +164,15 @@ pub fn run_similar(
             petgraph::graph::DiGraph::new()
         });
     let semantic_model = if cfg.search.semantic {
-        SemanticModel::load().ok()
+        match SemanticModel::load() {
+            Ok(model) => Some(model),
+            Err(err) => {
+                tracing::warn!(
+                    "semantic model unavailable for similar search; using lexical+structural only: {err}"
+                );
+                None
+            }
+        }
     } else {
         None
     };

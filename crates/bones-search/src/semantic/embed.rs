@@ -3,33 +3,37 @@ use anyhow::{Context, Result, bail};
 use bones_core::model::item::WorkItemFields;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 
 const EMBEDDING_DIM: usize = 384;
+const SEMANTIC_META_ID: i64 = 1;
 
-/// Manages embedding computation and vector storage.
-/// Holds both the ONNX model and a database connection.
-pub struct EmbeddingPipeline {
-    /// The loaded semantic model.
-    model: SemanticModel,
-    /// SQLite connection with sqlite-vec extension loaded.
-    db: Connection,
+/// Summary of semantic index synchronization work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncStats {
+    pub embedded: usize,
+    pub removed: usize,
 }
 
-impl EmbeddingPipeline {
-    /// Construct a new embedding pipeline and ensure vector tables exist.
-    pub fn new(model: SemanticModel, db: Connection) -> Result<Self> {
-        ensure_vec_schema(&db)?;
+/// Manages embedding computation and semantic index storage.
+pub struct EmbeddingPipeline<'a> {
+    model: &'a SemanticModel,
+    db: &'a Connection,
+}
+
+impl<'a> EmbeddingPipeline<'a> {
+    /// Construct a pipeline and ensure semantic tables exist.
+    pub fn new(model: &'a SemanticModel, db: &'a Connection) -> Result<Self> {
+        ensure_embedding_schema(db)?;
         Ok(Self { model, db })
     }
 
     /// Embed a single item and upsert its vector if content changed.
-    ///
-    /// Returns `Ok(true)` if an embedding was written, `Ok(false)` when skipped.
     pub fn embed_item(&self, item: &WorkItemFields) -> Result<bool> {
         let content = item_content(item);
         let content_hash = content_hash_hex(&content);
 
-        if has_same_hash(&self.db, &item.id, &content_hash)? {
+        if has_same_hash(self.db, &item.id, &content_hash)? {
             return Ok(false);
         }
 
@@ -38,19 +42,17 @@ impl EmbeddingPipeline {
             .embed(&content)
             .with_context(|| format!("embedding inference failed for item {}", item.id))?;
 
-        upsert_embedding(&self.db, &item.id, &content_hash, &embedding)
+        upsert_embedding(self.db, &item.id, &content_hash, &embedding)
     }
 
     /// Batch-embed multiple items.
-    ///
-    /// Returns count of items actually embedded (unchanged items are skipped).
     pub fn embed_all(&self, items: &[WorkItemFields]) -> Result<usize> {
         let mut pending = Vec::new();
 
         for item in items {
             let content = item_content(item);
             let content_hash = content_hash_hex(&content);
-            if has_same_hash(&self.db, &item.id, &content_hash)? {
+            if has_same_hash(self.db, &item.id, &content_hash)? {
                 continue;
             }
             pending.push((item.id.clone(), content_hash, content));
@@ -75,41 +77,202 @@ impl EmbeddingPipeline {
         }
 
         for ((item_id, hash, _), embedding) in pending.iter().zip(embeddings) {
-            upsert_embedding(&self.db, item_id, hash, &embedding)?;
+            upsert_embedding(self.db, item_id, hash, &embedding)?;
         }
 
         Ok(pending.len())
     }
-
-    /// Consume the pipeline and return the underlying SQLite connection.
-    pub fn into_connection(self) -> Connection {
-        self.db
-    }
 }
 
-fn ensure_vec_schema(db: &Connection) -> Result<()> {
+/// Ensure semantic embeddings are synchronized with the current projection.
+///
+/// This is safe to call before every semantic search request: when no new
+/// events were projected, it returns quickly without recomputing embeddings.
+pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Result<SyncStats> {
+    ensure_embedding_schema(db)?;
+
+    let projection_cursor = projection_cursor(db)?;
+    let indexed_cursor = semantic_cursor(db)?;
+    if indexed_cursor == projection_cursor {
+        return Ok(SyncStats::default());
+    }
+
+    let items = load_items_for_embedding(db)?;
+    let live_ids: HashSet<String> = items.iter().map(|(id, _, _)| id.clone()).collect();
+    let existing_hashes = load_existing_hashes(db)?;
+
+    let mut pending = Vec::new();
+    for (item_id, content_hash, content) in &items {
+        if existing_hashes.get(item_id) == Some(content_hash) {
+            continue;
+        }
+        pending.push((item_id.clone(), content_hash.clone(), content.clone()));
+    }
+
+    let embedded = if pending.is_empty() {
+        0
+    } else {
+        let texts: Vec<&str> = pending
+            .iter()
+            .map(|(_, _, content)| content.as_str())
+            .collect();
+        let embeddings = model
+            .embed_batch(&texts)
+            .context("semantic index sync failed during embedding inference")?;
+
+        if embeddings.len() != pending.len() {
+            bail!(
+                "semantic index sync embedding count mismatch: expected {}, got {}",
+                pending.len(),
+                embeddings.len()
+            );
+        }
+
+        for ((item_id, content_hash, _), embedding) in pending.iter().zip(embeddings.iter()) {
+            upsert_embedding(db, item_id, content_hash, embedding)?;
+        }
+        pending.len()
+    };
+
+    let removed = remove_stale_embeddings(db, &live_ids)?;
+    set_semantic_cursor(db, projection_cursor.0, projection_cursor.1.as_deref())?;
+
+    Ok(SyncStats { embedded, removed })
+}
+
+fn ensure_embedding_schema(db: &Connection) -> Result<()> {
     db.execute_batch(
         "
-        CREATE VIRTUAL TABLE IF NOT EXISTS vec_items USING vec0(
-            embedding float[384]
+        CREATE TABLE IF NOT EXISTS item_embeddings (
+            item_id TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            embedding_json TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS vec_item_map (
-            rowid INTEGER PRIMARY KEY,
-            item_id TEXT NOT NULL UNIQUE,
-            content_hash TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS semantic_meta (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_event_offset INTEGER NOT NULL DEFAULT 0,
+            last_event_hash TEXT
         );
+
+        INSERT OR IGNORE INTO semantic_meta (id, last_event_offset, last_event_hash)
+        VALUES (1, 0, NULL);
         ",
     )
-    .context("failed to create sqlite-vec schema (is vec0 extension available?)")?;
+    .context("failed to create semantic index tables")?;
 
     Ok(())
+}
+
+fn projection_cursor(db: &Connection) -> Result<(i64, Option<String>)> {
+    db.query_row(
+        "SELECT last_event_offset, last_event_hash FROM projection_meta WHERE id = 1",
+        [],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+    )
+    .context("failed to read projection cursor for semantic sync")
+}
+
+fn semantic_cursor(db: &Connection) -> Result<(i64, Option<String>)> {
+    db.query_row(
+        "SELECT last_event_offset, last_event_hash FROM semantic_meta WHERE id = ?1",
+        params![SEMANTIC_META_ID],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+    )
+    .context("failed to read semantic index cursor")
+}
+
+fn set_semantic_cursor(db: &Connection, offset: i64, hash: Option<&str>) -> Result<()> {
+    db.execute(
+        "UPDATE semantic_meta
+         SET last_event_offset = ?1, last_event_hash = ?2
+         WHERE id = ?3",
+        params![offset, hash, SEMANTIC_META_ID],
+    )
+    .context("failed to update semantic index cursor")?;
+
+    Ok(())
+}
+
+fn load_items_for_embedding(db: &Connection) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = db
+        .prepare(
+            "SELECT item_id, title, description
+             FROM items
+             WHERE is_deleted = 0",
+        )
+        .context("failed to prepare item query for semantic sync")?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let item_id = row.get::<_, String>(0)?;
+            let title = row.get::<_, String>(1)?;
+            let description = row.get::<_, Option<String>>(2)?;
+            Ok((item_id, title, description))
+        })
+        .context("failed to execute item query for semantic sync")?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        let (item_id, title, description) =
+            row.context("failed to read item row for semantic sync")?;
+        let content = content_from_title_description(&title, description.as_deref());
+        let content_hash = content_hash_hex(&content);
+        items.push((item_id, content_hash, content));
+    }
+
+    Ok(items)
+}
+
+fn load_existing_hashes(db: &Connection) -> Result<HashMap<String, String>> {
+    let mut stmt = db
+        .prepare("SELECT item_id, content_hash FROM item_embeddings")
+        .context("failed to prepare semantic hash query")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .context("failed to query semantic hash table")?;
+
+    let mut out = HashMap::new();
+    for row in rows {
+        let (item_id, hash) = row.context("failed to read semantic hash row")?;
+        out.insert(item_id, hash);
+    }
+    Ok(out)
+}
+
+fn remove_stale_embeddings(db: &Connection, live_ids: &HashSet<String>) -> Result<usize> {
+    let mut stmt = db
+        .prepare("SELECT item_id FROM item_embeddings")
+        .context("failed to prepare stale semantic row query")?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .context("failed to query semantic rows for stale cleanup")?;
+
+    let mut stale = Vec::new();
+    for row in rows {
+        let item_id = row.context("failed to read semantic row id")?;
+        if !live_ids.contains(&item_id) {
+            stale.push(item_id);
+        }
+    }
+
+    for item_id in &stale {
+        db.execute(
+            "DELETE FROM item_embeddings WHERE item_id = ?1",
+            params![item_id],
+        )
+        .with_context(|| format!("failed to delete stale semantic row for {item_id}"))?;
+    }
+
+    Ok(stale.len())
 }
 
 fn has_same_hash(db: &Connection, item_id: &str, content_hash: &str) -> Result<bool> {
     let existing = db
         .query_row(
-            "SELECT content_hash FROM vec_item_map WHERE item_id = ?1",
+            "SELECT content_hash FROM item_embeddings WHERE item_id = ?1",
             params![item_id],
             |row| row.get::<_, String>(0),
         )
@@ -132,64 +295,43 @@ fn upsert_embedding(
         );
     }
 
-    let row_meta = db
+    let existing_hash = db
         .query_row(
-            "SELECT rowid, content_hash FROM vec_item_map WHERE item_id = ?1",
+            "SELECT content_hash FROM item_embeddings WHERE item_id = ?1",
             params![item_id],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            |row| row.get::<_, String>(0),
         )
         .optional()
-        .with_context(|| format!("failed to lookup vector row mapping for item {item_id}"))?;
+        .with_context(|| format!("failed to lookup semantic row for item {item_id}"))?;
 
-    if let Some((_, existing_hash)) = &row_meta
-        && existing_hash == content_hash
-    {
+    if existing_hash.as_deref() == Some(content_hash) {
         return Ok(false);
     }
 
     let encoded_vector = encode_embedding_json(embedding);
-
-    match row_meta {
-        Some((rowid, _)) => {
-            db.execute(
-                "UPDATE vec_items SET embedding = ?1 WHERE rowid = ?2",
-                params![encoded_vector, rowid],
-            )
-            .with_context(|| {
-                format!("failed to update embedding row {rowid} for item {item_id}")
-            })?;
-
-            db.execute(
-                "UPDATE vec_item_map SET content_hash = ?1 WHERE item_id = ?2",
-                params![content_hash, item_id],
-            )
-            .with_context(|| format!("failed to update content hash for item {item_id}"))?;
-        }
-        None => {
-            db.execute(
-                "INSERT INTO vec_items (embedding) VALUES (?1)",
-                params![encoded_vector],
-            )
-            .with_context(|| format!("failed to insert embedding for item {item_id}"))?;
-
-            let rowid = db.last_insert_rowid();
-            db.execute(
-                "INSERT INTO vec_item_map (rowid, item_id, content_hash) VALUES (?1, ?2, ?3)",
-                params![rowid, item_id, content_hash],
-            )
-            .with_context(|| format!("failed to insert mapping for item {item_id}"))?;
-        }
-    }
+    db.execute(
+        "INSERT INTO item_embeddings (item_id, content_hash, embedding_json)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(item_id)
+         DO UPDATE SET content_hash = excluded.content_hash,
+                       embedding_json = excluded.embedding_json",
+        params![item_id, content_hash, encoded_vector],
+    )
+    .with_context(|| format!("failed to upsert semantic embedding for item {item_id}"))?;
 
     Ok(true)
 }
 
 fn item_content(item: &WorkItemFields) -> String {
-    match item.description.as_deref() {
+    content_from_title_description(&item.title, item.description.as_deref())
+}
+
+fn content_from_title_description(title: &str, description: Option<&str>) -> String {
+    match description {
         Some(description) if !description.trim().is_empty() => {
-            format!("{} {}", item.title.trim(), description.trim())
+            format!("{} {}", title.trim(), description.trim())
         }
-        _ => item.title.trim().to_owned(),
+        _ => title.trim().to_owned(),
     }
 }
 
@@ -218,18 +360,26 @@ mod tests {
     fn seed_schema_for_unit_tests(db: &Connection) -> Result<()> {
         db.execute_batch(
             "
-            CREATE TABLE vec_items (
-                rowid INTEGER PRIMARY KEY,
-                embedding TEXT NOT NULL
+            CREATE TABLE items (
+                item_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at_us INTEGER NOT NULL DEFAULT 0
             );
 
-            CREATE TABLE vec_item_map (
-                rowid INTEGER PRIMARY KEY,
-                item_id TEXT NOT NULL UNIQUE,
-                content_hash TEXT NOT NULL
+            CREATE TABLE projection_meta (
+                id INTEGER PRIMARY KEY,
+                last_event_offset INTEGER NOT NULL,
+                last_event_hash TEXT
             );
+
+            INSERT INTO projection_meta (id, last_event_offset, last_event_hash)
+            VALUES (1, 0, NULL);
             ",
         )?;
+
+        ensure_embedding_schema(db)?;
         Ok(())
     }
 
@@ -270,7 +420,8 @@ mod tests {
         assert!(inserted);
         assert!(!skipped);
 
-        let count: i64 = db.query_row("SELECT COUNT(*) FROM vec_item_map", [], |row| row.get(0))?;
+        let count: i64 =
+            db.query_row("SELECT COUNT(*) FROM item_embeddings", [], |row| row.get(0))?;
         assert_eq!(count, 1);
 
         Ok(())
@@ -291,11 +442,34 @@ mod tests {
         assert!(written);
 
         let stored_hash: String = db.query_row(
-            "SELECT content_hash FROM vec_item_map WHERE item_id = ?1",
+            "SELECT content_hash FROM item_embeddings WHERE item_id = ?1",
             params![item_id],
             |row| row.get(0),
         )?;
         assert_eq!(stored_hash, second_hash);
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_projection_embeddings_short_circuits_when_cursor_matches() -> Result<()> {
+        let db = Connection::open_in_memory()?;
+        seed_schema_for_unit_tests(&db)?;
+
+        db.execute(
+            "UPDATE semantic_meta SET last_event_offset = 7, last_event_hash = 'h7' WHERE id = 1",
+            [],
+        )?;
+        db.execute(
+            "UPDATE projection_meta SET last_event_offset = 7, last_event_hash = 'h7' WHERE id = 1",
+            [],
+        )?;
+
+        let model = SemanticModel::load();
+        if let Ok(model) = model {
+            let stats = sync_projection_embeddings(&db, &model)?;
+            assert_eq!(stats, SyncStats::default());
+        }
 
         Ok(())
     }

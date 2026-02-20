@@ -83,7 +83,7 @@ pub struct CapabilityStatus {
 /// Checks performed:
 /// - **fts5**: `items_fts` virtual table present in `sqlite_master`
 /// - **vectors**: `vec_version()` SQL function is callable (sqlite-vec loaded)
-/// - **semantic**: sqlite-vec available **and** MiniLM model file on disk
+/// - **semantic**: MiniLM model+tokenizer files available on disk
 /// - **binary_cache**: `.bones/cache/events.bin` exists with valid `BNCH` magic
 /// - **triage**: `items` table queryable (petgraph is always compiled in)
 ///
@@ -97,7 +97,7 @@ pub struct CapabilityStatus {
 pub fn detect_capabilities(db: &Connection) -> Capabilities {
     let fts5 = probe_fts5(db);
     let vectors = probe_vectors(db);
-    let semantic = vectors && probe_semantic_model();
+    let semantic = probe_semantic_model();
     let bones_dir = bones_dir_from_db(db);
     let binary_cache = bones_dir
         .as_deref()
@@ -431,7 +431,8 @@ mod tests {
         let caps = detect_capabilities(&conn);
         assert!(!caps.fts5, "no FTS5 on bare db");
         assert!(!caps.vectors, "no vectors on bare db");
-        assert!(!caps.semantic, "no semantic on bare db");
+        // semantic may be true on developer machines where model assets are
+        // present in cache; this test only asserts DB-derived capabilities.
         assert!(!caps.binary_cache, "no binary_cache (in-memory db)");
         assert!(!caps.triage, "no triage on bare db (no items table)");
     }

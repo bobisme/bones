@@ -311,7 +311,15 @@ pub fn run_create(
                 maybe_related_threshold: 0.50,
             };
             let semantic_model = if project_config.search.semantic {
-                SemanticModel::load().ok()
+                match SemanticModel::load() {
+                    Ok(model) => Some(model),
+                    Err(err) => {
+                        tracing::warn!(
+                            "semantic model unavailable during duplicate check; using lexical+structural only: {err}"
+                        );
+                        None
+                    }
+                }
             } else {
                 None
             };

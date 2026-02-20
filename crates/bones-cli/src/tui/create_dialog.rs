@@ -68,7 +68,15 @@ impl CreateDialog {
             .map(|cfg| cfg.search.semantic)
             .unwrap_or(true);
         let semantic_model = if semantic_enabled {
-            SemanticModel::load().ok()
+            match SemanticModel::load() {
+                Ok(model) => Some(model),
+                Err(err) => {
+                    tracing::warn!(
+                        "semantic model unavailable in create dialog; using lexical+structural only: {err}"
+                    );
+                    None
+                }
+            }
         } else {
             None
         };

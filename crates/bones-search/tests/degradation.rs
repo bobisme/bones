@@ -11,8 +11,8 @@
 //!    no panic.
 //! 2. **Semantic unavailability reported** — `is_semantic_available()` returns
 //!    `false` when the `semantic-ort` feature is not compiled in.
-//! 3. **KNN search fails gracefully on corrupt/missing vector table** —
-//!    `knn_search` returns an error (not a panic) when `vec_items` is absent.
+//! 3. **KNN search fails gracefully on missing semantic index table** —
+//!    `knn_search` returns an error (not a panic) when `item_embeddings` is absent.
 //! 4. **Hybrid search does not crash when model unavailable** — no panics
 //!    on a range of query types in degraded mode.
 //! 5. **find_duplicates works without semantic layer** — end-to-end duplicate
@@ -190,33 +190,33 @@ fn semantic_unavailable_without_ort_feature() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 3: KNN search fails gracefully when vec_items table is missing
+// Scenario 3: KNN search fails gracefully when semantic index table is missing
 // ---------------------------------------------------------------------------
 
-/// When the `vec_items` virtual table does not exist (e.g. corrupt or missing
-/// vector store), `knn_search` must return an `Err`, not panic.
+/// When the `item_embeddings` table does not exist (e.g. semantic index not
+/// initialized), `knn_search` must return an `Err`, not panic.
 ///
 /// The error message should reference the missing table so callers can
 /// diagnose the problem.
 #[test]
 fn knn_search_errors_gracefully_when_vec_table_missing() {
-    let conn = build_db_with_items(); // has items but no vec_items table
+    let conn = build_db_with_items(); // has items but no item_embeddings table
 
     let embedding = vec![0.1_f32; 384]; // valid 384-dim embedding
     let result = knn_search(&conn, &embedding, 10);
 
     assert!(
         result.is_err(),
-        "knn_search must return Err when vec_items table is absent"
+        "knn_search must return Err when semantic index table is absent"
     );
 
     let err_msg = result.unwrap_err().to_string();
-    // The error should mention the missing table or the prepare step.
+    // The error should mention the missing semantic index table.
     assert!(
-        err_msg.contains("vec_items")
+        err_msg.contains("item_embeddings")
             || err_msg.contains("no such table")
             || err_msg.contains("prepare"),
-        "error should mention missing vec_items table, got: {err_msg}"
+        "error should mention missing semantic index table, got: {err_msg}"
     );
 }
 
@@ -384,21 +384,17 @@ fn no_panic_in_find_duplicates_semantic_enabled_model_unavailable() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 7: Corrupt vector table (drop after populate)
+// Scenario 7: Missing semantic index table does not break lexical search
 // ---------------------------------------------------------------------------
 
-/// Simulate a corrupt vector table by populating items, then dropping any
-/// vec-related tables if they exist, and verifying that lexical search still
-/// works.  In the current implementation, vec_items only exists when the
-/// sqlite-vec extension creates it; in test env it never exists.  This test
-/// therefore demonstrates that hybrid_search is resilient to the vector table
-/// being absent regardless of item population.
+/// Simulate absent semantic index storage by dropping `item_embeddings` (if it
+/// exists), and verify lexical search still works.
 #[test]
 fn lexical_search_unaffected_by_absent_vector_store() {
     let conn = build_db_with_items();
 
-    // Attempt to drop vec tables if they happen to exist (idempotent in tests).
-    let _ = conn.execute_batch("DROP TABLE IF EXISTS vec_items; DROP TABLE IF EXISTS vec_item_map");
+    // Drop semantic index table if it exists (idempotent in tests).
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS item_embeddings");
 
     // Lexical search with model=None must still work after dropping vec tables.
     let results = hybrid_search("database", &conn, None, 10, 60)
@@ -406,7 +402,7 @@ fn lexical_search_unaffected_by_absent_vector_store() {
 
     assert!(
         !results.is_empty(),
-        "should find 'database' items via FTS5 even when vector tables are absent"
+        "should find 'database' items via FTS5 even when semantic index table is absent"
     );
     assert!(
         results.iter().any(|r| r.item_id == "bn-002"),
