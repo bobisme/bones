@@ -1,0 +1,1026 @@
+{
+  "description": "Gold evaluation dataset for bones-search: 110 work items across 10 domains with labeled duplicate pairs and relevance-annotated queries.",
+  "schema_version": "1",
+  "items": [
+    {
+      "id": "bn-a01",
+      "title": "OAuth token refresh fails with timeout error",
+      "description": "Users report that OAuth token refresh requests time out after 30 seconds. The token endpoint becomes unresponsive, forcing repeated logins. Affects Google and GitHub OAuth providers.",
+      "labels": ["auth", "bug", "backend"],
+      "deps": []
+    },
+    {
+      "id": "bn-a02",
+      "title": "Authentication timeout during login via Google OAuth",
+      "description": "Google OAuth authentication times out after 30 seconds. Token refresh endpoint unresponsive, causing repeated login prompts. Same issue affects GitHub OAuth provider.",
+      "labels": ["auth", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-a03",
+      "title": "Implement role-based access control for project permissions",
+      "description": "Add RBAC permission model so project owners can assign roles (viewer, editor, admin) to team members. Roles control which operations each user can perform.",
+      "labels": ["auth", "feature", "backend"],
+      "deps": []
+    },
+    {
+      "id": "bn-a04",
+      "title": "RBAC permission system for team member roles",
+      "description": "Role-based access control system with project-level permissions. Define viewer, editor, and admin roles. Project owners assign roles to team members to control access.",
+      "labels": ["auth", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-a05",
+      "title": "Password reset email not delivered to users",
+      "description": "Users report not receiving password reset emails. The forgot-password flow sends a reset link via SMTP but emails are silently dropped. Affects new signups and locked accounts.",
+      "labels": ["auth", "bug", "email"],
+      "deps": []
+    },
+    {
+      "id": "bn-a06",
+      "title": "Forgot password link not arriving via email",
+      "description": "Password reset flow broken: reset emails not delivered via SMTP. Forgot-password link silently dropped, leaving users unable to recover locked accounts.",
+      "labels": ["auth", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-a07",
+      "title": "Two-factor authentication via TOTP",
+      "description": "Implement time-based one-time password (TOTP) for two-factor authentication. Support authenticator apps (Google Authenticator, Authy). Store encrypted TOTP secrets.",
+      "labels": ["auth", "security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-a08",
+      "title": "2FA setup broken for new accounts",
+      "description": "Two-factor authentication enrollment fails for accounts created in the last 7 days. TOTP code rejected even when correct. Affects new user onboarding.",
+      "labels": ["auth", "bug", "security"],
+      "deps": []
+    },
+    {
+      "id": "bn-a09",
+      "title": "Audit log for admin permission changes",
+      "description": "Record all admin actions that modify user permissions. Audit log entries should include actor, target user, old and new permissions, timestamp, and IP address.",
+      "labels": ["auth", "security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-a10",
+      "title": "Track user permission modifications in audit trail",
+      "description": "Audit trail for permission changes: log admin actions modifying user roles. Each entry stores actor, target user, old permissions, new permissions, timestamp.",
+      "labels": ["auth", "security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-a11",
+      "title": "SSO integration with enterprise identity providers",
+      "description": "Support SAML 2.0 and OIDC for enterprise single sign-on. Allow companies to connect their identity provider (Okta, Azure AD, Auth0) for seamless employee authentication.",
+      "labels": ["auth", "feature", "enterprise"],
+      "deps": []
+    },
+    {
+      "id": "bn-d01",
+      "title": "SQLite connection pool exhausted under load",
+      "description": "Under concurrent load, all SQLite database connections in the pool are exhausted. New requests queue indefinitely or fail with 'too many open connections'. Happens above 50 concurrent requests.",
+      "labels": ["database", "bug", "backend"],
+      "deps": []
+    },
+    {
+      "id": "bn-d02",
+      "title": "Database too many open connections error during concurrent requests",
+      "description": "SQLite connection pool exhausted under concurrent load. Too many open connections error appears above 50 concurrent requests. Pool size needs tuning or requests fail.",
+      "labels": ["database", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-d03",
+      "title": "Slow search query on large item datasets",
+      "description": "Full-text search query takes over 2 seconds on datasets with more than 100k items. The FTS5 index may need rebuilding or additional prefix indexes. Affects production deployments.",
+      "labels": ["database", "performance", "search"],
+      "deps": []
+    },
+    {
+      "id": "bn-d04",
+      "title": "Search query timeout with 100k items in database",
+      "description": "FTS5 full-text search times out on large datasets exceeding 100k items. Query takes over 2 seconds, hitting the timeout threshold. FTS5 index rebuild may resolve the issue.",
+      "labels": ["database", "performance"],
+      "deps": []
+    },
+    {
+      "id": "bn-d05",
+      "title": "Implement schema migration for v2 database format",
+      "description": "Design and implement data migration path from v1 to v2 schema. Migration must be reversible, run atomically, and handle partial failures. Support both automatic and manual migration.",
+      "labels": ["database", "migration", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-d06",
+      "title": "Database schema upgrade path from version 1 to version 2",
+      "description": "Schema migration from v1 to v2 format. Reversible migration that runs atomically with rollback support. Handles partial failure gracefully. Auto-migrate on first run or manual migration.",
+      "labels": ["database", "migration", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-d07",
+      "title": "WAL file corruption after unexpected crash recovery",
+      "description": "SQLite write-ahead log becomes corrupted after unexpected process crash. Integrity check fails on restart. Need robust crash recovery to repair or rebuild the WAL file.",
+      "labels": ["database", "bug", "reliability"],
+      "deps": []
+    },
+    {
+      "id": "bn-d08",
+      "title": "Database integrity failure after process crash and WAL recovery",
+      "description": "After crash recovery, SQLite write-ahead log is corrupted. Database integrity check fails on restart. WAL repair or rebuild required for crash recovery.",
+      "labels": ["database", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-d09",
+      "title": "Add composite index on event timestamp and item_id",
+      "description": "Add a composite SQLite index on (item_id, wall_ts_us) to speed up event replay queries. Current full-table scans are O(n) and slow for large event logs.",
+      "labels": ["database", "performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-d10",
+      "title": "Query performance regression after adding new column to items table",
+      "description": "Adding a new column to the items table caused a query performance regression. All queries that previously used an index now do full table scans. Likely a missing index.",
+      "labels": ["database", "performance", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-d11",
+      "title": "Backup and restore for project databases",
+      "description": "Implement bn backup and bn restore commands for project database snapshots. Backup should be atomic, include all event logs and projection databases.",
+      "labels": ["database", "feature", "reliability"],
+      "deps": []
+    },
+    {
+      "id": "bn-u01",
+      "title": "Terminal color output garbled on Windows console",
+      "description": "ANSI color escape codes not rendered correctly on Windows terminal. Output appears with raw escape sequences like ESC[32m instead of colored text. Affects Windows 10 and Windows Terminal.",
+      "labels": ["ui", "bug", "windows"],
+      "deps": []
+    },
+    {
+      "id": "bn-u02",
+      "title": "CLI colors broken with ANSI escape codes in Windows terminal",
+      "description": "ANSI color escape codes displayed as raw text on Windows. Windows terminal shows ESC[32m instead of rendering colors. Windows 10 and Windows Terminal both affected.",
+      "labels": ["ui", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-u03",
+      "title": "Add progress indicator for long-running operations",
+      "description": "Show a spinner or progress bar during long-running operations like sync, rebuild, and search indexing. Prevents confusion when commands take more than 2 seconds.",
+      "labels": ["ui", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-u04",
+      "title": "Spinner animation during slow CLI commands",
+      "description": "Display a spinner animation for commands that take longer than 2 seconds (sync, rebuild, indexing). Progress indicator reassures users that the command is still running.",
+      "labels": ["ui", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-u05",
+      "title": "Dark mode color theme for TUI interface",
+      "description": "Add a dark mode color theme to the ratatui TUI. Colors should use a dark background palette with appropriate contrast ratios for accessibility.",
+      "labels": ["ui", "feature", "tui"],
+      "deps": []
+    },
+    {
+      "id": "bn-u06",
+      "title": "Configurable color theme for terminal user interface",
+      "description": "Allow users to configure color themes in the terminal UI. Support dark mode palette with high contrast. TUI colors configurable via config file.",
+      "labels": ["ui", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-u07",
+      "title": "Table layout overflows with long item titles in TUI",
+      "description": "Items with titles longer than 80 characters overflow the TUI table layout. The overflow wraps text incorrectly or truncates without indication. Need proper text truncation with ellipsis.",
+      "labels": ["ui", "bug", "tui"],
+      "deps": []
+    },
+    {
+      "id": "bn-u08",
+      "title": "Long titles cause text wrapping issues in list view",
+      "description": "TUI list view incorrectly wraps text for titles over 80 characters. Table columns overflow, causing misaligned rows. Text should be truncated with ellipsis when too long.",
+      "labels": ["ui", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-u09",
+      "title": "Add keyboard shortcuts for TUI navigation",
+      "description": "Add vim-style keyboard shortcuts (j/k for up/down, g/G for top/bottom, / for search) to the TUI. Shortcuts should be configurable and displayed in a help panel.",
+      "labels": ["ui", "feature", "tui"],
+      "deps": []
+    },
+    {
+      "id": "bn-u10",
+      "title": "Hotkeys and keybindings for item navigation in terminal UI",
+      "description": "Keyboard shortcuts for navigating items in the TUI: vim-style j/k navigation, g/G for top/bottom, / to trigger search. Configurable keybindings in config file.",
+      "labels": ["ui", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-u11",
+      "title": "Improve error message formatting with context",
+      "description": "Error messages lack context. Improve error display by showing the command that failed, the root cause, and actionable hints for resolution. Use colored output for severity.",
+      "labels": ["ui", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-b01",
+      "title": "Versioned REST API with backward compatibility guarantees",
+      "description": "Design a versioned API (v1, v2) with explicit backward compatibility policy. Breaking changes require a new major version. Clients specify version in Accept header.",
+      "labels": ["api", "feature", "design"],
+      "deps": []
+    },
+    {
+      "id": "bn-b02",
+      "title": "API versioning and stability guarantees for public release",
+      "description": "Public API versioning with backward compatibility: v1, v2 major versions. Breaking changes trigger new major version. Version negotiation via Accept header.",
+      "labels": ["api", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-b03",
+      "title": "JSON output format for machine-readable CLI results",
+      "description": "Add --json flag to all list and show commands to output machine-readable JSON. Structured output enables scripting and integration with other tools.",
+      "labels": ["api", "feature", "cli"],
+      "deps": []
+    },
+    {
+      "id": "bn-b04",
+      "title": "Machine-readable structured output with --json flag",
+      "description": "Support --json flag on list, show, and search commands for machine-readable output. JSON structured output enables scripting and tool integration.",
+      "labels": ["api", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-b05",
+      "title": "Rate limiting for bulk import operations",
+      "description": "Apply rate limiting to bulk import commands to prevent overloading the event log. Configurable rate limit with backpressure. Prevents disk I/O saturation during large imports.",
+      "labels": ["api", "feature", "reliability"],
+      "deps": []
+    },
+    {
+      "id": "bn-b06",
+      "title": "Throttle bulk operations to prevent event log overload",
+      "description": "Rate-limit bulk import commands. Configurable throttle rate prevents overloading the event log and disk I/O. Backpressure mechanism for large-scale bulk imports.",
+      "labels": ["api", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-b07",
+      "title": "Paginated output for large item lists",
+      "description": "Implement cursor-based pagination for list commands returning more than 100 items. Returns a cursor token for the next page. Prevents loading entire dataset into memory.",
+      "labels": ["api", "feature", "performance"],
+      "deps": []
+    },
+    {
+      "id": "bn-b08",
+      "title": "Cursor-based pagination for large result sets",
+      "description": "Cursor-based paging for list commands: returns next cursor token when results exceed 100 items. Avoids loading entire dataset. Pagination for scalable output.",
+      "labels": ["api", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-b09",
+      "title": "Deprecate legacy event format in next major release",
+      "description": "Mark the v0 event format as deprecated. Remove support in v2. Provide migration tooling to upgrade existing event logs to v1 format before the cutoff.",
+      "labels": ["api", "maintenance", "migration"],
+      "deps": []
+    },
+    {
+      "id": "bn-b10",
+      "title": "Remove support for old event schema in v2 release",
+      "description": "Drop legacy event format support in v2. v0 schema deprecated and removed. Migration tool converts old event logs to v1 format before v2 cutoff.",
+      "labels": ["api", "maintenance"],
+      "deps": []
+    },
+    {
+      "id": "bn-b11",
+      "title": "Document public API surface with examples",
+      "description": "Write comprehensive API documentation covering all public commands, flags, and output formats. Include worked examples for common workflows. Publish as web docs and man pages.",
+      "labels": ["api", "documentation"],
+      "deps": []
+    },
+    {
+      "id": "bn-t01",
+      "title": "Flaky integration test in event replay suite",
+      "description": "The event replay integration test fails intermittently (about 1 in 20 runs). Failure mode: assertion on event order after concurrent writes. Likely a timing-dependent race condition.",
+      "labels": ["testing", "bug", "flaky"],
+      "deps": []
+    },
+    {
+      "id": "bn-t02",
+      "title": "Intermittent test failure in CI pipeline for event ordering",
+      "description": "Flaky test in event replay integration suite: fails about 1 in 20 CI runs. Failure is a race condition in concurrent write ordering. Timing-dependent intermittent failure.",
+      "labels": ["testing", "bug", "ci"],
+      "deps": []
+    },
+    {
+      "id": "bn-t03",
+      "title": "Add property-based tests for CRDT merge correctness",
+      "description": "Use proptest to generate random sequences of CRDT operations and verify merge commutativity, associativity, and idempotence. Target 1000 test cases with shrinking.",
+      "labels": ["testing", "crdt", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-t04",
+      "title": "Fuzz testing for event replay and CRDT merge logic",
+      "description": "Apply cargo-fuzz to the event replay pipeline and CRDT merge operations. Generate arbitrary event sequences to discover crashes, panics, or merge invariant violations.",
+      "labels": ["testing", "feature", "security"],
+      "deps": []
+    },
+    {
+      "id": "bn-t05",
+      "title": "CI build fails on macOS with linker error",
+      "description": "GitHub Actions CI workflow fails on macOS runners with a linker error: ld: library not found for -lsqlite3. The dependency needs to be bundled or the runner needs the Homebrew sqlite package.",
+      "labels": ["ci", "bug", "macos"],
+      "deps": []
+    },
+    {
+      "id": "bn-t06",
+      "title": "GitHub Actions workflow broken for macOS Apple Silicon builds",
+      "description": "macOS CI build fails with linker error: ld library not found for sqlite3. Homebrew sqlite dependency missing on Apple Silicon runner. Needs bundled sqlite or CI runner fix.",
+      "labels": ["ci", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-t07",
+      "title": "Test coverage below 80% threshold in core module",
+      "description": "bones-core has 72% line coverage, below the 80% target. The uncovered paths are in error handling branches and the event replay edge cases. CI coverage check fails.",
+      "labels": ["testing", "quality"],
+      "deps": []
+    },
+    {
+      "id": "bn-t08",
+      "title": "Increase unit test coverage for bones-core to meet 80% threshold",
+      "description": "bones-core test coverage at 72%, below 80% CI threshold. Missing coverage in error handling and event replay edge cases. Add targeted unit tests to meet coverage target.",
+      "labels": ["testing", "quality"],
+      "deps": []
+    },
+    {
+      "id": "bn-t09",
+      "title": "Simulation harness for concurrent agent operations",
+      "description": "Build a deterministic simulation harness that replays agent operations concurrently. Used to verify CRDT merge correctness and find race conditions under controlled conditions.",
+      "labels": ["testing", "simulation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-t10",
+      "title": "Deterministic multi-agent simulation for testing concurrent operations",
+      "description": "Deterministic simulation harness for concurrent agent operations. Replays agents operations to test CRDT correctness and race conditions under controlled, repeatable conditions.",
+      "labels": ["testing", "simulation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-t11",
+      "title": "Add microbenchmarks for search and FTS query performance",
+      "description": "Add criterion.rs benchmarks for FTS5 search queries at various dataset sizes (1k, 10k, 100k items). Track performance regression across changes. Benchmark runs in CI nightly.",
+      "labels": ["testing", "performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-t12",
+      "title": "Performance regression test for full-text search queries",
+      "description": "Criterion benchmarks for FTS search at 1k, 10k, 100k item scales. Regression testing for query performance. CI nightly benchmark run to detect FTS performance degradation.",
+      "labels": ["testing", "performance"],
+      "deps": []
+    },
+    {
+      "id": "bn-p01",
+      "title": "CLI startup time too slow on large repositories",
+      "description": "bn command takes 3+ seconds to start on repositories with more than 10k items. Profiling shows projection loading is the bottleneck. Need lazy loading or incremental startup.",
+      "labels": ["performance", "bug", "cli"],
+      "deps": []
+    },
+    {
+      "id": "bn-p02",
+      "title": "Slow initialization: CLI takes 3 seconds with 10k items",
+      "description": "CLI startup latency: 3 seconds on 10k item repositories due to projection loading. Lazy loading or incremental startup required. Profiling confirms projection load is bottleneck.",
+      "labels": ["performance", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-p03",
+      "title": "Memory usage grows unboundedly during sync operation",
+      "description": "Memory usage increases without bound during long sync operations. After syncing 1M events, RSS exceeds 2GB. Likely a memory leak in the event replay loop buffer.",
+      "labels": ["performance", "bug", "memory"],
+      "deps": []
+    },
+    {
+      "id": "bn-p04",
+      "title": "Memory leak in event replay loop causes OOM during sync",
+      "description": "Event replay loop memory leak during sync. RSS grows unboundedly past 2GB when replaying 1M events. Memory not freed between replay batches. OOM killer terminates process.",
+      "labels": ["performance", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-p05",
+      "title": "Implement lazy loading for item detail views",
+      "description": "Defer loading item descriptions and metadata until the user actually views the item. Reduces initial load time by 60% on large repositories. Prioritize title and status loading.",
+      "labels": ["performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-p06",
+      "title": "Defer item metadata loading until needed to reduce startup latency",
+      "description": "Lazy loading for item metadata: defer description and field loading until viewed. Reduces startup latency 60% on large repos. Only titles and status loaded eagerly.",
+      "labels": ["performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-p07",
+      "title": "In-memory LRU cache for frequent projection queries",
+      "description": "Add an LRU cache in front of the SQLite projection queries. Cache capacity: 1000 items, 60s TTL. Reduces repeated reads for the same items in a TUI session.",
+      "labels": ["performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-p08",
+      "title": "Query result caching with LRU eviction for TUI sessions",
+      "description": "LRU cache for projection query results. Capacity 1000 items with 60s TTL. Reduces repeated SQLite reads during TUI sessions. Cache invalidated on write events.",
+      "labels": ["performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-p09",
+      "title": "Optimize FTS5 index configuration for large dataset queries",
+      "description": "Tune FTS5 index configuration: enable prefix indexes at 2 and 3 chars, increase page size, batch insert mode. Target: sub-100ms search on 100k items.",
+      "labels": ["performance", "search", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-p10",
+      "title": "FTS5 index tuning for sub-100ms search performance at scale",
+      "description": "FTS5 index optimization: prefix indexes 2-3 chars, larger page size, batch insert for indexing. Goal: sub-100ms search latency on 100k items dataset.",
+      "labels": ["performance", "search"],
+      "deps": []
+    },
+    {
+      "id": "bn-p11",
+      "title": "Profile and reduce memory allocations in the hot path",
+      "description": "Use cargo-flamegraph to profile allocation hot paths during search and event replay. Identify and eliminate unnecessary heap allocations. Target: 50% reduction in allocations.",
+      "labels": ["performance", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-s01",
+      "title": "Sanitize user input before writing to event log",
+      "description": "Event titles and descriptions are written to the event log without sanitization. Malicious content in titles could cause issues during replay. Validate and sanitize all user input fields.",
+      "labels": ["security", "bug", "input-validation"],
+      "deps": []
+    },
+    {
+      "id": "bn-s02",
+      "title": "Input validation to prevent injection through item titles",
+      "description": "Lack of input sanitization on item titles allows injection in event log entries. User-supplied titles and descriptions need validation before writing to the event log.",
+      "labels": ["security", "bug"],
+      "deps": []
+    },
+    {
+      "id": "bn-s03",
+      "title": "Encrypt sensitive project data at rest",
+      "description": "Project databases and event logs contain sensitive data stored in plaintext. Implement AES-256-GCM encryption at rest using a user-provided or system-managed key.",
+      "labels": ["security", "feature", "encryption"],
+      "deps": []
+    },
+    {
+      "id": "bn-s04",
+      "title": "At-rest encryption for local project database and event logs",
+      "description": "Encrypt project database and event logs at rest with AES-256-GCM. User-provided or system key management. Sensitive data protected from filesystem-level access.",
+      "labels": ["security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-s05",
+      "title": "Event log tamper detection with cryptographic checksums",
+      "description": "Compute BLAKE3 checksums over event log entries to detect tampering. Verify checksums on read. Alert user if integrity check fails. Prevents silent event log manipulation.",
+      "labels": ["security", "feature", "integrity"],
+      "deps": []
+    },
+    {
+      "id": "bn-s06",
+      "title": "Verify event log integrity with BLAKE3 hash verification",
+      "description": "BLAKE3 hash verification for event log integrity. Compute checksums over entries, verify on read. Tamper detection alerts if checksum mismatch found. Event log integrity protection.",
+      "labels": ["security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-s07",
+      "title": "Restrict file system access to project .bones directory",
+      "description": "The bn CLI should sandbox all file operations within the project's .bones directory. Prevent path traversal attacks that could read files outside the project scope.",
+      "labels": ["security", "feature", "sandbox"],
+      "deps": []
+    },
+    {
+      "id": "bn-s08",
+      "title": "Sandbox file operations to prevent path traversal outside project",
+      "description": "Sandbox the CLI to only access files within the .bones project directory. Block path traversal attacks. File operations outside the project scope should be rejected.",
+      "labels": ["security", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-s09",
+      "title": "Automated dependency vulnerability scanning in CI",
+      "description": "Add cargo-audit to CI pipeline to scan for known vulnerabilities in dependencies. Fail CI on high-severity advisories. Weekly scheduled scan for new CVEs.",
+      "labels": ["security", "ci", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-s10",
+      "title": "Supply chain security audit for Rust crate dependencies",
+      "description": "Audit all Rust crate dependencies for supply chain security risks. cargo-audit for CVE scanning. Review suspicious crates with broad filesystem or network access.",
+      "labels": ["security", "audit"],
+      "deps": []
+    },
+    {
+      "id": "bn-s11",
+      "title": "Secure token storage for OAuth credentials",
+      "description": "Store OAuth access tokens and refresh tokens securely using the OS keychain (keyring crate). Prevents tokens from being stored in plaintext config files.",
+      "labels": ["security", "auth", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x01",
+      "title": "Write contributor guide for new developers",
+      "description": "Create a comprehensive contributor guide covering: development environment setup, code conventions, how to add new event types, testing strategy, and PR process.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x02",
+      "title": "Development workflow documentation for new contributors",
+      "description": "Contributor documentation: development environment setup, code conventions, adding event types, testing strategy, pull request workflow. Guide for onboarding new developers.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x03",
+      "title": "Generate rustdoc API reference for all public interfaces",
+      "description": "Ensure all public functions, structs, and traits have complete rustdoc comments. Generate and publish API reference documentation. Add examples to key public APIs.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x04",
+      "title": "Rustdoc documentation for public API interfaces and structs",
+      "description": "Complete rustdoc coverage for public interfaces. All public functions, structs, traits documented with examples. API reference published from rustdoc output.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x05",
+      "title": "Quickstart tutorial for getting started with bones",
+      "description": "Write a quickstart guide with step-by-step tutorial: installation, project init, creating items, searching, duplicate detection. Includes worked examples and screenshots.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x06",
+      "title": "Getting started guide with examples and installation instructions",
+      "description": "Quickstart guide: installation steps, project initialization, creating and searching items, duplicate detection workflow. Step-by-step tutorial with worked examples.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x07",
+      "title": "Automate changelog generation from commit history",
+      "description": "Use git-cliff or similar to auto-generate CHANGELOG.md from conventional commits. Integrate into release pipeline. Group changes by type (feat, fix, docs, perf).",
+      "labels": ["documentation", "ci", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-x08",
+      "title": "Auto-generate release notes from conventional commits",
+      "description": "Automated release notes generation from commit history using git-cliff. Conventional commits grouped by type (feat, fix, perf, docs) for CHANGELOG.md. Part of release pipeline.",
+      "labels": ["documentation", "ci"],
+      "deps": []
+    },
+    {
+      "id": "bn-x09",
+      "title": "Document CRDT merge semantics and conflict resolution",
+      "description": "Write detailed documentation on the CRDT event model: merge commutativity, conflict resolution rules for concurrent edits, tombstone handling, and causality tracking.",
+      "labels": ["documentation", "crdt"],
+      "deps": []
+    },
+    {
+      "id": "bn-x10",
+      "title": "Explain conflict resolution algorithm for concurrent CRDT edits",
+      "description": "CRDT documentation: merge semantics for concurrent edits, conflict resolution algorithm, tombstone handling, causality tracking. Documents how concurrent agent writes are merged.",
+      "labels": ["documentation", "crdt"],
+      "deps": []
+    },
+    {
+      "id": "bn-x11",
+      "title": "Document architecture and design decisions",
+      "description": "Architecture documentation: high-level system design, crate layout, key design decisions (CRDT choice, event sourcing, projection model). ADR format for major decisions.",
+      "labels": ["documentation", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i01",
+      "title": "Dockerfile for containerized deployment",
+      "description": "Create a multi-stage Dockerfile for containerized deployment. Build stage uses Rust toolchain; runtime stage is a minimal distroless image. Publish to GitHub Container Registry.",
+      "labels": ["infrastructure", "feature", "docker"],
+      "deps": []
+    },
+    {
+      "id": "bn-i02",
+      "title": "Containerize application with multi-stage Dockerfile",
+      "description": "Multi-stage Dockerfile: Rust builder stage + minimal distroless runtime. Containerized deployment for Docker environments. Published to GitHub Container Registry.",
+      "labels": ["infrastructure", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i03",
+      "title": "GitHub Actions release pipeline for binary distribution",
+      "description": "Automate binary release pipeline using GitHub Actions. Build release binaries for Linux x86_64, macOS arm64, and Windows x86_64. Publish to GitHub Releases on tag push.",
+      "labels": ["infrastructure", "ci", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i04",
+      "title": "Automate publishing binary releases via GitHub Actions",
+      "description": "GitHub Actions pipeline to publish release binaries. Builds for Linux x86_64, macOS arm64, Windows x86_64. Automated release to GitHub Releases on version tag.",
+      "labels": ["infrastructure", "ci"],
+      "deps": []
+    },
+    {
+      "id": "bn-i05",
+      "title": "Cross-compilation for ARM Linux targets",
+      "description": "Add cross-compilation support for aarch64-unknown-linux-gnu and armv7-unknown-linux-gnueabihf targets. Use cross-rs for builds. Required for Raspberry Pi and ARM server deployments.",
+      "labels": ["infrastructure", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i06",
+      "title": "Build ARM aarch64 Linux binaries in CI",
+      "description": "CI cross-compilation for aarch64-unknown-linux-gnu and armv7 ARM targets using cross-rs. Produces ARM Linux binaries for Raspberry Pi and ARM server deployments.",
+      "labels": ["infrastructure", "ci"],
+      "deps": []
+    },
+    {
+      "id": "bn-i07",
+      "title": "Homebrew formula for macOS package installation",
+      "description": "Create and maintain a Homebrew formula for macOS installation. Submit to homebrew-core or a custom tap. Formula builds from source or installs pre-built bottles.",
+      "labels": ["infrastructure", "feature", "macos"],
+      "deps": []
+    },
+    {
+      "id": "bn-i08",
+      "title": "macOS package manager distribution via Homebrew",
+      "description": "Homebrew distribution for macOS. Formula in homebrew-core or custom tap. Install via brew install bones. Source build or pre-built bottle distribution.",
+      "labels": ["infrastructure", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i09",
+      "title": "Linux DEB and RPM packages for distribution",
+      "description": "Build Debian (.deb) and RPM packages for Linux distribution. Packages include man pages and shell completions. Publish to a package repository via GitHub Actions.",
+      "labels": ["infrastructure", "feature", "linux"],
+      "deps": []
+    },
+    {
+      "id": "bn-i10",
+      "title": "APT and RPM package repository for Linux installation",
+      "description": "DEB and RPM packages for Linux. APT repository and RPM repository for distribution. Packages include man pages, shell completions. GitHub Actions publishing pipeline.",
+      "labels": ["infrastructure", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-i11",
+      "title": "Nix flake for reproducible development environment",
+      "description": "Add a Nix flake to the repository for reproducible development environments. Includes all Rust toolchain dependencies, dev tools, and test dependencies.",
+      "labels": ["infrastructure", "feature", "nix"],
+      "deps": []
+    },
+    {
+      "id": "bn-c01",
+      "title": "Graceful shutdown on SIGTERM and SIGINT signals",
+      "description": "Handle SIGTERM and SIGINT signals for graceful shutdown. In-progress operations should complete or checkpoint before exit. Prevents data corruption on container stop.",
+      "labels": ["reliability", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-c02",
+      "title": "Clean process termination on interrupt and termination signals",
+      "description": "Graceful shutdown handler for SIGTERM and SIGINT. Completes or checkpoints in-progress operations before exit. Prevents data corruption when container is stopped.",
+      "labels": ["reliability", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-c03",
+      "title": "Configuration file hot reload without restart",
+      "description": "Watch config file for changes and reload settings at runtime without restarting. Uses inotify/kqueue for file change notifications. Applies new config within 1 second.",
+      "labels": ["feature", "config"],
+      "deps": []
+    },
+    {
+      "id": "bn-c04",
+      "title": "Reload project settings at runtime without process restart",
+      "description": "Hot reload configuration: watch config file with inotify/kqueue, apply new settings within 1 second without restart. Runtime config reload for production environments.",
+      "labels": ["feature", "config"],
+      "deps": []
+    },
+    {
+      "id": "bn-c05",
+      "title": "Structured logging with OpenTelemetry tracing",
+      "description": "Add OpenTelemetry distributed tracing to key operations. Emit trace spans for event replay, search queries, and sync operations. Export to Jaeger or OTLP collector.",
+      "labels": ["observability", "feature"],
+      "deps": []
+    },
+    {
+      "id": "bn-c06",
+      "title": "Plugin system for custom event handlers and extensions",
+      "description": "Design a plugin API for custom event handlers and workflow extensions. Plugins hook into the event pipeline to trigger actions on item create, update, or status change.",
+      "labels": ["feature", "extension"],
+      "deps": []
+    },
+    {
+      "id": "bn-c07",
+      "title": "Extension hook API for agent workflow integrations",
+      "description": "Extension API with hooks into the event pipeline. Plugins trigger on item create, update, status change. Agent integrations use hooks for custom workflow automation.",
+      "labels": ["feature", "extension"],
+      "deps": []
+    },
+    {
+      "id": "bn-c08",
+      "title": "Internationalization support for non-English users",
+      "description": "Add i18n support for CLI messages and TUI text. Use gettext or fluent for message catalogs. Initial translations: Spanish, French, German, Japanese.",
+      "labels": ["feature", "i18n"],
+      "deps": []
+    },
+    {
+      "id": "bn-c09",
+      "title": "Localization for CLI and TUI in multiple languages",
+      "description": "Localization (l10n) for CLI and TUI. Message catalogs for Spanish, French, German, Japanese. gettext/fluent translation system. i18n internationalization infrastructure.",
+      "labels": ["feature", "i18n"],
+      "deps": []
+    },
+    {
+      "id": "bn-c10",
+      "title": "Adversarial: fix HTML table rendering in web output",
+      "description": "Fix HTML table rendering bugs in the web export output. Table cells with special characters are not escaped. Broken colspan on merged cells. Affects HTML export only.",
+      "labels": ["ui", "bug", "web"],
+      "deps": []
+    },
+    {
+      "id": "bn-c11",
+      "title": "Adversarial: fix database table schema for new column",
+      "description": "Fix database table schema to add new column without breaking existing queries. SQLite ALTER TABLE to add nullable column. Schema migration for production databases.",
+      "labels": ["database", "maintenance"],
+      "deps": []
+    }
+  ],
+  "queries": [
+    {
+      "query": "OAuth token authentication timeout",
+      "relevant": ["bn-a01", "bn-a02"],
+      "notes": "Both items about OAuth token timeout; ev-a02 uses 'authentication' instead of 'OAuth token refresh'"
+    },
+    {
+      "query": "role permission access control",
+      "relevant": ["bn-a03", "bn-a04"],
+      "notes": "RBAC items share role, permission, access control vocabulary"
+    },
+    {
+      "query": "password reset email forgot",
+      "relevant": ["bn-a05", "bn-a06"],
+      "notes": "Password reset email delivery failure; ev-a06 uses 'forgot' vocabulary"
+    },
+    {
+      "query": "two factor authentication TOTP",
+      "relevant": ["bn-a07", "bn-a08"],
+      "notes": "2FA TOTP authentication items"
+    },
+    {
+      "query": "audit log permission changes admin",
+      "relevant": ["bn-a09", "bn-a10"],
+      "notes": "Audit trail for permission/role changes"
+    },
+    {
+      "query": "SQLite connection pool database concurrent",
+      "relevant": ["bn-d01", "bn-d02"],
+      "notes": "Connection pool exhaustion under concurrent load"
+    },
+    {
+      "query": "search query slow large dataset FTS",
+      "relevant": ["bn-d03", "bn-d04", "bn-p09", "bn-p10"],
+      "notes": "Slow FTS search on large datasets; also matches performance optimization items"
+    },
+    {
+      "query": "database migration schema upgrade version",
+      "relevant": ["bn-d05", "bn-d06"],
+      "notes": "Schema migration v1 to v2"
+    },
+    {
+      "query": "WAL corruption crash recovery database",
+      "relevant": ["bn-d07", "bn-d08"],
+      "notes": "WAL file corruption after crash recovery"
+    },
+    {
+      "query": "terminal color ANSI Windows output",
+      "relevant": ["bn-u01", "bn-u02"],
+      "notes": "ANSI color escape codes broken on Windows terminal"
+    },
+    {
+      "query": "progress spinner long running command",
+      "relevant": ["bn-u03", "bn-u04"],
+      "notes": "Progress indicator for slow commands"
+    },
+    {
+      "query": "dark mode color theme TUI",
+      "relevant": ["bn-u05", "bn-u06"],
+      "notes": "Dark mode color theme for terminal interface"
+    },
+    {
+      "query": "keyboard shortcuts navigation hotkeys TUI",
+      "relevant": ["bn-u09", "bn-u10"],
+      "notes": "Keyboard navigation shortcuts in TUI"
+    },
+    {
+      "query": "JSON output machine readable CLI flag",
+      "relevant": ["bn-b03", "bn-b04"],
+      "notes": "Machine-readable JSON output with --json flag"
+    },
+    {
+      "query": "rate limit bulk import throttle",
+      "relevant": ["bn-b05", "bn-b06"],
+      "notes": "Rate limiting for bulk operations"
+    },
+    {
+      "query": "pagination cursor large results list",
+      "relevant": ["bn-b07", "bn-b08"],
+      "notes": "Cursor-based pagination for large result sets"
+    },
+    {
+      "query": "flaky intermittent test CI failure",
+      "relevant": ["bn-t01", "bn-t02"],
+      "notes": "Flaky tests in CI pipeline"
+    },
+    {
+      "query": "macOS CI build linker error GitHub Actions",
+      "relevant": ["bn-t05", "bn-t06"],
+      "notes": "macOS CI build failure"
+    },
+    {
+      "query": "test coverage unit bones-core threshold",
+      "relevant": ["bn-t07", "bn-t08"],
+      "notes": "Test coverage below threshold"
+    },
+    {
+      "query": "simulation concurrent deterministic agent testing",
+      "relevant": ["bn-t09", "bn-t10"],
+      "notes": "Deterministic simulation harness"
+    },
+    {
+      "query": "benchmark search FTS performance regression",
+      "relevant": ["bn-t11", "bn-t12", "bn-p09", "bn-p10"],
+      "notes": "Search performance benchmarks and regression testing"
+    },
+    {
+      "query": "CLI startup slow initialization latency",
+      "relevant": ["bn-p01", "bn-p02"],
+      "notes": "Slow CLI startup with large repos"
+    },
+    {
+      "query": "memory leak event replay OOM",
+      "relevant": ["bn-p03", "bn-p04"],
+      "notes": "Memory leak in event replay loop"
+    },
+    {
+      "query": "lazy loading defer metadata startup",
+      "relevant": ["bn-p05", "bn-p06"],
+      "notes": "Lazy loading for performance"
+    },
+    {
+      "query": "LRU cache query result projection",
+      "relevant": ["bn-p07", "bn-p08"],
+      "notes": "Query result caching"
+    },
+    {
+      "query": "input validation sanitize injection security",
+      "relevant": ["bn-s01", "bn-s02"],
+      "notes": "Input sanitization to prevent injection"
+    },
+    {
+      "query": "encryption at rest database sensitive data",
+      "relevant": ["bn-s03", "bn-s04"],
+      "notes": "At-rest encryption for project data"
+    },
+    {
+      "query": "BLAKE3 checksum integrity event log tamper",
+      "relevant": ["bn-s05", "bn-s06"],
+      "notes": "Event log integrity verification"
+    },
+    {
+      "query": "contributor guide development workflow documentation",
+      "relevant": ["bn-x01", "bn-x02"],
+      "notes": "Contributor and developer documentation"
+    },
+    {
+      "query": "rustdoc API documentation public interface",
+      "relevant": ["bn-x03", "bn-x04"],
+      "notes": "API reference documentation"
+    },
+    {
+      "query": "CRDT merge conflict resolution concurrent",
+      "relevant": ["bn-x09", "bn-x10"],
+      "notes": "CRDT semantics documentation"
+    },
+    {
+      "query": "Dockerfile containerize deployment Docker",
+      "relevant": ["bn-i01", "bn-i02"],
+      "notes": "Containerization with Docker"
+    },
+    {
+      "query": "GitHub Actions release pipeline binary publish",
+      "relevant": ["bn-i03", "bn-i04", "bn-x07", "bn-x08"],
+      "notes": "CI release pipeline; also matches changelog automation"
+    },
+    {
+      "query": "shutdown SIGTERM graceful signal handler",
+      "relevant": ["bn-c01", "bn-c02"],
+      "notes": "Graceful shutdown on signals"
+    },
+    {
+      "query": "config hot reload settings runtime restart",
+      "relevant": ["bn-c03", "bn-c04"],
+      "notes": "Configuration hot reload"
+    }
+  ],
+  "duplicates": [
+    ["bn-a01", "bn-a02"],
+    ["bn-a03", "bn-a04"],
+    ["bn-a05", "bn-a06"],
+    ["bn-a09", "bn-a10"],
+    ["bn-d01", "bn-d02"],
+    ["bn-d03", "bn-d04"],
+    ["bn-d05", "bn-d06"],
+    ["bn-d07", "bn-d08"],
+    ["bn-u01", "bn-u02"],
+    ["bn-u03", "bn-u04"],
+    ["bn-u05", "bn-u06"],
+    ["bn-u07", "bn-u08"],
+    ["bn-u09", "bn-u10"],
+    ["bn-b01", "bn-b02"],
+    ["bn-b03", "bn-b04"],
+    ["bn-b05", "bn-b06"],
+    ["bn-b07", "bn-b08"],
+    ["bn-b09", "bn-b10"],
+    ["bn-t01", "bn-t02"],
+    ["bn-t05", "bn-t06"],
+    ["bn-t07", "bn-t08"],
+    ["bn-t09", "bn-t10"],
+    ["bn-t11", "bn-t12"],
+    ["bn-p01", "bn-p02"],
+    ["bn-p03", "bn-p04"],
+    ["bn-p05", "bn-p06"],
+    ["bn-p07", "bn-p08"],
+    ["bn-p09", "bn-p10"],
+    ["bn-s01", "bn-s02"],
+    ["bn-s03", "bn-s04"],
+    ["bn-s05", "bn-s06"],
+    ["bn-s07", "bn-s08"],
+    ["bn-x01", "bn-x02"],
+    ["bn-x03", "bn-x04"],
+    ["bn-x05", "bn-x06"],
+    ["bn-x07", "bn-x08"],
+    ["bn-x09", "bn-x10"],
+    ["bn-i01", "bn-i02"],
+    ["bn-i03", "bn-i04"],
+    ["bn-i05", "bn-i06"],
+    ["bn-i07", "bn-i08"],
+    ["bn-i09", "bn-i10"],
+    ["bn-c01", "bn-c02"],
+    ["bn-c03", "bn-c04"],
+    ["bn-c06", "bn-c07"],
+    ["bn-c08", "bn-c09"],
+    ["bn-a07", "bn-a08"],
+    ["bn-d09", "bn-d10"],
+    ["bn-u11", "bn-b11"],
+    ["bn-p11", "bn-t11"]
+  ],
+  "adversarial_non_duplicates": [
+    {
+      "pair": ["bn-c10", "bn-c11"],
+      "notes": "Both mention 'table' but ev-c10 is about HTML table rendering, ev-c11 is about database table schema — different domains despite shared keyword"
+    },
+    {
+      "pair": ["bn-d03", "bn-p09"],
+      "notes": "Both about FTS search performance but ev-d03 is a regression bug, ev-p09 is a proactive optimization feature — related but distinct problems"
+    },
+    {
+      "pair": ["bn-a07", "bn-s11"],
+      "notes": "Both about OAuth/auth tokens but ev-a07 is 2FA TOTP setup, ev-s11 is secure OAuth token storage — different concerns"
+    }
+  ]
+}
