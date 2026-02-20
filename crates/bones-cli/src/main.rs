@@ -4,6 +4,7 @@ mod agent;
 mod cmd;
 mod git;
 mod output;
+mod tui;
 mod validate;
 
 use bones_core::timing;
@@ -455,6 +456,22 @@ enum Commands {
     RedactVerify(cmd::redact_verify::RedactVerifyArgs),
 
     #[command(
+        next_help_heading = "Read",
+        about = "Open interactive TUI list view",
+        long_about = "Open an interactive terminal UI for browsing, filtering, and navigating work items.\n\n\
+                      Key bindings:\n\
+                      - j/k or arrows: navigate up/down\n\
+                      - /: search (filter by text)\n\
+                      - f: open filter popup (state, kind, urgency, label)\n\
+                      - s: cycle sort order (updated → priority → created)\n\
+                      - r: refresh from database\n\
+                      - ESC: clear all filters\n\
+                      - q or Ctrl+C: quit",
+        after_help = "EXAMPLES:\n    # Open the interactive list\n    bn tui\n\n    # Must be run in a bones project directory\n    cd myproject && bn tui"
+    )]
+    Tui,
+
+    #[command(
         next_help_heading = "Simulation",
         about = "Run deterministic simulation campaigns",
         long_about = "Deterministic simulation campaign runner for verifying CRDT convergence\n\
@@ -896,6 +913,13 @@ fn main() -> anyhow::Result<()> {
             cmd::completions::run_completions(args.shell, &mut command)
         }),
 
+        Commands::Sim(ref args) => timing::timed("cmd.sim", || {
+            cmd::sim::run_sim(args, output, &project_root)
+        }),
+
+        Commands::Tui => timing::timed("cmd.tui", || {
+            tui::list::run_list_tui(&project_root)
+        }),
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
             git::merge_driver::merge_driver_main(&base, &ours, &theirs)
         }),
