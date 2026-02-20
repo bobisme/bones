@@ -941,7 +941,7 @@ fn main() -> anyhow::Result<()> {
             timing::timed("cmd.sim", || cmd::sim::run_sim(args, output, &project_root))
         }
 
-        Commands::Tui => timing::timed("cmd.tui", || tui::list::run_list_tui(&project_root)),
+        Commands::Tui => timing::timed("cmd.tui", || tui::run_tui(&project_root)),
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
             git::merge_driver::merge_driver_main(&base, &ours, &theirs)
         }),

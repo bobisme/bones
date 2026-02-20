@@ -625,8 +625,18 @@ impl ListView {
         }
     }
 
-    fn set_status(&mut self, msg: String) {
+    pub fn set_status(&mut self, msg: String) {
         self.status_msg = Some((msg, Instant::now()));
+    }
+
+    /// Returns true if the list view has been asked to quit (e.g. 'q' key).
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    /// Render the list view into `area` within the given frame.
+    pub fn render(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        render_into(frame, self, area);
     }
 }
 
@@ -738,6 +748,11 @@ fn build_row(item: &WorkItem, title_width: u16) -> Row<'static> {
 /// Render the full list view into the terminal frame.
 fn render(frame: &mut ratatui::Frame<'_>, app: &mut ListView) {
     let area = frame.area();
+    render_into(frame, app, area);
+}
+
+/// Render the list view into a specific area of the frame.
+fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
 
     // Layout: main table + status bar (3 lines at bottom).
     let chunks = Layout::default()
