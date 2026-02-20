@@ -9,6 +9,7 @@
 pub mod feedback;
 pub mod graph;
 pub mod metrics;
+pub mod schedule;
 pub mod score;
 
 use tracing::{info, instrument};
