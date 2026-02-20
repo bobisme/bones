@@ -9,107 +9,141 @@
 //!
 //! Results are fused using Reciprocal Rank Fusion (RRF) and classified into
 //! risk levels (likely_duplicate, possibly_related, maybe_related, none).
-//!
-//! # Graceful Degradation
-//!
-//! If semantic or structural search layers are unavailable:
-//! - Semantic search is skipped if the model cannot be loaded or embeddings fail
-//! - Structural search is skipped if the graph is empty or comparison fails
-//! - Lexical search is always performed as the baseline
-//!
-//! The RRF fusion still works effectively with partial results from available layers.
 
-use crate::fusion::scoring::{DupCandidate, SearchConfig, build_dup_candidates, rrf_fuse};
-use anyhow::{Context, Result};
-use bones_core::db::fts::search_bm25;
+use crate::fusion::{DupCandidate, SearchConfig, classify_risk, hybrid_search};
+use crate::semantic::SemanticModel;
+use anyhow::Result;
 use petgraph::graph::DiGraph;
 use rusqlite::Connection;
-use std::collections::HashSet;
 
 /// Find potential duplicate candidates for a given title.
 ///
-/// This function performs an integrated duplicate risk analysis by combining:
-/// - Lexical search (FTS5 BM25 on title/description)
-/// - Semantic search (KNN embeddings, if enabled and model is available)
-/// - Structural similarity (graph-based relatedness, if graph is provided)
-///
-/// Results are ranked using Reciprocal Rank Fusion (RRF) and filtered by
-/// the risk thresholds in `config`.
-///
-/// # Parameters
-///
-/// - `query_title` — The title of the item being created.
-/// - `db` — SQLite connection to the bones projection database.
-/// - `graph` — Dependency graph for structural similarity. May be empty; structural search will be skipped.
-/// - `config` — Search configuration with RRF parameters and thresholds.
-/// - `semantic_enabled` — If false, skip semantic search (e.g. model not available).
-/// - `limit` — Maximum number of results to return per layer.
-///
-/// # Returns
-///
-/// A vector of `DupCandidate` items sorted by composite score (highest first),
-/// filtered to those with risk >= MaybeRelated. Returns an empty vector if no
-/// candidates are found above the threshold.
-///
-/// # Errors
-///
-/// Returns an error if the lexical search fails. Failures in semantic or
-/// structural layers are logged and do not block the function — it falls
-/// back to available layers.
+/// Runs hybrid search and converts results into duplicate candidates with
+/// risk classifications. Falls back gracefully to lexical-only when semantic
+/// model loading or inference is unavailable.
 pub fn find_duplicates(
     query_title: &str,
     db: &Connection,
     _graph: &DiGraph<String, ()>,
     config: &SearchConfig,
-    _semantic_enabled: bool,
+    semantic_enabled: bool,
     limit: usize,
 ) -> Result<Vec<DupCandidate>> {
-    // 1. Lexical search using FTS5 BM25 (always performed)
-    let lexical_hits =
-        search_bm25(db, query_title, limit as u32).context("lexical search failed")?;
-    let lexical_ranked: Vec<&str> = lexical_hits.iter().map(|h| h.item_id.as_str()).collect();
+    let model = if semantic_enabled {
+        SemanticModel::load().ok()
+    } else {
+        None
+    };
 
-    // 2. Semantic search (optional, requires model and embeddings)
-    // For now, semantic search is not performed in the initial implementation.
-    // Future: load SemanticModel, embed the query title, call knn_search
-    let semantic_ranked: Vec<&str> = vec![];
+    let fused = hybrid_search(query_title, db, model.as_ref(), limit, config.rrf_k)?;
 
-    // 3. Structural similarity (optional, requires graph and metadata)
-    // For now, structural search is not performed in the initial implementation.
-    // Future: build pairwise structural similarity for all candidates
-    let structural_ranked: Vec<&str> = vec![];
+    let mut candidates: Vec<DupCandidate> = fused
+        .into_iter()
+        .map(|r| {
+            let risk = classify_risk(r.score, config);
+            DupCandidate {
+                item_id: r.item_id,
+                composite_score: r.score,
+                lexical_rank: r.lexical_rank,
+                semantic_rank: r.semantic_rank,
+                structural_rank: r.structural_rank,
+                risk,
+            }
+        })
+        .collect();
 
-    // 4. Fuse results using RRF
-    // Even with some layers missing, RRF still produces sensible scores
-    let fused = rrf_fuse(
-        &lexical_ranked,
-        &semantic_ranked,
-        &structural_ranked,
-        config.rrf_k,
-    );
+    let has_semantic = candidates.iter().any(|c| c.semantic_rank != usize::MAX);
+    let has_structural = candidates.iter().any(|c| c.structural_rank != usize::MAX);
+    let active_layers = 1 + usize::from(has_semantic) + usize::from(has_structural);
+    let max_rrf = active_layers as f32 / (config.rrf_k as f32 + 1.0);
+    let cutoff = config.maybe_related_threshold * max_rrf;
 
-    // 5. Build candidate list with rank metadata and classifications
-    let mut candidates = build_dup_candidates(
-        &fused,
-        &lexical_ranked,
-        &semantic_ranked,
-        &structural_ranked,
-        config,
-    );
-
-    // 6. Filter to candidates above MaybeRelated threshold
-    candidates.retain(|c| c.composite_score >= config.maybe_related_threshold);
-
+    candidates.retain(|c| c.composite_score >= cutoff);
     Ok(candidates)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bones_core::db::migrations;
+    use bones_core::db::project::{Projector, ensure_tracking_table};
+    use bones_core::event::data::*;
+    use bones_core::event::types::EventType;
+    use bones_core::event::{Event, EventData};
+    use bones_core::model::item::{Kind, Size, Urgency};
+    use bones_core::model::item_id::ItemId;
+    use rusqlite::Connection;
+    use std::collections::BTreeMap;
+
+    fn setup_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        migrations::migrate(&mut conn).expect("migrate");
+        ensure_tracking_table(&conn).expect("tracking table");
+
+        let proj = Projector::new(&conn);
+        proj.project_event(&make_create(
+            "bn-001",
+            "Authentication timeout regression",
+            Some("Auth service fails after 30 seconds"),
+            "h1",
+        ))
+        .unwrap();
+        proj.project_event(&make_create(
+            "bn-002",
+            "Auth timeout in staging",
+            Some("Intermittent auth failures"),
+            "h2",
+        ))
+        .unwrap();
+
+        conn
+    }
+
+    fn make_create(id: &str, title: &str, desc: Option<&str>, hash: &str) -> Event {
+        Event {
+            wall_ts_us: 1000,
+            agent: "test-agent".into(),
+            itc: "itc:AQ".into(),
+            parents: vec![],
+            event_type: EventType::Create,
+            item_id: ItemId::new_unchecked(id),
+            data: EventData::Create(CreateData {
+                title: title.into(),
+                kind: Kind::Task,
+                size: Some(Size::M),
+                urgency: Urgency::Default,
+                labels: vec![],
+                parent: None,
+                causation: None,
+                description: desc.map(String::from),
+                extra: BTreeMap::new(),
+            }),
+            event_hash: format!("blake3:{hash}"),
+        }
+    }
 
     #[test]
-    fn placeholder_test() {
-        // Placeholder test
-        assert!(true);
+    fn find_duplicates_returns_candidates() {
+        let conn = setup_db();
+        let config = SearchConfig::default();
+        let graph: DiGraph<String, ()> = DiGraph::new();
+
+        let out = find_duplicates("authentication timeout", &conn, &graph, &config, false, 10)
+            .expect("search should succeed");
+
+        assert!(!out.is_empty());
+        assert!(out.iter().all(|c| c.lexical_rank != usize::MAX));
+    }
+
+    #[test]
+    fn find_duplicates_returns_empty_for_unmatched_query() {
+        let conn = setup_db();
+        let config = SearchConfig::default();
+        let graph: DiGraph<String, ()> = DiGraph::new();
+
+        let out = find_duplicates("totallyunrelatedtermxyz", &conn, &graph, &config, false, 10)
+            .expect("search should succeed");
+
+        assert!(out.is_empty());
     }
 }
