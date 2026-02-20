@@ -168,6 +168,19 @@ enum Commands {
     Dedup(cmd::dedup::DedupArgs),
 
     #[command(
+        next_help_heading = "Search",
+        about = "Find items most similar to a given item",
+        long_about = "Find work items most similar to the given item using fusion scoring.\n\n\
+                      Combines lexical (FTS5), semantic, and structural search layers via\n\
+                      Reciprocal Rank Fusion (RRF) to rank candidates by similarity.\n\n\
+                      Results exclude the source item and show per-layer score breakdown.",
+        after_help = "EXAMPLES:\n    # Find items similar to bn-abc\n    bn similar bn-abc\n\n\
+                      # Limit to top 5 results\n    bn similar bn-abc --limit 5\n\n\
+                      # Machine-readable output\n    bn similar bn-abc --json"
+    )]
+    Similar(cmd::similar::SimilarArgs),
+
+    #[command(
         next_help_heading = "Lifecycle",
         about = "Mark item as doing",
         long_about = "Transition a work item to the doing state.",
@@ -689,6 +702,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Dedup(ref args) => timing::timed("cmd.dedup", || {
             cmd::dedup::run_dedup(args, output, &project_root)
+        }),
+        Commands::Similar(ref args) => timing::timed("cmd.similar", || {
+            cmd::similar::run_similar(args, output, &project_root)
         }),
         Commands::Do(ref args) => timing::timed("cmd.do", || {
             cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)

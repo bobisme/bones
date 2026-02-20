@@ -33,6 +33,7 @@ pub mod redact_verify;
 pub mod reopen;
 pub mod search;
 pub mod show;
+pub mod similar;
 pub mod status;
 pub mod sync;
 pub mod tag;
