@@ -18,6 +18,7 @@ pub mod recovery;
 pub mod shard;
 pub mod sync;
 pub mod timing;
+pub mod undo;
 pub mod verify;
 
 use tracing::{info, instrument};

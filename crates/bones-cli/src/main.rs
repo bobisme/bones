@@ -253,6 +253,20 @@ enum Commands {
     Reopen(cmd::reopen::ReopenArgs),
 
     #[command(
+        next_help_heading = "Lifecycle",
+        about = "Reverse the last N events on an item via compensating events",
+        long_about = "Emit compensating events that reverse the effect of prior events.\n\n\
+                      Does NOT delete or modify existing events — the append-only event log\n\
+                      and Merkle-DAG integrity are preserved.\n\n\
+                      Events that CANNOT be undone (grow-only):\n\
+                      - item.comment (G-Set: comments are permanent)\n\
+                      - item.compact, item.snapshot (compaction)\n\
+                      - item.redact (intentionally permanent)",
+        after_help = "EXAMPLES:\n    # Undo the last event on an item\n    bn undo bn-abc\n\n    # Undo the last 3 events\n    bn undo bn-abc --last 3\n\n    # Undo a specific event by hash\n    bn undo --event blake3:abcdef...\n\n    # Preview without emitting\n    bn undo bn-abc --dry-run\n\n    # Emit machine-readable output\n    bn undo bn-abc --json"
+    )]
+    Undo(cmd::undo::UndoArgs),
+
+    #[command(
         next_help_heading = "Metadata",
         about = "Add labels to an item",
         long_about = "Attach one or more labels to an existing work item.",
@@ -762,6 +776,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Reopen(ref args) => timing::timed("cmd.reopen", || {
             cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Undo(ref args) => timing::timed("cmd.undo", || {
+            cmd::undo::run_undo(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Tag(ref args) => timing::timed("cmd.tag", || {
             cmd::tag::run_tag(args, cli.agent_flag(), output, &project_root)
         }),
@@ -1123,6 +1140,7 @@ mod tests {
             vec!["bn", "import", "--jsonl"],
             vec!["bn", "completions", "bash"],
             vec!["bn", "diagnose"],
+            vec!["bn", "undo", "bn-abc"],
         ];
         for args in &subcommands {
             let result = Cli::try_parse_from(args.iter());
@@ -1132,6 +1150,40 @@ mod tests {
                 args,
                 result.err()
             );
+        }
+    }
+
+    #[test]
+    fn undo_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "undo", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Undo(_)));
+    }
+
+    #[test]
+    fn undo_subcommand_parses_dry_run() {
+        let cli = Cli::parse_from(["bn", "undo", "bn-abc", "--dry-run"]);
+        assert!(matches!(cli.command, Commands::Undo(_)));
+        if let Commands::Undo(ref args) = cli.command {
+            assert!(args.dry_run);
+        }
+    }
+
+    #[test]
+    fn undo_subcommand_parses_last_n() {
+        let cli = Cli::parse_from(["bn", "undo", "bn-abc", "--last", "5"]);
+        assert!(matches!(cli.command, Commands::Undo(_)));
+        if let Commands::Undo(ref args) = cli.command {
+            assert_eq!(args.last_n, 5);
+        }
+    }
+
+    #[test]
+    fn undo_subcommand_parses_event_hash() {
+        let cli = Cli::parse_from(["bn", "undo", "--event", "blake3:abc123"]);
+        assert!(matches!(cli.command, Commands::Undo(_)));
+        if let Commands::Undo(ref args) = cli.command {
+            assert_eq!(args.event_hash.as_deref(), Some("blake3:abc123"));
+            assert!(args.id.is_none());
         }
     }
 
