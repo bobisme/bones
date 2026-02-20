@@ -158,6 +158,16 @@ enum Commands {
     Dup(cmd::dup::DupArgs),
 
     #[command(
+        next_help_heading = "Search",
+        about = "Bulk duplicate detection across open items",
+        long_about = "Scan all open items to find likely duplicate clusters.\n\n\
+                      Uses FTS5 BM25 as a first-pass filter, then fusion scoring to\
+                      confirm likely duplicate links.",
+        after_help = "EXAMPLES:\n    # Scan with default threshold\n    bn dedup\n\n    # More permissive threshold\n    bn dedup --threshold 0.60\n\n    # Limit groups\n    bn dedup --limit 20\n\n    # Machine-readable output\n    bn dedup --json"
+    )]
+    Dedup(cmd::dedup::DedupArgs),
+
+    #[command(
         next_help_heading = "Lifecycle",
         about = "Mark item as doing",
         long_about = "Transition a work item to the doing state.",
@@ -677,6 +687,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Dup(ref args) => {
             timing::timed("cmd.dup", || cmd::dup::run_dup(args, output, &project_root))
         }
+        Commands::Dedup(ref args) => timing::timed("cmd.dedup", || {
+            cmd::dedup::run_dedup(args, output, &project_root)
+        }),
         Commands::Do(ref args) => timing::timed("cmd.do", || {
             cmd::do_cmd::run_do(args, cli.agent_flag(), output, &project_root)
         }),
@@ -938,6 +951,18 @@ mod tests {
     }
 
     #[test]
+    fn dup_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "dup", "bn-123"]);
+        assert!(matches!(cli.command, Commands::Dup(_)));
+    }
+
+    #[test]
+    fn dedup_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "dedup", "--threshold", "0.7"]);
+        assert!(matches!(cli.command, Commands::Dedup(_)));
+    }
+
+    #[test]
     fn do_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "do", "item-123"]);
         assert!(matches!(cli.command, Commands::Do(_)));
@@ -1025,6 +1050,8 @@ mod tests {
             vec!["bn", "log", "x"],
             vec!["bn", "history"],
             vec!["bn", "blame", "x", "title"],
+            vec!["bn", "dup", "x"],
+            vec!["bn", "dedup"],
             vec!["bn", "do", "x"],
             vec!["bn", "done", "x"],
             vec!["bn", "did", "x"],

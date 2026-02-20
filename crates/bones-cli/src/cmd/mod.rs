@@ -8,6 +8,7 @@ pub mod config;
 pub mod create;
 pub mod cycles;
 pub mod delete;
+pub mod dedup;
 pub mod dep;
 pub mod diagnose;
 pub mod do_cmd;
