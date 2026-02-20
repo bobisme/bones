@@ -8,7 +8,7 @@ mod tui;
 mod validate;
 
 use bones_core::timing;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use output::{OutputMode, resolve_output_mode};
 use std::env;
 use std::fs;
@@ -21,8 +21,9 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 #[command(
     author,
     version,
-    about = "bones: CRDT-native issue tracker",
-    long_about = None
+    about = "bones: issue tracker for agents",
+    long_about = None,
+    after_help = "QUICK REFERENCE:\n    bn triage                # triage report (default)\n    bn triage dup <id>       # duplicate check for one item\n    bn triage plan           # parallel execution layers\n    bn bone log <id>         # item event timeline\n    bn bone assign <id> <a>  # assign item to agent\n    bn bone comment add <id> <text>\n    bn admin verify          # verify event/manifests\n    bn data export --output events.jsonl\n    bn dev sim run --seeds 100\n    bn ui                    # open interactive UI"
 )]
 struct Cli {
     /// Enable verbose logging.
@@ -98,6 +99,7 @@ enum Commands {
     )]
     Show(cmd::show::ShowArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Show chronological event timeline for one item",
@@ -106,6 +108,7 @@ enum Commands {
     )]
     Log(cmd::log::LogArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Show recent global event history",
@@ -114,6 +117,7 @@ enum Commands {
     )]
     History(cmd::log::HistoryArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Attribute a field's last write",
@@ -122,6 +126,7 @@ enum Commands {
     )]
     Blame(cmd::log::BlameArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "List known agents",
@@ -130,6 +135,7 @@ enum Commands {
     )]
     Agents(cmd::agents::AgentsArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "List items assigned to the current agent",
@@ -148,6 +154,7 @@ enum Commands {
     )]
     Search(cmd::search::SearchArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Search",
         about = "Find potential duplicate work items",
@@ -158,6 +165,7 @@ enum Commands {
     )]
     Dup(cmd::dup::DupArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Search",
         about = "Bulk duplicate detection across open items",
@@ -168,6 +176,7 @@ enum Commands {
     )]
     Dedup(cmd::dedup::DedupArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Search",
         about = "Find items most similar to a given item",
@@ -197,6 +206,7 @@ enum Commands {
     )]
     Done(cmd::done::DoneArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Feedback",
         about = "Record that you worked on this item (positive feedback)",
@@ -205,6 +215,7 @@ enum Commands {
     )]
     Did(cmd::feedback::DidArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Feedback",
         about = "Record that you skipped this item (negative feedback)",
@@ -213,6 +224,7 @@ enum Commands {
     )]
     Skip(cmd::feedback::SkipArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Archive done items",
@@ -229,6 +241,7 @@ enum Commands {
     )]
     Update(cmd::update::UpdateArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Close a work item (alias for done)",
@@ -237,6 +250,7 @@ enum Commands {
     )]
     Close(cmd::close::CloseArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Soft-delete a work item",
@@ -245,6 +259,7 @@ enum Commands {
     )]
     Delete(cmd::delete::DeleteArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Reopen a closed or archived item",
@@ -253,6 +268,7 @@ enum Commands {
     )]
     Reopen(cmd::reopen::ReopenArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Reverse the last N events on an item via compensating events",
@@ -267,6 +283,7 @@ enum Commands {
     )]
     Undo(cmd::undo::UndoArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Add labels to an item",
@@ -275,6 +292,7 @@ enum Commands {
     )]
     Tag(cmd::tag::TagArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Remove labels from an item",
@@ -283,6 +301,7 @@ enum Commands {
     )]
     Untag(cmd::tag::UntagArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Add a comment to an item",
@@ -291,6 +310,7 @@ enum Commands {
     )]
     Comment(cmd::comment::CommentArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Show comment timeline for an item",
@@ -299,6 +319,7 @@ enum Commands {
     )]
     Comments(cmd::comment::CommentsArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "List all labels with usage counts",
@@ -307,6 +328,7 @@ enum Commands {
     )]
     Labels(cmd::labels::LabelsArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Canonical single-label operations",
@@ -315,6 +337,7 @@ enum Commands {
     )]
     Label(cmd::labels::LabelArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Assign an item to an agent",
@@ -323,6 +346,7 @@ enum Commands {
     )]
     Assign(cmd::assign::AssignArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Metadata",
         about = "Unassign the current agent from an item",
@@ -331,6 +355,7 @@ enum Commands {
     )]
     Unassign(cmd::assign::UnassignArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
         about = "Move item under a parent",
@@ -339,6 +364,7 @@ enum Commands {
     )]
     Move(cmd::move_cmd::MoveArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Dependencies",
         about = "Manage dependency links",
@@ -347,6 +373,7 @@ enum Commands {
     )]
     Dep(cmd::dep::DepArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Dependencies",
         about = "Visualize the dependency graph",
@@ -365,11 +392,11 @@ enum Commands {
 
     #[command(
         next_help_heading = "Triage",
-        about = "Show a full triage report",
-        long_about = "Compute graph metrics and composite scores, grouped into Top Picks, Blockers, Quick Wins, and Cycles.",
-        after_help = "EXAMPLES:\n    # Human-readable triage report\n    bn triage\n\n    # Emit machine-readable output\n    bn triage --json"
+        about = "Triage workflows and reports",
+        long_about = "Run triage report and triage-adjacent analysis commands.",
+        after_help = "QUICK REFERENCE:\n    bn triage                # default triage report\n    bn triage report         # explicit report\n    bn triage dup <id>       # check one item for duplicates\n    bn triage dedup          # bulk duplicate scan\n    bn triage plan           # parallel execution layers\n    bn triage health         # dependency health metrics\n\nEXAMPLES:\n    # Human-readable triage report\n    bn triage\n\n    # Explicit report subcommand\n    bn triage report\n\n    # Duplicate analysis\n    bn triage dup bn-abc"
     )]
-    Triage(cmd::triage::TriageArgs),
+    Triage(TriageGroupArgs),
 
     #[command(
         next_help_heading = "Read",
@@ -379,6 +406,7 @@ enum Commands {
     )]
     Status(cmd::status::StatusArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Show goal completion progress",
@@ -387,6 +415,7 @@ enum Commands {
     )]
     Progress(cmd::progress::ProgressArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Triage",
         about = "Compute parallel execution layers",
@@ -395,6 +424,7 @@ enum Commands {
     )]
     Plan(cmd::plan::PlanArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Triage",
         about = "Show project health metrics",
@@ -403,6 +433,7 @@ enum Commands {
     )]
     Health(cmd::health::HealthArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Triage",
         about = "List dependency cycles",
@@ -411,6 +442,7 @@ enum Commands {
     )]
     Cycles(cmd::cycles::CyclesArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Generate shell completion scripts",
@@ -419,6 +451,7 @@ enum Commands {
     )]
     Completions(cmd::completions::CompletionsArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Manage optional git hooks"
@@ -428,6 +461,7 @@ enum Commands {
         command: HookCommand,
     },
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Verify event and manifest integrity",
@@ -444,6 +478,7 @@ enum Commands {
         regenerate_missing: bool,
     },
 
+    #[command(hide = true)]
     #[command(
         name = "redact-verify",
         next_help_heading = "Security",
@@ -455,6 +490,7 @@ enum Commands {
     )]
     RedactVerify(cmd::redact_verify::RedactVerifyArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Read",
         about = "Open interactive TUI list view",
@@ -471,6 +507,7 @@ enum Commands {
     )]
     Tui,
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Simulation",
         about = "Run deterministic simulation campaigns",
@@ -482,6 +519,7 @@ enum Commands {
     )]
     Sim(cmd::sim::SimArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Compact event log for completed items",
@@ -492,6 +530,7 @@ enum Commands {
     )]
     Compact(cmd::compact::CompactArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Reporting",
         about = "Show project-level statistics and reporting dashboard",
@@ -502,6 +541,7 @@ enum Commands {
     )]
     Stats(cmd::stats::StatsArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Run repository diagnostics",
@@ -510,6 +550,7 @@ enum Commands {
     )]
     Diagnose,
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Inspect and update configuration",
@@ -521,11 +562,64 @@ enum Commands {
     #[command(
         next_help_heading = "Sync",
         about = "Synchronize local and remote state",
-        long_about = "Synchronize with remote: git pull, rebuild projection, then git push.",
-        after_help = "EXAMPLES:\n    # Sync from and to remote\n    bn sync\n\n    # Emit machine-readable output\n    bn sync --json"
+        long_about = "Run the git-oriented sync workflow for a bones project.\n\nThis command:\n1) ensures git config entries for bones files are present\n2) runs `git pull --rebase`\n3) runs `bn rebuild --incremental`\n4) runs `git push` (unless `--no-push`)\n\nThis is a repository workflow wrapper, not a direct CRDT transport protocol command.",
+        after_help = "QUICK REFERENCE:\n    bn sync                 # config + pull + rebuild + push\n    bn sync --no-push       # stop before push\n    bn sync --config-only   # only update .gitattributes/.gitignore\n\nEXAMPLES:\n    # Full sync workflow\n    bn sync\n\n    # Local-only sync (no push)\n    bn sync --no-push\n\n    # Machine-readable output\n    bn sync --json"
     )]
     Sync(cmd::sync::SyncArgs),
 
+    #[command(
+        next_help_heading = "Lifecycle",
+        about = "Item-scoped operations",
+        long_about = "Grouped item operations including history, metadata, assignment, comments, and lifecycle detail.",
+        after_help = "QUICK REFERENCE:\n    bn bone log <id>                 # item event timeline\n    bn bone assign <id> <agent>      # assign\n    bn bone comment add <id> <text>  # add comment\n    bn bone tag <id> <label...>      # add labels\n    bn bone close <id>               # close item\n    bn bone reopen <id>              # reopen item\n\nEXAMPLES:\n    # Show item event timeline\n    bn bone log bn-abc\n\n    # Assign an item\n    bn bone assign bn-abc alice\n\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating\""
+    )]
+    Bone {
+        #[command(subcommand)]
+        command: BoneCommand,
+    },
+
+    #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Administrative and maintenance operations",
+        long_about = "Grouped maintenance commands for verification, diagnostics, configuration, rebuild, and project housekeeping.",
+        after_help = "QUICK REFERENCE:\n    bn admin verify                    # verify event/manifests\n    bn admin diagnose                  # health diagnostics\n    bn admin rebuild --incremental     # rebuild projection\n    bn admin config show               # inspect effective config\n    bn admin compact                   # compact completed-item history\n\nEXAMPLES:\n    # Verify integrity\n    bn admin verify\n\n    # Rebuild projection\n    bn admin rebuild --incremental\n\n    # Update config\n    bn admin config set user.output json"
+    )]
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
+
+    #[command(
+        next_help_heading = "Interoperability",
+        about = "Data import/export and migrations",
+        long_about = "Grouped data interchange commands including import, export, and legacy migration.",
+        after_help = "QUICK REFERENCE:\n    bn data import ...                # ingest external tracker data\n    bn data export --output <file>    # export canonical JSONL\n    bn data migrate-from-beads ...    # one-time migration\n\nEXAMPLES:\n    # Import from GitHub\n    bn data import --github owner/repo\n\n    # Export canonical JSONL\n    bn data export --output events.jsonl"
+    )]
+    Data {
+        #[command(subcommand)]
+        command: DataCommand,
+    },
+
+    #[command(
+        next_help_heading = "Developer",
+        about = "Developer and simulation tooling",
+        long_about = "Grouped developer-focused tools including simulation and merge utilities.",
+        after_help = "QUICK REFERENCE:\n    bn dev sim run --seeds <n>        # simulation campaign\n    bn dev sim replay --seed <n>      # replay seed\n    bn dev merge-tool ...             # merge helper tool\n    bn dev merge-driver ...           # git merge-driver entrypoint\n\nEXAMPLES:\n    # Run simulation campaign\n    bn dev sim run --seeds 100\n\n    # Run merge driver helper\n    bn dev merge-driver BASE OURS THEIRS"
+    )]
+    Dev {
+        #[command(subcommand)]
+        command: DevCommand,
+    },
+
+    #[command(
+        next_help_heading = "Read",
+        about = "Open interactive UI",
+        long_about = "Open the interactive terminal user interface for browsing and triaging work.",
+        after_help = "EXAMPLES:\n    # Open the interactive UI\n    bn ui"
+    )]
+    Ui,
+
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Interoperability",
         about = "Import external tracker data",
@@ -534,6 +628,7 @@ enum Commands {
     )]
     Import(cmd::import::ImportArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Interoperability",
         about = "Export events in canonical JSONL format",
@@ -542,6 +637,7 @@ enum Commands {
     )]
     Export(cmd::export::ExportArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Sync",
         about = "Migrate from a beads project",
@@ -550,6 +646,7 @@ enum Commands {
     )]
     MigrateFromBeads(cmd::migrate::MigrateArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Rewrite event shards to the current format version",
@@ -558,6 +655,7 @@ enum Commands {
     )]
     MigrateFormat(cmd::migrate_format::MigrateFormatArgs),
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
         about = "Rebuild the projection",
@@ -570,6 +668,7 @@ enum Commands {
         incremental: bool,
     },
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Merge Integration",
         about = "Run merge tool for event files",
@@ -598,6 +697,7 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
+    #[command(hide = true)]
     #[command(
         next_help_heading = "Merge Integration",
         about = "Run git merge driver for .events",
@@ -614,6 +714,155 @@ enum Commands {
         ours: PathBuf,
 
         /// Theirs file — the remote branch version (git %B placeholder).
+        #[arg(value_name = "THEIRS")]
+        theirs: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BoneCommand {
+    #[command(about = "Show chronological event timeline for one item")]
+    Log(cmd::log::LogArgs),
+    #[command(about = "Show recent global event history")]
+    History(cmd::log::HistoryArgs),
+    #[command(about = "Attribute a field's last write")]
+    Blame(cmd::log::BlameArgs),
+    #[command(about = "List known agents")]
+    Agents(cmd::agents::AgentsArgs),
+    #[command(about = "List items assigned to the current agent")]
+    Mine(cmd::mine::MineArgs),
+    #[command(about = "Record that you worked on this item")]
+    Did(cmd::feedback::DidArgs),
+    #[command(about = "Record that you skipped this item")]
+    Skip(cmd::feedback::SkipArgs),
+    #[command(about = "Archive done items")]
+    Archive(cmd::archive::ArchiveArgs),
+    #[command(about = "Close a work item")]
+    Close(cmd::close::CloseArgs),
+    #[command(about = "Soft-delete a work item")]
+    Delete(cmd::delete::DeleteArgs),
+    #[command(about = "Reopen a closed or archived item")]
+    Reopen(cmd::reopen::ReopenArgs),
+    #[command(about = "Reverse recent events with compensating events")]
+    Undo(cmd::undo::UndoArgs),
+    #[command(about = "Add labels to an item")]
+    Tag(cmd::tag::TagArgs),
+    #[command(about = "Remove labels from an item")]
+    Untag(cmd::tag::UntagArgs),
+    #[command(about = "Add a comment to an item")]
+    Comment(cmd::comment::CommentArgs),
+    #[command(about = "Show comment timeline for an item")]
+    Comments(cmd::comment::CommentsArgs),
+    #[command(about = "List all labels with usage counts")]
+    Labels(cmd::labels::LabelsArgs),
+    #[command(about = "Single-label operations")]
+    Label(cmd::labels::LabelArgs),
+    #[command(about = "Assign an item to an agent")]
+    Assign(cmd::assign::AssignArgs),
+    #[command(about = "Unassign the current agent from an item")]
+    Unassign(cmd::assign::UnassignArgs),
+    #[command(about = "Move an item under a parent")]
+    Move(cmd::move_cmd::MoveArgs),
+}
+
+#[derive(Args, Debug)]
+struct TriageGroupArgs {
+    #[command(subcommand)]
+    command: Option<TriageCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum TriageCommand {
+    #[command(about = "Show a full triage report")]
+    Report(cmd::triage::TriageArgs),
+    #[command(about = "Find potential duplicate work items")]
+    Dup(cmd::dup::DupArgs),
+    #[command(about = "Bulk duplicate detection across open items")]
+    Dedup(cmd::dedup::DedupArgs),
+    #[command(about = "Find items similar to a given item")]
+    Similar(cmd::similar::SimilarArgs),
+    #[command(about = "Manage dependency links")]
+    Dep(cmd::dep::DepArgs),
+    #[command(about = "Visualize the dependency graph")]
+    Graph(cmd::graph::GraphArgs),
+    #[command(about = "Show goal completion progress")]
+    Progress(cmd::progress::ProgressArgs),
+    #[command(about = "Compute parallel execution layers")]
+    Plan(cmd::plan::PlanArgs),
+    #[command(about = "Show project health metrics")]
+    Health(cmd::health::HealthArgs),
+    #[command(about = "List dependency cycles")]
+    Cycles(cmd::cycles::CyclesArgs),
+    #[command(about = "Show project-level statistics")]
+    Stats(cmd::stats::StatsArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum AdminCommand {
+    #[command(about = "Generate shell completion scripts")]
+    Completions(cmd::completions::CompletionsArgs),
+    #[command(about = "Manage optional git hooks")]
+    Hooks {
+        #[command(subcommand)]
+        command: HookCommand,
+    },
+    #[command(about = "Verify event and manifest integrity")]
+    Verify {
+        #[arg(long)]
+        staged: bool,
+        #[arg(long)]
+        regenerate_missing: bool,
+    },
+    #[command(name = "redact-verify", about = "Verify redaction completeness")]
+    RedactVerify(cmd::redact_verify::RedactVerifyArgs),
+    #[command(about = "Compact event log for completed items")]
+    Compact(cmd::compact::CompactArgs),
+    #[command(about = "Run repository diagnostics")]
+    Diagnose,
+    #[command(about = "Inspect and update configuration")]
+    Config(cmd::config::ConfigArgs),
+    #[command(about = "Rewrite event shards to current format version")]
+    MigrateFormat(cmd::migrate_format::MigrateFormatArgs),
+    #[command(about = "Rebuild the projection")]
+    Rebuild {
+        #[arg(long)]
+        incremental: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DataCommand {
+    #[command(about = "Import external tracker data")]
+    Import(cmd::import::ImportArgs),
+    #[command(about = "Export events in canonical JSONL format")]
+    Export(cmd::export::ExportArgs),
+    #[command(name = "migrate-from-beads", about = "Migrate from a beads project")]
+    MigrateFromBeads(cmd::migrate::MigrateArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum DevCommand {
+    #[command(about = "Run deterministic simulation campaigns")]
+    Sim(cmd::sim::SimArgs),
+    #[command(about = "Run merge tool for event files")]
+    MergeTool {
+        #[arg(long)]
+        setup: bool,
+        #[arg(value_name = "BASE")]
+        base: Option<PathBuf>,
+        #[arg(value_name = "LEFT")]
+        left: Option<PathBuf>,
+        #[arg(value_name = "RIGHT")]
+        right: Option<PathBuf>,
+        #[arg(value_name = "OUTPUT")]
+        output: Option<PathBuf>,
+    },
+    #[command(about = "Run git merge driver for .events")]
+    MergeDriver {
+        #[arg(value_name = "BASE")]
+        base: PathBuf,
+        #[arg(value_name = "OURS")]
+        ours: PathBuf,
         #[arg(value_name = "THEIRS")]
         theirs: PathBuf,
     },
@@ -858,8 +1107,44 @@ fn main() -> anyhow::Result<()> {
         Commands::Next(ref args) => timing::timed("cmd.next", || {
             cmd::next::run_next(args, output, cli.agent_flag(), &project_root)
         }),
-        Commands::Triage(ref args) => timing::timed("cmd.triage", || {
-            cmd::triage::run_triage(args, output, &project_root)
+        Commands::Triage(ref args) => timing::timed("cmd.triage", || match &args.command {
+            None => {
+                let defaults = cmd::triage::TriageArgs::default();
+                cmd::triage::run_triage(&defaults, output, &project_root)
+            }
+            Some(TriageCommand::Report(report_args)) => {
+                cmd::triage::run_triage(report_args, output, &project_root)
+            }
+            Some(TriageCommand::Dup(dup_args)) => {
+                cmd::dup::run_dup(dup_args, output, &project_root)
+            }
+            Some(TriageCommand::Dedup(dedup_args)) => {
+                cmd::dedup::run_dedup(dedup_args, output, &project_root)
+            }
+            Some(TriageCommand::Similar(similar_args)) => {
+                cmd::similar::run_similar(similar_args, output, &project_root)
+            }
+            Some(TriageCommand::Dep(dep_args)) => {
+                cmd::dep::run_dep(dep_args, cli.agent_flag(), output, &project_root)
+            }
+            Some(TriageCommand::Graph(graph_args)) => {
+                cmd::graph::run_graph(graph_args, output, &project_root)
+            }
+            Some(TriageCommand::Progress(progress_args)) => {
+                cmd::progress::run_progress(progress_args, output, &project_root)
+            }
+            Some(TriageCommand::Plan(plan_args)) => {
+                cmd::plan::run_plan(plan_args, output, &project_root)
+            }
+            Some(TriageCommand::Health(health_args)) => {
+                cmd::health::run_health(health_args, output, &project_root)
+            }
+            Some(TriageCommand::Cycles(cycles_args)) => {
+                cmd::cycles::run_cycles(cycles_args, output, &project_root)
+            }
+            Some(TriageCommand::Stats(stats_args)) => {
+                cmd::stats::run_stats(stats_args, output, &project_root)
+            }
         }),
         Commands::Status(ref args) => timing::timed("cmd.status", || {
             cmd::status::run_status(args, cli.agent_flag(), output, &project_root)
@@ -876,9 +1161,134 @@ fn main() -> anyhow::Result<()> {
         Commands::Cycles(ref args) => timing::timed("cmd.cycles", || {
             cmd::cycles::run_cycles(args, output, &project_root)
         }),
-        Commands::Sync(args) => {
-            timing::timed("cmd.sync", || cmd::sync::run_sync(&args, &project_root))
-        }
+        Commands::Sync(args) => timing::timed("cmd.sync", || {
+            cmd::sync::run_sync(&args, output, &project_root)
+        }),
+
+        Commands::Bone { ref command } => timing::timed("cmd.bone", || match command {
+            BoneCommand::Log(args) => cmd::log::run_log(args, output, &project_root),
+            BoneCommand::History(args) => cmd::log::run_history(args, output, &project_root),
+            BoneCommand::Blame(args) => cmd::log::run_blame(args, output, &project_root),
+            BoneCommand::Agents(args) => cmd::agents::run_agents(args, output, &project_root),
+            BoneCommand::Mine(args) => {
+                cmd::mine::run_mine(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Did(args) => {
+                cmd::feedback::run_did(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Skip(args) => {
+                cmd::feedback::run_skip(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Archive(args) => {
+                cmd::archive::run_archive(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Close(args) => {
+                cmd::close::run_close(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Delete(args) => {
+                cmd::delete::run_delete(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Reopen(args) => {
+                cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Undo(args) => {
+                cmd::undo::run_undo(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Tag(args) => {
+                cmd::tag::run_tag(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Untag(args) => {
+                cmd::tag::run_untag(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Comment(args) => {
+                cmd::comment::run_comment(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Comments(args) => cmd::comment::run_comments(args, output, &project_root),
+            BoneCommand::Labels(args) => cmd::labels::run_labels(args, output, &project_root),
+            BoneCommand::Label(args) => {
+                cmd::labels::run_label(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Assign(args) => {
+                cmd::assign::run_assign(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Unassign(args) => {
+                cmd::assign::run_unassign(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Move(args) => {
+                cmd::move_cmd::run_move(args, cli.agent_flag(), output, &project_root)
+            }
+        }),
+
+        Commands::Admin { ref command } => timing::timed("cmd.admin", || match command {
+            AdminCommand::Completions(args) => {
+                let mut command = Cli::command();
+                cmd::completions::run_completions(args.shell, &mut command)
+            }
+            AdminCommand::Hooks {
+                command: HookCommand::Install,
+            } => git::hooks::install_hooks(&project_root),
+            AdminCommand::Verify {
+                staged,
+                regenerate_missing,
+            } => {
+                if *staged {
+                    git::hooks::verify_staged_events()
+                } else {
+                    cmd::verify::run_verify(&project_root, *regenerate_missing, output)
+                }
+            }
+            AdminCommand::RedactVerify(args) => {
+                cmd::redact_verify::run_redact_verify(args, output, &project_root)
+            }
+            AdminCommand::Compact(args) => cmd::compact::run_compact(args, output, &project_root),
+            AdminCommand::Diagnose => cmd::diagnose::run_diagnose(output, &project_root),
+            AdminCommand::Config(args) => cmd::config::run_config(args, &project_root, cli.json),
+            AdminCommand::MigrateFormat(args) => {
+                cmd::migrate_format::run_migrate_format(args, &project_root)
+            }
+            AdminCommand::Rebuild { incremental } => {
+                cmd::rebuild::run_rebuild(&project_root, *incremental)
+            }
+        }),
+
+        Commands::Data { ref command } => timing::timed("cmd.data", || match command {
+            DataCommand::Import(args) => cmd::import::run_import(args, &project_root),
+            DataCommand::Export(args) => cmd::export::run_export(args, &project_root),
+            DataCommand::MigrateFromBeads(args) => cmd::migrate::run_migrate(args, &project_root),
+        }),
+
+        Commands::Dev { ref command } => timing::timed("cmd.dev", || match command {
+            DevCommand::Sim(args) => cmd::sim::run_sim(args, output, &project_root),
+            DevCommand::MergeTool {
+                setup,
+                base,
+                left,
+                right,
+                output,
+            } => {
+                if *setup {
+                    return setup_merge_tool();
+                }
+
+                let base = base
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing base file argument"))?;
+                let left = left
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing left file argument"))?;
+                let right = right
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing right file argument"))?;
+                let output = output
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing output file argument"))?;
+
+                merge_files(base, left, right, output)
+            }
+            DevCommand::MergeDriver { base, ours, theirs } => {
+                git::merge_driver::merge_driver_main(base, ours, theirs)
+            }
+        }),
         Commands::Import(args) => timing::timed("cmd.import", || {
             cmd::import::run_import(&args, &project_root)
         }),
@@ -952,7 +1362,8 @@ fn main() -> anyhow::Result<()> {
             timing::timed("cmd.sim", || cmd::sim::run_sim(args, output, &project_root))
         }
 
-        Commands::Tui => timing::timed("cmd.tui", || tui::run_tui(&project_root)),
+        Commands::Ui => timing::timed("cmd.ui", || tui::run_tui(&project_root)),
+        Commands::Tui => timing::timed("cmd.ui", || tui::run_tui(&project_root)),
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
             git::merge_driver::merge_driver_main(&base, &ours, &theirs)
         }),
@@ -1205,6 +1616,12 @@ mod tests {
             vec!["bn", "diagnose"],
             vec!["bn", "config", "show"],
             vec!["bn", "undo", "bn-abc"],
+            vec!["bn", "bone", "log", "x"],
+            vec!["bn", "triage", "report"],
+            vec!["bn", "admin", "verify"],
+            vec!["bn", "data", "export"],
+            vec!["bn", "dev", "sim", "run", "--seeds", "1"],
+            vec!["bn", "ui"],
         ];
         for args in &subcommands {
             let result = Cli::try_parse_from(args.iter());
@@ -1448,6 +1865,42 @@ mod tests {
     fn triage_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "triage"]);
         assert!(matches!(cli.command, Commands::Triage(_)));
+    }
+
+    #[test]
+    fn triage_group_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "triage", "dup", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Triage(_)));
+    }
+
+    #[test]
+    fn bone_group_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "bone", "log", "bn-abc"]);
+        assert!(matches!(cli.command, Commands::Bone { .. }));
+    }
+
+    #[test]
+    fn admin_group_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "admin", "verify"]);
+        assert!(matches!(cli.command, Commands::Admin { .. }));
+    }
+
+    #[test]
+    fn data_group_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "data", "export"]);
+        assert!(matches!(cli.command, Commands::Data { .. }));
+    }
+
+    #[test]
+    fn dev_group_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "dev", "sim", "run", "--seeds", "1"]);
+        assert!(matches!(cli.command, Commands::Dev { .. }));
+    }
+
+    #[test]
+    fn ui_command_parses() {
+        let cli = Cli::parse_from(["bn", "ui"]);
+        assert!(matches!(cli.command, Commands::Ui));
     }
 
     #[test]

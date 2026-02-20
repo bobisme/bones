@@ -233,7 +233,7 @@ fn run_archive_single(
     };
 
     render(output, &result, |r, w| {
-        writeln!(w, "✓ {} → archived (was {})", r.id, r.previous_state)?;
+        writeln!(w, "Archived {} ({} -> archived)", r.id, r.previous_state)?;
         Ok(())
     })?;
 
@@ -283,9 +283,12 @@ fn run_archive_auto(
         } else {
             writeln!(
                 w,
-                "✓ Archived {} item(s) older than {} day(s)",
+                "Archived {} item(s) older than {} day(s)",
                 r.archived_count, r.days
             )?;
+            for id in &r.archived_ids {
+                writeln!(w, "  - {id}")?;
+            }
         }
         Ok(())
     })?;

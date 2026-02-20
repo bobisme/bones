@@ -365,19 +365,21 @@ pub fn run_update(
     let payload = UpdateBatchOutput { results };
 
     render(output, &payload, |r, w| {
+        writeln!(w, "Update results")?;
+        writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
                 let count = result.updates.as_ref().map(|u| u.len()).unwrap_or(0);
-                writeln!(w, "✓ {} updated ({} field(s))", result.id, count)?;
+                writeln!(w, "ok    {:<16}  {} field(s) updated", result.id, count)?;
                 if let Some(ref updates) = result.updates {
                     for u in updates {
-                        writeln!(w, "  {} = {}", u.field, u.value)?;
+                        writeln!(w, "      {} = {}", u.field, u.value)?;
                     }
                 }
             } else {
                 writeln!(
                     w,
-                    "✗ {}: {}",
+                    "err   {:<16}  {}",
                     result.id,
                     result.error.as_deref().unwrap_or("unknown error")
                 )?;

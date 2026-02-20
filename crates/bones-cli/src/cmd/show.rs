@@ -171,57 +171,50 @@ pub fn run_show(
 
 /// Render full item details in human-readable format.
 fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(
-        w,
-        "┌─ {} ─────────────────────────────────────────",
-        item.id
-    )?;
-    writeln!(w, "│  {}", item.title)?;
-    writeln!(w, "├─────────────────────────────────────────────────")?;
-    writeln!(w, "│  kind:    {}", item.kind)?;
-    writeln!(w, "│  state:   {}", item.state)?;
-    writeln!(w, "│  urgency: {}", item.urgency)?;
+    writeln!(w, "Item {} — {}", item.id, item.title)?;
+    writeln!(w, "{:-<88}", "")?;
+    writeln!(w, "Kind:    {}", item.kind)?;
+    writeln!(w, "State:   {}", item.state)?;
+    writeln!(w, "Urgency: {}", item.urgency)?;
     if let Some(ref size) = item.size {
-        writeln!(w, "│  size:    {size}")?;
+        writeln!(w, "Size:    {size}")?;
     }
     if let Some(ref parent) = item.parent_id {
-        writeln!(w, "│  parent:  {parent}")?;
+        writeln!(w, "Parent:  {parent}")?;
     }
     if !item.labels.is_empty() {
-        writeln!(w, "│  labels:  {}", item.labels.join(", "))?;
+        writeln!(w, "Labels:  {}", item.labels.join(", "))?;
     }
     if !item.assignees.is_empty() {
-        writeln!(w, "│  assigned: {}", item.assignees.join(", "))?;
+        writeln!(w, "Assigned: {}", item.assignees.join(", "))?;
     }
     if !item.depends_on.is_empty() {
-        writeln!(w, "│  blocks:  {}", item.depends_on.join(", "))?;
+        writeln!(w, "Depends on: {}", item.depends_on.join(", "))?;
     }
     if !item.dependents.is_empty() {
-        writeln!(w, "│  blocked by: {}", item.dependents.join(", "))?;
+        writeln!(w, "Dependents: {}", item.dependents.join(", "))?;
     }
 
     if let Some(ref desc) = item.description {
-        writeln!(w, "├─ description ───────────────────────────────────")?;
+        writeln!(w)?;
+        writeln!(w, "Description")?;
+        writeln!(w, "{:-<88}", "")?;
         for line in desc.lines() {
-            writeln!(w, "│  {line}")?;
+            writeln!(w, "{line}")?;
         }
     }
 
     if !item.comments.is_empty() {
-        writeln!(
-            w,
-            "├─ comments ({}) ──────────────────────────────────",
-            item.comments.len()
-        )?;
+        writeln!(w)?;
+        writeln!(w, "Comments ({})", item.comments.len())?;
+        writeln!(w, "{:-<88}", "")?;
         for (i, comment) in item.comments.iter().enumerate() {
             if i > 0 {
-                writeln!(w, "│")?;
+                writeln!(w)?;
             }
-            writeln!(w, "│  [{}] {}", comment.author, comment.body)?;
+            writeln!(w, "[{}] {}", comment.author, comment.body)?;
         }
     }
-
-    writeln!(w, "└─────────────────────────────────────────────────")?;
     Ok(())
 }
 

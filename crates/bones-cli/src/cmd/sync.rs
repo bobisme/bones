@@ -7,6 +7,8 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::output::OutputMode;
+
 /// Result of a `bn sync` run.
 #[derive(Debug, Default, Serialize)]
 pub struct SyncReport {
@@ -31,10 +33,6 @@ pub struct SyncArgs {
     /// Skip `git push` after rebuilding.
     #[arg(long)]
     pub no_push: bool,
-
-    /// Output in JSON (machine-readable) format.
-    #[arg(long)]
-    pub json: bool,
 }
 
 // ─── public API ─────────────────────────────────────────────────────────────
@@ -163,13 +161,15 @@ pub fn ensure_gitignore(repo_dir: &Path) -> Result<()> {
 }
 
 /// Entry point wired from `main.rs`.
-pub fn run_sync(args: &SyncArgs, project_root: &Path) -> Result<()> {
+pub fn run_sync(args: &SyncArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     // Always ensure git configuration is up-to-date
     ensure_gitattributes(project_root).context("Failed to update .gitattributes")?;
     ensure_gitignore(project_root).context("Failed to update .gitignore")?;
 
+    let json = output.is_json();
+
     if args.config_only {
-        if args.json {
+        if json {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
@@ -186,7 +186,7 @@ pub fn run_sync(args: &SyncArgs, project_root: &Path) -> Result<()> {
 
     let report = sync_workflow(project_root, args.no_push)?;
 
-    if args.json {
+    if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_report(&report);

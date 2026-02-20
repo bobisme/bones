@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::path::Path;
 
 use clap::Args;
@@ -100,9 +100,8 @@ pub fn run_triage(
         &score_map,
     );
 
-    let use_color = std::io::stdout().is_terminal();
     render(output, &rows, |_, w| {
-        render_triage_human(w, &top_picks, &blockers, &quick_wins, &cycles, use_color)
+        render_triage_human(w, &top_picks, &blockers, &quick_wins, &cycles)
     })
 }
 
@@ -154,25 +153,25 @@ fn render_triage_human(
     blockers: &[&RankedItem],
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
-    use_color: bool,
 ) -> std::io::Result<()> {
-    render_ranked_section(w, "Top Picks", "32;1", top_picks, use_color)?;
+    writeln!(w, "Triage report")?;
+    writeln!(w, "{:-<72}", "")?;
+    render_ranked_section(w, "Top Picks", top_picks)?;
     writeln!(w)?;
 
-    render_blocker_section(w, blockers, use_color)?;
+    render_blocker_section(w, blockers)?;
     writeln!(w)?;
 
-    render_ranked_section(w, "Quick Wins", "36;1", quick_wins, use_color)?;
+    render_ranked_section(w, "Quick Wins", quick_wins)?;
     writeln!(w)?;
 
-    let heading = colorize("Cycles", "31;1", use_color);
-    writeln!(w, "{heading}")?;
+    writeln!(w, "Cycles")?;
     writeln!(w, "{:-<72}", "")?;
     if cycles.is_empty() {
         writeln!(w, "(none)")?;
     } else {
-        for cycle in cycles {
-            writeln!(w, "{}", cycle.join(" → "))?;
+        for (idx, cycle) in cycles.iter().enumerate() {
+            writeln!(w, "{:>2}. {}", idx + 1, cycle.join(" -> "))?;
         }
     }
 
@@ -182,12 +181,9 @@ fn render_triage_human(
 fn render_ranked_section(
     w: &mut dyn Write,
     title: &str,
-    color: &str,
     items: &[&RankedItem],
-    use_color: bool,
 ) -> std::io::Result<()> {
-    let heading = colorize(title, color, use_color);
-    writeln!(w, "{heading}")?;
+    writeln!(w, "{title}")?;
     writeln!(w, "{:-<72}", "")?;
 
     if items.is_empty() {
@@ -203,13 +199,8 @@ fn render_ranked_section(
     Ok(())
 }
 
-fn render_blocker_section(
-    w: &mut dyn Write,
-    blockers: &[&RankedItem],
-    use_color: bool,
-) -> std::io::Result<()> {
-    let heading = colorize("Blockers", "33;1", use_color);
-    writeln!(w, "{heading}")?;
+fn render_blocker_section(w: &mut dyn Write, blockers: &[&RankedItem]) -> std::io::Result<()> {
+    writeln!(w, "Blockers")?;
     writeln!(w, "{:-<72}", "")?;
 
     if blockers.is_empty() {
@@ -227,14 +218,6 @@ fn render_blocker_section(
     }
 
     Ok(())
-}
-
-fn colorize(text: &str, color: &str, use_color: bool) -> String {
-    if use_color {
-        format!("\x1b[{color}m{text}\x1b[0m")
-    } else {
-        text.to_string()
-    }
 }
 
 fn is_small_size(size: Option<&str>) -> bool {

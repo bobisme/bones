@@ -235,19 +235,23 @@ pub fn run_do(
     let payload = DoBatchOutput { results };
 
     render(output, &payload, |r, w| {
+        writeln!(w, "Do results")?;
+        writeln!(w, "{:-<88}", "")?;
+        writeln!(w, "{:<4}  {:<16}  TRANSITION", "OK", "ID")?;
+        writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
                 writeln!(
                     w,
-                    "✓ {} → {} (was {})",
+                    "ok    {:<16}  {} -> {}",
                     result.id,
-                    result.new_state.as_deref().unwrap_or("doing"),
-                    result.previous_state.as_deref().unwrap_or("unknown")
+                    result.previous_state.as_deref().unwrap_or("unknown"),
+                    result.new_state.as_deref().unwrap_or("doing")
                 )?;
             } else {
                 writeln!(
                     w,
-                    "✗ {}: {}",
+                    "err   {:<16}  {}",
                     result.id,
                     result.error.as_deref().unwrap_or("unknown error")
                 )?;

@@ -352,21 +352,25 @@ pub fn run_done(
     let payload = DoneBatchOutput { results };
 
     render(output, &payload, |r, w| {
+        writeln!(w, "Done results")?;
+        writeln!(w, "{:-<88}", "")?;
+        writeln!(w, "{:<4}  {:<16}  TRANSITION", "OK", "ID")?;
+        writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
                 writeln!(
                     w,
-                    "✓ {} → done (was {})",
+                    "ok    {:<16}  {} -> done",
                     result.id,
                     result.previous_state.as_deref().unwrap_or("unknown")
                 )?;
                 if let Some(ref parent) = result.auto_completed_parent {
-                    writeln!(w, "  ✓ auto-completed parent goal {parent}")?;
+                    writeln!(w, "      parent auto-completed: {parent}")?;
                 }
             } else {
                 writeln!(
                     w,
-                    "✗ {}: {}",
+                    "err   {:<16}  {}",
                     result.id,
                     result.error.as_deref().unwrap_or("unknown error")
                 )?;

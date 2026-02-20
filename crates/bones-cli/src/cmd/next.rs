@@ -184,29 +184,31 @@ fn render_next_card(
 ) -> std::io::Result<()> {
     let bar = score_bar(item.score, min_score, max_score);
 
-    writeln!(w, "┌─ Next ─────────────────────────────────────────")?;
-    writeln!(w, "│ {}  {}", item.id, item.title)?;
-    writeln!(w, "│ score: [{bar}] {:.4}", item.score)?;
-    writeln!(w, "│")?;
-    writeln!(w, "│ {}", item.explanation)?;
-    writeln!(w, "└────────────────────────────────────────────────")
+    writeln!(w, "Next item")?;
+    writeln!(w, "{:-<72}", "")?;
+    writeln!(w, "ID:    {}", item.id)?;
+    writeln!(w, "Title: {}", item.title)?;
+    writeln!(w, "Score: [{bar}] {:.4}", item.score)?;
+    writeln!(w, "Why:   {}", item.explanation)
 }
 
 fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std::io::Result<()> {
     if payload.assignments.is_empty() {
-        return writeln!(w, "(no assignments)");
+        return writeln!(w, "No assignments available.");
     }
 
-    writeln!(w, "Agent assignments")?;
-    writeln!(w, "{:-<72}", "")?;
+    writeln!(w, "Assignments")?;
+    writeln!(w, "{:-<96}", "")?;
+    writeln!(w, "{:>4}  {:<16}  {:>8}  TITLE", "SLOT", "ID", "SCORE")?;
+    writeln!(w, "{:-<96}", "")?;
 
     for assignment in &payload.assignments {
         writeln!(
             w,
-            "slot {:>2}: {:<22}  score {:>8.4}  {}",
+            "{:>4}  {:<16}  {:>8.4}  {}",
             assignment.agent_slot, assignment.id, assignment.score, assignment.title
         )?;
-        writeln!(w, "         {}", assignment.explanation)?;
+        writeln!(w, "      why: {}", assignment.explanation)?;
     }
 
     Ok(())

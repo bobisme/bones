@@ -138,14 +138,24 @@ pub fn run_search(
 fn render_search_human(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result<()> {
     if out.results.is_empty() {
         writeln!(w, "No results for '{}'", out.query)?;
+        writeln!(
+            w,
+            "Try broader terms or use prefix search (example: 'auth*')"
+        )?;
         return Ok(());
     }
 
     writeln!(w, "{} result(s) for '{}':", out.count, out.query)?;
-    writeln!(w, "{:-<60}", "")?;
+    writeln!(w, "{:-<90}", "")?;
+    writeln!(w, "{:<16}  {:<8}  {:>8}  TITLE", "ID", "STATE", "SCORE")?;
+    writeln!(w, "{:-<90}", "")?;
 
     for result in &out.results {
-        writeln!(w, "  {}  [{}]  {}", result.id, result.state, result.title)?;
+        writeln!(
+            w,
+            "{:<16}  {:<8}  {:>8.3}  {}",
+            result.id, result.state, result.score, result.title
+        )?;
     }
 
     Ok(())

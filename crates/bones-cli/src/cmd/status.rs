@@ -162,6 +162,9 @@ fn count_blocked_items(conn: &rusqlite::Connection) -> u64 {
 }
 
 fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Result<()> {
+    writeln!(w, "Status")?;
+    writeln!(w, "{:-<72}", "")?;
+
     // Agent identity section.
     if let Some(ref agent) = report.agent {
         writeln!(w, "Agent: {agent}")?;
@@ -173,38 +176,34 @@ fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Res
     }
 
     // Assigned items section.
-    if report.assigned.is_empty() {
-        if report.agent.is_some() {
-            writeln!(w, "Assigned to you: 0 items")?;
-        }
-    } else {
-        writeln!(w, "Assigned to you: {} items", report.assigned.len())?;
-        for item in &report.assigned {
-            let state_icon = match item.state.as_str() {
-                "doing" => "doing",
-                "open" => "open ",
-                _ => &item.state,
-            };
-            writeln!(w, "  {state_icon} {}  {}", item.id, item.title)?;
-        }
-    }
-
-    // Blocked items.
-    if report.project.blocked > 0 {
+    if report.agent.is_some() {
         writeln!(w)?;
-        writeln!(
-            w,
-            "Blocked: {} items waiting on dependencies",
-            report.project.blocked
-        )?;
+        writeln!(w, "Assigned: {} active item(s)", report.assigned.len())?;
+        if !report.assigned.is_empty() {
+            writeln!(w, "{:<16}  {:<8}  {:<8}  TITLE", "ID", "STATE", "URGENCY")?;
+            for item in &report.assigned {
+                writeln!(
+                    w,
+                    "{:<16}  {:<8}  {:<8}  {}",
+                    item.id, item.state, item.urgency, item.title
+                )?;
+            }
+        }
     }
 
     // Project summary.
     writeln!(w)?;
+    writeln!(w, "Project")?;
+    writeln!(w, "{:-<72}", "")?;
     writeln!(
         w,
-        "Project: {} open, {} doing, {} done, {} archived",
+        "{} open, {} doing, {} done, {} archived",
         report.project.open, report.project.doing, report.project.done, report.project.archived,
+    )?;
+    writeln!(
+        w,
+        "{} blocked item(s) waiting on dependencies",
+        report.project.blocked
     )?;
 
     Ok(())
@@ -299,11 +298,14 @@ mod tests {
         render_status_human(&report, &mut out).expect("render");
         let rendered = String::from_utf8(out).expect("utf8");
 
+        assert!(rendered.contains("Status"));
         assert!(rendered.contains("Agent: alice"));
-        assert!(rendered.contains("Assigned to you: 2 items"));
-        assert!(rendered.contains("doing bn-a1  Fix auth retry"));
-        assert!(rendered.contains("open  bn-b2  Write docs"));
-        assert!(rendered.contains("Blocked: 3 items"));
+        assert!(rendered.contains("Assigned: 2 active item(s)"));
+        assert!(rendered.contains("bn-a1"));
+        assert!(rendered.contains("Fix auth retry"));
+        assert!(rendered.contains("bn-b2"));
+        assert!(rendered.contains("Write docs"));
+        assert!(rendered.contains("3 blocked item(s)"));
         assert!(rendered.contains("47 open, 12 doing, 89 done, 15 archived"));
     }
 

@@ -324,12 +324,13 @@ pub fn build_fts_query(title: &str, description: Option<&str>) -> String {
 fn render_dup_human(out: &DupOutput, w: &mut dyn Write) -> std::io::Result<()> {
     writeln!(
         w,
-        "Duplicate check for: {} — {}",
+        "Duplicate check for {} — {}",
         out.source_id, out.source_title
     )?;
+    writeln!(w, "{:-<98}", "")?;
     writeln!(
         w,
-        "Thresholds: likely_duplicate ≥ {:.0}%, possibly_related ≥ {:.0}%",
+        "Thresholds: likely_duplicate >= {:.0}%, possibly_related >= {:.0}%",
         out.duplicate_threshold * 100.0,
         out.related_threshold * 100.0,
     )?;
@@ -339,12 +340,18 @@ fn render_dup_human(out: &DupOutput, w: &mut dyn Write) -> std::io::Result<()> {
         return Ok(());
     }
 
-    writeln!(w, "{:-<70}", "")?;
+    writeln!(w, "{:-<98}", "")?;
+    writeln!(
+        w,
+        "{:<18}  {:>5}  {:<8}  {:<16}  TITLE",
+        "MATCH_TYPE", "SCORE", "STATE", "ID"
+    )?;
+    writeln!(w, "{:-<98}", "")?;
 
     for candidate in &out.candidates {
         writeln!(
             w,
-            "  {:14}  {:.0}%  [{}]  {}  ({})",
+            "{:<18}  {:>4.0}%  {:<8}  {:<16}  {}",
             candidate.match_type.label(),
             candidate.score * 100.0,
             candidate.state,

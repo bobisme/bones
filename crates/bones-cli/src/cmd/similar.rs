@@ -213,21 +213,23 @@ fn render_similar_human(out: &SimilarOutput, w: &mut dyn Write) -> std::io::Resu
 
     if out.results.is_empty() {
         writeln!(w, "No similar items found.")?;
+        writeln!(w, "Try widening context (labels/description) and run again")?;
         return Ok(());
     }
 
-    writeln!(w, "{:-<80}", "")?;
+    writeln!(w, "Results: {}", out.results.len())?;
+    writeln!(w, "{:-<96}", "")?;
     writeln!(
         w,
-        "  {:>4}  {:14}  {:5}  {:5}  {:5}  {:5}  {}",
-        "rank", "id", "score", "lex", "sem", "str", "title"
+        "{:>4}  {:<16}  {:>7}  {:>7}  {:>7}  {:>7}  TITLE",
+        "RANK", "ID", "SCORE", "LEX", "SEM", "STR"
     )?;
-    writeln!(w, "{:-<80}", "")?;
+    writeln!(w, "{:-<96}", "")?;
 
     for (i, result) in out.results.iter().enumerate() {
         writeln!(
             w,
-            "  {:>4}  {:14}  {:.3}  {:.3}  {:.3}  {:.3}  {}",
+            "{:>4}  {:<16}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {}",
             i + 1,
             result.id,
             result.score,

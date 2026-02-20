@@ -271,13 +271,17 @@ pub fn run_delete(
     let payload = DeleteBatchOutput { results };
 
     render(output, &payload, |r, w| {
+        writeln!(w, "Delete results")?;
+        writeln!(w, "{:-<88}", "")?;
+        writeln!(w, "{:<4}  {:<16}  RESULT", "OK", "ID")?;
+        writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
-                writeln!(w, "✓ deleted {}", result.id)?;
+                writeln!(w, "ok    {:<16}  deleted", result.id)?;
             } else {
                 writeln!(
                     w,
-                    "✗ {}: {}",
+                    "err   {:<16}  {}",
                     result.id,
                     result.error.as_deref().unwrap_or("unknown error")
                 )?;

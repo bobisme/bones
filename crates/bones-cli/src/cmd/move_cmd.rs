@@ -199,8 +199,8 @@ pub fn run_move(
     render(output, &val, |v, w| {
         let item = v["item_id"].as_str().unwrap_or("");
         match v["parent_id"].as_str() {
-            Some(parent) => writeln!(w, "✓ {item}: moved under parent {parent}"),
-            None => writeln!(w, "✓ {item}: moved to top level (no parent)"),
+            Some(parent) => writeln!(w, "Moved {item} under parent {parent}"),
+            None => writeln!(w, "Moved {item} to top level"),
         }
     })?;
 

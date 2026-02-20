@@ -468,8 +468,12 @@ fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
 /// Render the item list as a human-readable table.
 fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()> {
     if items.is_empty() {
-        return writeln!(w, "(no items)");
+        writeln!(w, "No items found.")?;
+        return writeln!(w, "Use `bn create --title \"...\"` to add a new item");
     }
+
+    writeln!(w, "Items: {}", items.len())?;
+    writeln!(w, "{:-<72}", "")?;
 
     writeln!(
         w,
@@ -691,7 +695,7 @@ mod tests {
         let mut buf = Vec::new();
         render_list_human(&[], &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("(no items)"));
+        assert!(out.contains("No items found"));
     }
 
     #[test]

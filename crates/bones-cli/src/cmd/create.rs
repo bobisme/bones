@@ -440,15 +440,20 @@ pub fn run_create(
     };
 
     render(output, &result, |r, w| {
-        writeln!(w, "✓ Created {} — {}", r.id, r.title)?;
+        writeln!(w, "Created item")?;
+        writeln!(w, "{:-<72}", "")?;
+        writeln!(w, "ID:      {}", r.id)?;
+        writeln!(w, "Title:   {}", r.title)?;
+        writeln!(w, "Kind:    {}", r.kind)?;
+        writeln!(w, "Urgency: {}", r.urgency)?;
         if let Some(ref parent) = r.parent {
-            writeln!(w, "  parent: {parent}")?;
+            writeln!(w, "Parent:  {parent}")?;
         }
         if !r.labels.is_empty() {
-            writeln!(w, "  labels: {}", r.labels.join(", "))?;
+            writeln!(w, "Labels:  {}", r.labels.join(", "))?;
         }
         if let Some(ref size) = r.size {
-            writeln!(w, "  size: {size}")?;
+            writeln!(w, "Size:    {size}")?;
         }
         Ok(())
     })?;
