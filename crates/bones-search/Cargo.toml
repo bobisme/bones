@@ -8,7 +8,7 @@ workspace = true
 
 [features]
 default = []
-semantic-ort = ["dep:ort"]
+semantic-ort = ["dep:ort", "dep:tokenizers"]
 bundled-model = ["semantic-ort"]
 
 [dependencies]
@@ -16,6 +16,7 @@ bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 ort = { version = "2.0.0-rc.10", optional = true }
+tokenizers = { version = "0.19", optional = true }
 petgraph = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }

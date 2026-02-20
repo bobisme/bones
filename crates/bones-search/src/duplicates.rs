@@ -35,8 +35,21 @@ pub fn find_duplicates(
         None
     };
 
-    let fused =
-        hybrid_search_with_graph(query_title, db, model.as_ref(), graph, limit, config.rrf_k)?;
+    find_duplicates_with_model(query_title, db, graph, config, model.as_ref(), limit)
+}
+
+/// Find potential duplicate candidates using an already loaded semantic model.
+///
+/// This avoids repeated model loads across batch workflows.
+pub fn find_duplicates_with_model(
+    query_title: &str,
+    db: &Connection,
+    graph: &DiGraph<String, ()>,
+    config: &SearchConfig,
+    model: Option<&SemanticModel>,
+    limit: usize,
+) -> Result<Vec<DupCandidate>> {
+    let fused = hybrid_search_with_graph(query_title, db, model, graph, limit, config.rrf_k)?;
 
     let mut candidates: Vec<DupCandidate> = fused
         .into_iter()

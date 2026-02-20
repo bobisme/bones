@@ -5,8 +5,10 @@
 //! Falls back to FTS5-only search if semantic model unavailable.
 
 use anyhow::{Context, Result};
+use bones_core::config::load_project_config;
 use bones_core::db::query;
 use bones_search::fusion::{HybridSearchResult, hybrid_search};
+use bones_search::semantic::SemanticModel;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -25,6 +27,7 @@ struct EnrichedResult {
 
 pub struct SearchView {
     db_path: PathBuf,
+    semantic_model: Option<SemanticModel>,
     query: String,
     results: Vec<EnrichedResult>,
     state: ListState,
@@ -34,8 +37,21 @@ pub struct SearchView {
 
 impl SearchView {
     pub fn new(db_path: PathBuf) -> Result<Self> {
+        let semantic_enabled = db_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .and_then(|root| load_project_config(root).ok())
+            .map(|cfg| cfg.search.semantic)
+            .unwrap_or(true);
+        let semantic_model = if semantic_enabled {
+            SemanticModel::load().ok()
+        } else {
+            None
+        };
+
         let view = Self {
             db_path,
+            semantic_model,
             query: String::new(),
             results: Vec::new(),
             state: ListState::default(),
@@ -126,8 +142,14 @@ impl SearchView {
             self.query.clone()
         };
 
-        let raw_results =
-            hybrid_search(&effective_query, &conn, None, 20, 60).context("search failed")?;
+        let raw_results = hybrid_search(
+            &effective_query,
+            &conn,
+            self.semantic_model.as_ref(),
+            20,
+            60,
+        )
+        .context("search failed")?;
 
         let mut enriched = Vec::with_capacity(raw_results.len());
         for res in raw_results {

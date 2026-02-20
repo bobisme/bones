@@ -8,6 +8,7 @@ use crate::output::{
 };
 use crate::validate;
 use bones_core::db::query;
+use chrono::{DateTime, Utc};
 use clap::Args;
 use rusqlite::params;
 use serde::Serialize;
@@ -50,6 +51,29 @@ pub struct ShowComment {
     pub author: String,
     pub body: String,
     pub created_at_us: i64,
+}
+
+fn micros_to_rfc3339(us: i64) -> String {
+    DateTime::<Utc>::from_timestamp_micros(us)
+        .map(|ts| ts.to_rfc3339())
+        .unwrap_or_else(|| us.to_string())
+}
+
+fn timeline_comments(mut comments: Vec<query::QueryComment>) -> Vec<ShowComment> {
+    comments.sort_by(|a, b| {
+        a.created_at_us
+            .cmp(&b.created_at_us)
+            .then_with(|| a.comment_id.cmp(&b.comment_id))
+    });
+
+    comments
+        .into_iter()
+        .map(|c| ShowComment {
+            author: c.author,
+            body: c.body,
+            created_at_us: c.created_at_us,
+        })
+        .collect()
 }
 
 /// Execute `bn show <id>`.
@@ -141,14 +165,7 @@ pub fn run_show(
         .map(|d| d.item_id)
         .collect();
 
-    let comments: Vec<ShowComment> = query::get_comments(&conn, &resolved_id, None, None)?
-        .into_iter()
-        .map(|c| ShowComment {
-            author: c.author,
-            body: c.body,
-            created_at_us: c.created_at_us,
-        })
-        .collect();
+    let comments = timeline_comments(query::get_comments(&conn, &resolved_id, None, None)?);
 
     let show_item = ShowItem {
         id: item.item_id.clone(),
@@ -218,7 +235,13 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
             if i > 0 {
                 writeln!(w)?;
             }
-            writeln!(w, "[{}] {}", comment.author, comment.body)?;
+            writeln!(
+                w,
+                "[{}] {}: {}",
+                micros_to_rfc3339(comment.created_at_us),
+                comment.author,
+                comment.body
+            )?;
         }
     }
     Ok(())
@@ -254,8 +277,11 @@ fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
     for comment in &item.comments {
         writeln!(
             w,
-            "{}  comment  [{}] {}",
-            item.id, comment.author, comment.body
+            "{}  comment  ts={}  [{}] {}",
+            item.id,
+            micros_to_rfc3339(comment.created_at_us),
+            comment.author,
+            comment.body
         )?;
     }
     Ok(())
@@ -440,6 +466,42 @@ mod tests {
         // Optional fields should be absent
         assert!(!out.contains("parent"));
         assert!(!out.contains("labels"));
+    }
+
+    #[test]
+    fn timeline_comments_sorted_oldest_first() {
+        let input = vec![
+            query::QueryComment {
+                comment_id: 2,
+                item_id: "bn-1".into(),
+                event_hash: "blake3:b".into(),
+                author: "bob".into(),
+                body: "second".into(),
+                created_at_us: 2_000,
+            },
+            query::QueryComment {
+                comment_id: 1,
+                item_id: "bn-1".into(),
+                event_hash: "blake3:a".into(),
+                author: "alice".into(),
+                body: "first".into(),
+                created_at_us: 1_000,
+            },
+        ];
+
+        let out = timeline_comments(input);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].author, "alice");
+        assert_eq!(out[1].author, "bob");
+    }
+
+    #[test]
+    fn render_show_text_comments_include_timestamp() {
+        let item = make_show_item();
+        let mut buf = Vec::new();
+        render_show_text(&item, &mut buf).expect("render text");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("comment  ts="));
     }
 
     // -----------------------------------------------------------------------

@@ -4,11 +4,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "semantic-ort")]
-use ort::session::Session;
+use ort::{session::Session, value::Tensor};
+#[cfg(feature = "semantic-ort")]
+use std::sync::Mutex;
+#[cfg(feature = "semantic-ort")]
+use tokenizers::Tokenizer;
 
 const MODEL_FILENAME: &str = "minilm-l6-v2-int8.onnx";
 #[cfg(feature = "semantic-ort")]
-const EMBEDDING_DIM: usize = 384;
+const TOKENIZER_FILENAME: &str = "minilm-l6-v2-tokenizer.json";
+#[cfg(feature = "semantic-ort")]
+const MAX_TOKENS: usize = 256;
 
 #[cfg(feature = "bundled-model")]
 const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
@@ -19,7 +25,22 @@ const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
 /// Wrapper around an ONNX Runtime session for the embedding model.
 pub struct SemanticModel {
     #[cfg(feature = "semantic-ort")]
-    session: Session,
+    session: Mutex<Session>,
+    #[cfg(feature = "semantic-ort")]
+    tokenizer: Tokenizer,
+}
+
+#[cfg(feature = "semantic-ort")]
+struct EncodedText {
+    input_ids: Vec<i64>,
+    attention_mask: Vec<i64>,
+}
+
+#[cfg(feature = "semantic-ort")]
+enum InputSource {
+    InputIds,
+    AttentionMask,
+    TokenTypeIds,
 }
 
 impl SemanticModel {
@@ -44,13 +65,32 @@ impl SemanticModel {
 
         #[cfg(feature = "semantic-ort")]
         {
+            let tokenizer_path = Self::tokenizer_cache_path()?;
+            if !tokenizer_path.is_file() {
+                bail!(
+                    "semantic tokenizer not found at {}. Place `{TOKENIZER_FILENAME}` next to `{MODEL_FILENAME}` in the cache path",
+                    tokenizer_path.display()
+                );
+            }
+
+            let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
+                anyhow!(
+                    "failed to load semantic tokenizer from {}: {e}",
+                    tokenizer_path.display()
+                )
+            })?;
+
             let session = Session::builder()
                 .context("failed to create ONNX Runtime session builder")?
                 .commit_from_file(&path)
                 .with_context(|| {
                     format!("failed to load semantic model from {}", path.display())
                 })?;
-            return Ok(Self { session });
+
+            return Ok(Self {
+                session: Mutex::new(session),
+                tokenizer,
+            });
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -64,10 +104,18 @@ impl SemanticModel {
     ///
     /// Uses `dirs::cache_dir() / bones / models / minilm-l6-v2-int8.onnx`.
     pub fn model_cache_path() -> Result<PathBuf> {
+        Ok(Self::model_cache_root()?.join(MODEL_FILENAME))
+    }
+
+    #[cfg(feature = "semantic-ort")]
+    fn tokenizer_cache_path() -> Result<PathBuf> {
+        Ok(Self::model_cache_root()?.join(TOKENIZER_FILENAME))
+    }
+
+    fn model_cache_root() -> Result<PathBuf> {
         let mut path = dirs::cache_dir().context("unable to determine OS cache directory")?;
         path.push("bones");
         path.push("models");
-        path.push(MODEL_FILENAME);
         Ok(path)
     }
 
@@ -137,8 +185,11 @@ impl SemanticModel {
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
         #[cfg(feature = "semantic-ort")]
         {
-            let _ = &self.session;
-            Ok(hash_text_embedding(text))
+            let encoded = self.encode_text(text)?;
+            let mut out = self.run_model_batch(&[encoded])?;
+            return out
+                .pop()
+                .ok_or_else(|| anyhow!("semantic model returned no embedding"));
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -151,66 +202,231 @@ impl SemanticModel {
 
     /// Batch inference for efficiency.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        texts.iter().map(|text| self.embed(text)).collect()
-    }
-}
-
-#[cfg(feature = "semantic-ort")]
-fn hash_text_embedding(text: &str) -> Vec<f32> {
-    let mut embedding = vec![0.0_f32; EMBEDDING_DIM];
-    let normalized = text.to_ascii_lowercase();
-
-    let mut tokens = Vec::new();
-    for token in normalized.split(|c: char| !c.is_ascii_alphanumeric()) {
-        if token.is_empty() {
-            continue;
+        #[cfg(feature = "semantic-ort")]
+        {
+            let encoded: Vec<EncodedText> = texts
+                .iter()
+                .map(|text| self.encode_text(text))
+                .collect::<Result<Vec<_>>>()?;
+            return self.run_model_batch(&encoded);
         }
 
-        tokens.push(token);
-        apply_hashed_feature(&mut embedding, token.as_bytes(), 1.0);
+        #[cfg(not(feature = "semantic-ort"))]
+        {
+            let _ = self;
+            let _ = texts;
+            bail!("semantic runtime unavailable: compile bones-search with `semantic-ort`");
+        }
     }
 
-    for pair in tokens.windows(2) {
-        let mut feature = String::with_capacity(pair[0].len() + pair[1].len() + 1);
-        feature.push_str(pair[0]);
-        feature.push(' ');
-        feature.push_str(pair[1]);
-        apply_hashed_feature(&mut embedding, feature.as_bytes(), 0.7);
+    #[cfg(feature = "semantic-ort")]
+    fn encode_text(&self, text: &str) -> Result<EncodedText> {
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow!("failed to tokenize semantic query: {e}"))?;
+
+        let ids = encoding.get_ids();
+        if ids.is_empty() {
+            bail!("semantic tokenizer produced zero tokens");
+        }
+
+        let attention = encoding.get_attention_mask();
+        let keep = ids.len().min(MAX_TOKENS);
+
+        let mut input_ids = Vec::with_capacity(keep);
+        let mut attention_mask = Vec::with_capacity(keep);
+        for idx in 0..keep {
+            input_ids.push(i64::from(ids[idx]));
+            attention_mask.push(i64::from(*attention.get(idx).unwrap_or(&1_u32)));
+        }
+        if attention_mask.iter().all(|v| *v == 0) {
+            attention_mask.fill(1);
+        }
+
+        Ok(EncodedText {
+            input_ids,
+            attention_mask,
+        })
     }
 
-    let compact_text: String = normalized
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect();
-    let bytes = compact_text.as_bytes();
-    for trigram in bytes.windows(3) {
-        apply_hashed_feature(&mut embedding, trigram, 0.25);
-    }
+    #[cfg(feature = "semantic-ort")]
+    fn run_model_batch(&self, encoded: &[EncodedText]) -> Result<Vec<Vec<f32>>> {
+        if encoded.is_empty() {
+            return Ok(Vec::new());
+        }
 
-    normalize_l2(&mut embedding);
-    embedding
+        let batch = encoded.len();
+        let seq_len = encoded.iter().map(|e| e.input_ids.len()).max().unwrap_or(0);
+        if seq_len == 0 {
+            bail!("semantic batch has no tokens");
+        }
+
+        let mut flat_ids = vec![0_i64; batch * seq_len];
+        let mut flat_attention = vec![0_i64; batch * seq_len];
+        for (row_idx, row) in encoded.iter().enumerate() {
+            let row_base = row_idx * seq_len;
+            for col_idx in 0..row.input_ids.len() {
+                flat_ids[row_base + col_idx] = row.input_ids[col_idx];
+                flat_attention[row_base + col_idx] = row.attention_mask[col_idx];
+            }
+        }
+        let flat_token_types = vec![0_i64; batch * seq_len];
+
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| anyhow!("semantic model session mutex poisoned"))?;
+
+        let model_inputs = session.inputs();
+        let mut inputs: Vec<(String, Tensor<i64>)> = Vec::with_capacity(model_inputs.len());
+        for (index, input) in model_inputs.iter().enumerate() {
+            let input_name = input.name();
+            let source = input_source(index, input_name);
+            let data = match source {
+                InputSource::InputIds => flat_ids.clone(),
+                InputSource::AttentionMask => flat_attention.clone(),
+                InputSource::TokenTypeIds => flat_token_types.clone(),
+            };
+            let tensor = Tensor::<i64>::from_array(([batch, seq_len], data.into_boxed_slice()))
+                .with_context(|| format!("failed to build ONNX input tensor '{input_name}'"))?;
+            inputs.push((input_name.to_string(), tensor));
+        }
+
+        let outputs = session
+            .run(inputs)
+            .context("failed to run ONNX semantic inference")?;
+
+        if outputs.len() == 0 {
+            bail!("semantic model returned no outputs");
+        }
+
+        let output = outputs
+            .get("sentence_embedding")
+            .or_else(|| outputs.get("last_hidden_state"))
+            .or_else(|| outputs.get("token_embeddings"))
+            .unwrap_or(&outputs[0]);
+
+        let (shape, data) = output.try_extract_tensor::<f32>().with_context(
+            || "semantic model output tensor is not f32; expected sentence embedding tensor",
+        )?;
+
+        decode_embeddings(shape, data, &flat_attention, batch, seq_len)
+    }
 }
 
 #[cfg(feature = "semantic-ort")]
-fn apply_hashed_feature(embedding: &mut [f32], feature: &[u8], weight: f32) {
-    if feature.is_empty() {
-        return;
+fn input_source(index: usize, input_name: &str) -> InputSource {
+    let name = input_name.to_ascii_lowercase();
+    if name.contains("attention") {
+        return InputSource::AttentionMask;
+    }
+    if name.contains("token_type") || name.contains("segment") {
+        return InputSource::TokenTypeIds;
+    }
+    if name.contains("input_ids") || (name.contains("input") && name.contains("id")) {
+        return InputSource::InputIds;
     }
 
-    let mut hasher = Sha256::new();
-    hasher.update(feature);
-    let digest = hasher.finalize();
+    match index {
+        0 => InputSource::InputIds,
+        1 => InputSource::AttentionMask,
+        _ => InputSource::TokenTypeIds,
+    }
+}
 
-    let mut idx_bytes = [0_u8; 8];
-    idx_bytes.copy_from_slice(&digest[0..8]);
-    let idx = (u64::from_le_bytes(idx_bytes) as usize) % EMBEDDING_DIM;
+#[cfg(feature = "semantic-ort")]
+fn decode_embeddings(
+    shape: &[i64],
+    data: &[f32],
+    flat_attention: &[i64],
+    batch: usize,
+    seq_len: usize,
+) -> Result<Vec<Vec<f32>>> {
+    match shape.len() {
+        // [batch, hidden]
+        2 => {
+            let out_batch = usize::try_from(shape[0]).unwrap_or(0);
+            let hidden = usize::try_from(shape[1]).unwrap_or(0);
+            if out_batch == 0 || hidden == 0 {
+                bail!("invalid sentence embedding output shape {shape:?}");
+            }
+            if out_batch != batch {
+                bail!("semantic output batch mismatch: expected {batch}, got {out_batch}");
+            }
 
-    let sign = if digest[8] & 1 == 0 {
-        1.0_f32
-    } else {
-        -1.0_f32
-    };
-    embedding[idx] += sign * weight;
+            let mut out = Vec::with_capacity(out_batch);
+            for row in 0..out_batch {
+                let start = row * hidden;
+                let end = start + hidden;
+                let mut emb = data[start..end].to_vec();
+                normalize_l2(&mut emb);
+                out.push(emb);
+            }
+            Ok(out)
+        }
+
+        // [batch, tokens, hidden] -> mean pool with attention mask.
+        3 => {
+            let out_batch = usize::try_from(shape[0]).unwrap_or(0);
+            let out_tokens = usize::try_from(shape[1]).unwrap_or(0);
+            let hidden = usize::try_from(shape[2]).unwrap_or(0);
+            if out_batch == 0 || out_tokens == 0 || hidden == 0 {
+                bail!("invalid token embedding output shape {shape:?}");
+            }
+            if out_batch != batch {
+                bail!("semantic output batch mismatch: expected {batch}, got {out_batch}");
+            }
+
+            let mut out = Vec::with_capacity(out_batch);
+            for b in 0..out_batch {
+                let mut emb = vec![0.0_f32; hidden];
+                let mut weight_sum = 0.0_f32;
+
+                for t in 0..out_tokens {
+                    let mask_weight = if t < seq_len {
+                        flat_attention[b * seq_len + t] as f32
+                    } else {
+                        0.0
+                    };
+                    if mask_weight <= 0.0 {
+                        continue;
+                    }
+
+                    let token_base = (b * out_tokens + t) * hidden;
+                    for h in 0..hidden {
+                        emb[h] += data[token_base + h] * mask_weight;
+                    }
+                    weight_sum += mask_weight;
+                }
+
+                if weight_sum > 0.0 {
+                    for value in &mut emb {
+                        *value /= weight_sum;
+                    }
+                }
+                normalize_l2(&mut emb);
+                out.push(emb);
+            }
+            Ok(out)
+        }
+
+        // [hidden] (single-row fallback)
+        1 => {
+            if batch != 1 {
+                bail!("rank-1 semantic output only supported for single-row batch");
+            }
+            let hidden = usize::try_from(shape[0]).unwrap_or(0);
+            if hidden == 0 {
+                bail!("invalid rank-1 semantic output shape {shape:?}");
+            }
+            let mut emb = data[0..hidden].to_vec();
+            normalize_l2(&mut emb);
+            Ok(vec![emb])
+        }
+
+        rank => bail!("unsupported semantic output rank {rank}: shape {shape:?}"),
+    }
 }
 
 #[cfg(feature = "semantic-ort")]
@@ -314,16 +530,27 @@ mod tests {
 
     #[cfg(feature = "semantic-ort")]
     #[test]
-    fn hash_embedding_is_stable_and_normalized() {
-        let first = hash_text_embedding("Fix auth timeout under load");
-        let second = hash_text_embedding("Fix auth timeout under load");
-        let different = hash_text_embedding("Documentation typo cleanup");
+    fn normalize_l2_produces_unit_norm() {
+        let mut emb = vec![3.0_f32, 4.0_f32, 0.0_f32];
+        normalize_l2(&mut emb);
+        let norm = emb.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-6);
+    }
 
-        assert_eq!(first.len(), EMBEDDING_DIM);
-        assert_eq!(first, second);
-        assert_ne!(first, different);
-
-        let norm = first.iter().map(|v| v * v).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 1e-4, "expected unit norm, got {norm}");
+    #[cfg(feature = "semantic-ort")]
+    #[test]
+    fn input_source_prefers_named_fields() {
+        assert!(matches!(
+            input_source(5, "attention_mask"),
+            InputSource::AttentionMask
+        ));
+        assert!(matches!(
+            input_source(5, "token_type_ids"),
+            InputSource::TokenTypeIds
+        ));
+        assert!(matches!(
+            input_source(5, "input_ids"),
+            InputSource::InputIds
+        ));
     }
 }

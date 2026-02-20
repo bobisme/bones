@@ -151,8 +151,7 @@ enum Commands {
     #[command(
         next_help_heading = "Search",
         about = "Search items using full-text search",
-        long_about = "Search work items using SQLite FTS5 lexical full-text search with BM25 ranking.\n\n\
-                      Column weights: title 3×, description 2×, labels 1×.\n\n\
+        long_about = "Search work items using hybrid ranking (lexical BM25 + optional semantic + structural fusion).\n\n\
                       Supports FTS5 syntax: stemming ('run' matches 'running'), prefix ('auth*'), boolean (AND/OR/NOT).",
         after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n    # Prefix search\n    bn search 'auth*'\n\n    # Limit results\n    bn search timeout -n 5\n\n    # Machine-readable output\n    bn search authentication --format json"
     )]

@@ -1,13 +1,15 @@
-//! `bn search` — lexical full-text search over items using SQLite FTS5/BM25.
+//! `bn search` — hybrid search over items.
 //!
-//! Searches the FTS5 index with BM25 ranking (title 3×, description 2×,
-//! labels 1×). Results are sorted by relevance (best match first).
+//! Uses reciprocal-rank fusion across lexical (FTS5/BM25), optional semantic
+//! embeddings, and structural graph proximity signals.
 //!
 //! Supports FTS5 query syntax: stemming, prefix search (`auth*`), boolean ops.
 
 use crate::output::{CliError, OutputMode, render_error, render_mode};
-use bones_core::db::fts;
+use bones_core::config::load_project_config;
 use bones_core::db::query;
+use bones_search::fusion::hybrid_search;
+use bones_search::semantic::SemanticModel;
 use clap::Args;
 use serde::Serialize;
 use std::io::Write;
@@ -15,9 +17,8 @@ use std::io::Write;
 #[derive(Args, Debug)]
 #[command(
     about = "Search items using full-text search",
-    long_about = "Search work items using SQLite FTS5 lexical full-text search with BM25 ranking.\n\n\
-                  Column weights: title 3×, description 2×, labels 1×.\n\n\
-                  FTS5 syntax is supported: stemming ('run' matches 'running'), \
+    long_about = "Search work items using hybrid ranking (lexical BM25 + optional semantic + structural fusion).\n\n\
+                  FTS5 syntax is supported for lexical query parsing: stemming ('run' matches 'running'), \
                   prefix search ('auth*'), boolean operators (AND, OR, NOT).",
     after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n\
                   # Prefix search\n    bn search 'auth*'\n\n\
@@ -100,27 +101,34 @@ pub fn run_search(
         }
     };
 
-    let limit = u32::try_from(args.limit.min(1000)).unwrap_or(1000);
-    let hits = fts::search_bm25(&conn, &args.query, limit).map_err(|e| {
-        anyhow::anyhow!("FTS5 search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean).")
-    })?;
+    let cfg = load_project_config(project_root).unwrap_or_default();
+    let semantic_model = if cfg.search.semantic {
+        SemanticModel::load().ok()
+    } else {
+        None
+    };
+    let limit = args.limit.min(1000);
+
+    let hits = hybrid_search(&args.query, &conn, semantic_model.as_ref(), limit, 60).map_err(
+        |e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."),
+    )?;
 
     // Enrich hits with item state
     let mut results: Vec<SearchResult> = Vec::with_capacity(hits.len());
     for hit in hits {
         // Fetch state from items table
-        let state = conn
+        let (title, state) = conn
             .query_row(
-                "SELECT state FROM items WHERE item_id = ?1",
-                rusqlite::params![hit.item_id],
-                |row| row.get::<_, String>(0),
+                "SELECT title, state FROM items WHERE item_id = ?1",
+                rusqlite::params![&hit.item_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
-            .unwrap_or_else(|_| "unknown".to_string());
+            .unwrap_or_else(|_| ("<unknown>".to_string(), "unknown".to_string()));
 
         results.push(SearchResult {
             id: hit.item_id,
-            title: hit.title,
-            score: hit.rank,
+            title,
+            score: f64::from(hit.score),
             state,
         });
     }

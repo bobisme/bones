@@ -610,7 +610,7 @@ fn init_json_output_is_not_json_by_default() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("Initialized"));
+        .stdout(predicates::str::contains("init status=ok"));
 }
 
 // ===========================================================================

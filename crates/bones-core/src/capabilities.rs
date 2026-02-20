@@ -198,8 +198,9 @@ fn probe_semantic_model() -> bool {
         .map(|mut p| {
             p.push("bones");
             p.push("models");
-            p.push("minilm-l6-v2-int8.onnx");
-            p.is_file()
+            let model = p.join("minilm-l6-v2-int8.onnx");
+            let tokenizer = p.join("minilm-l6-v2-tokenizer.json");
+            model.is_file() && tokenizer.is_file()
         })
         .unwrap_or(false);
     debug!(available, "semantic model probe");

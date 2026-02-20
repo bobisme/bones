@@ -11,7 +11,7 @@ pub mod fusion;
 pub mod semantic;
 pub mod structural;
 
-pub use duplicates::find_duplicates;
+pub use duplicates::{find_duplicates, find_duplicates_with_model};
 
 use tracing::{info, instrument};
 

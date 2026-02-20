@@ -24,8 +24,9 @@ use bones_core::model::item::Size;
 use bones_core::model::item::Urgency;
 use bones_core::model::item_id::generate_item_id;
 use bones_core::shard::ShardManager;
-use bones_search::find_duplicates;
+use bones_search::find_duplicates_with_model;
 use bones_search::fusion::scoring::SearchConfig;
+use bones_search::semantic::SemanticModel;
 use bones_triage::graph::RawGraph;
 
 #[derive(Args, Debug)]
@@ -309,6 +310,11 @@ pub fn run_create(
                 possibly_related_threshold: 0.70,
                 maybe_related_threshold: 0.50,
             };
+            let semantic_model = if project_config.search.semantic {
+                SemanticModel::load().ok()
+            } else {
+                None
+            };
 
             let dependency_graph = RawGraph::from_sqlite(&conn)
                 .map(|raw| raw.graph)
@@ -320,12 +326,12 @@ pub fn run_create(
                 });
 
             // Run duplicate detection
-            match find_duplicates(
+            match find_duplicates_with_model(
                 &args.title,
                 &conn,
                 &dependency_graph,
                 &search_config,
-                false,
+                semantic_model.as_ref(),
                 10,
             ) {
                 Ok(candidates) => {

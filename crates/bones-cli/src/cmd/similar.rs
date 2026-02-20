@@ -6,9 +6,11 @@
 
 use crate::cmd::show::resolve_item_id;
 use crate::output::{CliError, OutputMode, render, render_error};
+use bones_core::config::load_project_config;
 use bones_core::db::query;
-use bones_search::find_duplicates;
+use bones_search::find_duplicates_with_model;
 use bones_search::fusion::SearchConfig;
+use bones_search::semantic::SemanticModel;
 use bones_triage::graph::RawGraph;
 use clap::Args;
 use serde::Serialize;
@@ -148,23 +150,34 @@ pub fn run_similar(
         _ => source.title.clone(),
     };
 
-    let search_config = SearchConfig::default();
+    let cfg = load_project_config(project_root).unwrap_or_default();
+    let search_config = SearchConfig {
+        rrf_k: 60,
+        likely_duplicate_threshold: cfg.search.duplicate_threshold as f32,
+        possibly_related_threshold: cfg.search.related_threshold as f32,
+        maybe_related_threshold: 0.50,
+    };
     let graph = RawGraph::from_sqlite(&conn)
         .map(|raw| raw.graph)
         .unwrap_or_else(|err| {
             tracing::warn!("unable to load dependency graph for similar: {err}");
             petgraph::graph::DiGraph::new()
         });
+    let semantic_model = if cfg.search.semantic {
+        SemanticModel::load().ok()
+    } else {
+        None
+    };
 
     // Fetch limit+1 to guarantee enough results after self-exclusion
     let fetch_limit = args.limit.saturating_add(1);
 
-    let candidates = find_duplicates(
+    let candidates = find_duplicates_with_model(
         &query_text,
         &conn,
         &graph,
         &search_config,
-        false,
+        semantic_model.as_ref(),
         fetch_limit,
     )?;
 

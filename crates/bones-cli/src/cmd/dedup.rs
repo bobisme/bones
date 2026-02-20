@@ -6,8 +6,9 @@
 use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::config::load_project_config;
 use bones_core::db::{fts, query};
-use bones_search::find_duplicates;
+use bones_search::find_duplicates_with_model;
 use bones_search::fusion::scoring::SearchConfig;
+use bones_search::semantic::SemanticModel;
 use bones_triage::graph::RawGraph;
 use clap::Args;
 use serde::Serialize;
@@ -106,6 +107,11 @@ pub fn run_dedup(
         possibly_related_threshold: 0.70,
         maybe_related_threshold: 0.50,
     };
+    let semantic_model = if cfg.search.semantic {
+        SemanticModel::load().ok()
+    } else {
+        None
+    };
 
     let dependency_graph = RawGraph::from_sqlite(&conn)
         .map(|raw| raw.graph)
@@ -153,12 +159,12 @@ pub fn run_dedup(
         }
 
         let limit = candidate_ids.len().max(10);
-        let Ok(candidates) = find_duplicates(
+        let Ok(candidates) = find_duplicates_with_model(
             &query_text,
             &conn,
             &dependency_graph,
             &search_cfg,
-            false,
+            semantic_model.as_ref(),
             limit,
         ) else {
             continue;

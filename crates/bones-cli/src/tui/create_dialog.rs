@@ -9,8 +9,10 @@
 //! - Press **Esc** to cancel
 
 use anyhow::{Context, Result};
+use bones_core::config::load_project_config;
 use bones_core::db::query;
 use bones_search::fusion::hybrid_search;
+use bones_search::semantic::SemanticModel;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -43,6 +45,7 @@ pub enum DialogAction {
 /// Overlay dialog for creating a new item with live duplicate detection.
 pub struct CreateDialog {
     db_path: PathBuf,
+    semantic_model: Option<SemanticModel>,
     /// Title the user is typing.
     title: String,
     /// Debounced search results.
@@ -58,8 +61,21 @@ pub struct CreateDialog {
 impl CreateDialog {
     /// Create a new dialog backed by the given projection database.
     pub fn new(db_path: PathBuf) -> Self {
+        let semantic_enabled = db_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .and_then(|root| load_project_config(root).ok())
+            .map(|cfg| cfg.search.semantic)
+            .unwrap_or(true);
+        let semantic_model = if semantic_enabled {
+            SemanticModel::load().ok()
+        } else {
+            None
+        };
+
         Self {
             db_path,
+            semantic_model,
             title: String::new(),
             similar: Vec::new(),
             similar_state: ListState::default(),
@@ -170,7 +186,8 @@ impl CreateDialog {
             self.title.clone()
         };
 
-        let raw = hybrid_search(&q, &conn, None, 5, 60).context("hybrid search")?;
+        let raw = hybrid_search(&q, &conn, self.semantic_model.as_ref(), 5, 60)
+            .context("hybrid search")?;
 
         self.similar = raw
             .into_iter()
