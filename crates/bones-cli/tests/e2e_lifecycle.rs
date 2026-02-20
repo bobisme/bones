@@ -17,7 +17,7 @@ use tempfile::TempDir;
 
 /// Build a Command targeting the bones-cli binary, rooted in `dir`.
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bones-cli").expect("bones-cli binary must exist");
+    let mut cmd = Command::cargo_bin("bn").expect("bn binary must exist");
     cmd.current_dir(dir);
     // Provide a default agent so mutating commands don't fail
     cmd.env("AGENT", "test-agent");
@@ -113,7 +113,13 @@ fn list_items_json(dir: &Path) -> Vec<Value> {
         "list failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).expect("list --json should produce valid JSON array")
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("list --json should produce valid JSON");
+    // list --json returns { items: [...], total, limit, offset, has_more }
+    response["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Run `bn list --json` with extra args and return parsed JSON array.
@@ -129,7 +135,12 @@ fn list_items_filtered(dir: &Path, args: &[&str]) -> Vec<Value> {
         "list filtered failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).expect("valid JSON array")
+    let response: Value =
+        serde_json::from_slice(&output.stdout).expect("valid JSON");
+    response["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
 }
 
 // ===========================================================================
@@ -211,11 +222,11 @@ fn do_transition_json_output() {
     assert!(output.status.success());
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    assert_eq!(json["id"], id);
-    assert_eq!(json["previous_state"], "open");
-    assert_eq!(json["new_state"], "doing");
-    assert!(json["agent"].as_str().is_some());
-    assert!(json["event_hash"].as_str().is_some());
+    let r = &json["results"].as_array().expect("results")[0];
+    assert_eq!(r["id"], id);
+    assert_eq!(r["previous_state"], "open");
+    assert_eq!(r["new_state"], "doing");
+    assert!(r["event_hash"].as_str().is_some());
 }
 
 #[test]
@@ -233,9 +244,10 @@ fn done_transition_json_output() {
     assert!(output.status.success());
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    assert_eq!(json["id"], id);
-    assert_eq!(json["previous_state"], "doing");
-    assert_eq!(json["new_state"], "done");
+    let r = &json["results"].as_array().expect("results")[0];
+    assert_eq!(r["id"], id);
+    assert_eq!(r["previous_state"], "doing");
+    assert_eq!(r["new_state"], "done");
 }
 
 #[test]
@@ -253,9 +265,8 @@ fn done_with_reason_flag() {
     assert!(output.status.success());
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    assert_eq!(json["new_state"], "done");
-    // reason may or may not be in output depending on implementation
-    // but the command should succeed
+    let r = &json["results"].as_array().expect("results")[0];
+    assert_eq!(r["new_state"], "done");
 }
 
 #[test]

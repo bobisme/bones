@@ -23,6 +23,10 @@ pub struct TagArgs {
     /// Labels to add.
     #[arg(required = true)]
     pub labels: Vec<String>,
+
+    /// Additional item IDs to tag with the same labels.
+    #[arg(long = "ids", value_name = "ID", num_args = 1..)]
+    pub additional_ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -33,6 +37,10 @@ pub struct UntagArgs {
     /// Labels to remove.
     #[arg(required = true)]
     pub labels: Vec<String>,
+
+    /// Additional item IDs to untag with the same labels.
+    #[arg(long = "ids", value_name = "ID", num_args = 1..)]
+    pub additional_ids: Vec<String>,
 }
 
 /// Normalize a label into canonical storage form.
@@ -203,6 +211,46 @@ fn emit_labels_event(
     Ok(())
 }
 
+fn run_tag_single(
+    project_root: &std::path::Path,
+    agent: &str,
+    raw_id: &str,
+    normalized_labels: &[String],
+) -> anyhow::Result<serde_json::Value> {
+    let item_id = ItemId::parse(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", raw_id, e))?;
+
+    let conn = open_db(project_root)?;
+
+    let current_labels = read_current_labels(&conn, item_id.as_str())?;
+
+    let mut new_labels = current_labels.clone();
+    for label in normalized_labels {
+        if !new_labels.contains(label) {
+            new_labels.push(label.clone());
+        }
+    }
+
+    let added: Vec<String> = normalized_labels
+        .iter()
+        .filter(|l| !current_labels.contains(*l))
+        .cloned()
+        .collect();
+
+    emit_labels_event(project_root, agent, &item_id, &new_labels)?;
+
+    Ok(json!({
+        "ok": true,
+        "item_id": item_id.as_str(),
+        "labels": new_labels,
+        "added": added,
+    }))
+}
+
+fn tag_item_ids(args: &TagArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.additional_ids.iter().map(String::as_str))
+}
+
 pub fn run_tag(
     args: &TagArgs,
     agent_flag: Option<&str>,
@@ -224,10 +272,6 @@ pub fn run_tag(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    if let Err(e) = validate::validate_item_id(&args.id) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
 
     let normalized_labels = match normalize_labels(&args.labels) {
         Ok(labels) => labels,
@@ -237,81 +281,109 @@ pub fn run_tag(
         }
     };
 
-    // Parse and validate item ID
-    let item_id = ItemId::parse(&args.id)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.id, e))?;
+    let mut all_results = Vec::new();
+    let mut failures = Vec::new();
 
-    // Open projection DB and read current labels
-    let conn = match open_db(project_root) {
-        Ok(c) => c,
-        Err(e) => {
-            render_error(output, &CliError::new(e.to_string()))?;
-            return Err(e);
-        }
-    };
-
-    let current_labels = match read_current_labels(&conn, item_id.as_str()) {
-        Ok(l) => l,
-        Err(e) => {
-            render_error(output, &CliError::new(e.to_string()))?;
-            return Err(e);
-        }
-    };
-
-    // Compute new labels: current + requested labels (deduplicated, preserving order)
-    let mut new_labels = current_labels.clone();
-    for label in &normalized_labels {
-        if !new_labels.contains(label) {
-            new_labels.push(label.clone());
+    for raw_id in tag_item_ids(args) {
+        match run_tag_single(project_root, &agent, raw_id, &normalized_labels) {
+            Ok(val) => all_results.push(val),
+            Err(err) => {
+                failures.push(err.to_string());
+                all_results.push(json!({
+                    "ok": false,
+                    "item_id": raw_id,
+                    "error": err.to_string(),
+                }));
+            }
         }
     }
 
-    // Identify which labels were actually added (not already present)
-    let added: Vec<String> = normalized_labels
+    let payload = json!({ "results": all_results });
+    render(output, &payload, |v, w| {
+        for result in v["results"].as_array().unwrap_or(&vec![]) {
+            let item = result["item_id"].as_str().unwrap_or("");
+            if result["ok"].as_bool().unwrap_or(false) {
+                let added_list: Vec<&str> = result["added"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                let all_labels: Vec<&str> = result["labels"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if added_list.is_empty() {
+                    writeln!(
+                        w,
+                        "✓ {item}: labels unchanged (all already present): {}",
+                        all_labels.join(", ")
+                    )?;
+                } else {
+                    writeln!(
+                        w,
+                        "✓ {item}: added {} → labels: {}",
+                        added_list.join(", "),
+                        all_labels.join(", ")
+                    )?;
+                }
+            } else {
+                writeln!(
+                    w,
+                    "✗ {item}: {}",
+                    result["error"].as_str().unwrap_or("unknown error")
+                )?;
+            }
+        }
+        Ok(())
+    })?;
+
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
+}
+
+fn run_untag_single(
+    project_root: &std::path::Path,
+    agent: &str,
+    raw_id: &str,
+    normalized_labels: &[String],
+) -> anyhow::Result<serde_json::Value> {
+    let item_id = ItemId::parse(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", raw_id, e))?;
+
+    let conn = open_db(project_root)?;
+
+    let current_labels = read_current_labels(&conn, item_id.as_str())?;
+
+    let labels_to_remove: std::collections::HashSet<&str> =
+        normalized_labels.iter().map(String::as_str).collect();
+    let new_labels: Vec<String> = current_labels
         .iter()
-        .filter(|l| !current_labels.contains(*l))
+        .filter(|l| !labels_to_remove.contains(l.as_str()))
         .cloned()
         .collect();
 
-    // Emit event
-    if let Err(e) = emit_labels_event(project_root, &agent, &item_id, &new_labels) {
-        render_error(output, &CliError::new(e.to_string()))?;
-        return Err(e);
-    }
+    let removed: Vec<String> = normalized_labels
+        .iter()
+        .filter(|l| current_labels.contains(*l))
+        .cloned()
+        .collect();
 
-    // Output result
-    let val = json!({
+    emit_labels_event(project_root, agent, &item_id, &new_labels)?;
+
+    Ok(json!({
         "ok": true,
         "item_id": item_id.as_str(),
         "labels": new_labels,
-        "added": added,
-    });
-    render(output, &val, |v, w| {
-        let item = v["item_id"].as_str().unwrap_or("");
-        let added_list: Vec<&str> = v["added"]
-            .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-            .unwrap_or_default();
-        let all_labels: Vec<&str> = v["labels"]
-            .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-            .unwrap_or_default();
-        if added_list.is_empty() {
-            writeln!(
-                w,
-                "✓ {item}: labels unchanged (all already present): {}",
-                all_labels.join(", ")
-            )
-        } else {
-            writeln!(
-                w,
-                "✓ {item}: added {} → labels: {}",
-                added_list.join(", "),
-                all_labels.join(", ")
-            )
-        }
-    })?;
-    Ok(())
+        "removed": removed,
+    }))
+}
+
+fn untag_item_ids(args: &UntagArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.additional_ids.iter().map(String::as_str))
 }
 
 pub fn run_untag(
@@ -335,10 +407,6 @@ pub fn run_untag(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    if let Err(e) = validate::validate_item_id(&args.id) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
 
     let normalized_labels = match normalize_labels(&args.labels) {
         Ok(labels) => labels,
@@ -348,90 +416,68 @@ pub fn run_untag(
         }
     };
 
-    // Parse and validate item ID
-    let item_id = ItemId::parse(&args.id)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.id, e))?;
+    let mut all_results = Vec::new();
+    let mut failures = Vec::new();
 
-    // Open projection DB and read current labels
-    let conn = match open_db(project_root) {
-        Ok(c) => c,
-        Err(e) => {
-            render_error(output, &CliError::new(e.to_string()))?;
-            return Err(e);
+    for raw_id in untag_item_ids(args) {
+        match run_untag_single(project_root, &agent, raw_id, &normalized_labels) {
+            Ok(val) => all_results.push(val),
+            Err(err) => {
+                failures.push(err.to_string());
+                all_results.push(json!({
+                    "ok": false,
+                    "item_id": raw_id,
+                    "error": err.to_string(),
+                }));
+            }
         }
-    };
-
-    let current_labels = match read_current_labels(&conn, item_id.as_str()) {
-        Ok(l) => l,
-        Err(e) => {
-            render_error(output, &CliError::new(e.to_string()))?;
-            return Err(e);
-        }
-    };
-
-    // Compute new labels: current minus requested labels
-    let labels_to_remove: std::collections::HashSet<&str> =
-        normalized_labels.iter().map(String::as_str).collect();
-    let new_labels: Vec<String> = current_labels
-        .iter()
-        .filter(|l| !labels_to_remove.contains(l.as_str()))
-        .cloned()
-        .collect();
-
-    // Identify which labels were actually removed
-    let removed: Vec<String> = normalized_labels
-        .iter()
-        .filter(|l| current_labels.contains(*l))
-        .cloned()
-        .collect();
-
-    // Emit event
-    if let Err(e) = emit_labels_event(project_root, &agent, &item_id, &new_labels) {
-        render_error(output, &CliError::new(e.to_string()))?;
-        return Err(e);
     }
 
-    // Output result
-    let val = json!({
-        "ok": true,
-        "item_id": item_id.as_str(),
-        "labels": new_labels,
-        "removed": removed,
-    });
-    render(output, &val, |v, w| {
-        let item = v["item_id"].as_str().unwrap_or("");
-        let removed_list: Vec<&str> = v["removed"]
-            .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-            .unwrap_or_default();
-        let all_labels: Vec<&str> = v["labels"]
-            .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-            .unwrap_or_default();
-        if removed_list.is_empty() {
-            writeln!(
-                w,
-                "✓ {item}: labels unchanged (none of the specified labels were present): {}",
-                if all_labels.is_empty() {
-                    "(none)".to_string()
+    let payload = json!({ "results": all_results });
+    render(output, &payload, |v, w| {
+        for result in v["results"].as_array().unwrap_or(&vec![]) {
+            let item = result["item_id"].as_str().unwrap_or("");
+            if result["ok"].as_bool().unwrap_or(false) {
+                let removed_list: Vec<&str> = result["removed"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                let all_labels: Vec<&str> = result["labels"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                    .unwrap_or_default();
+                if removed_list.is_empty() {
+                    writeln!(
+                        w,
+                        "✓ {item}: labels unchanged (none present): {}",
+                        if all_labels.is_empty() { "(none)".to_string() } else { all_labels.join(", ") }
+                    )?;
                 } else {
-                    all_labels.join(", ")
+                    writeln!(
+                        w,
+                        "✓ {item}: removed {} → labels: {}",
+                        removed_list.join(", "),
+                        if all_labels.is_empty() { "(none)".to_string() } else { all_labels.join(", ") }
+                    )?;
                 }
-            )
-        } else {
-            writeln!(
-                w,
-                "✓ {item}: removed {} → labels: {}",
-                removed_list.join(", "),
-                if all_labels.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    all_labels.join(", ")
-                }
-            )
+            } else {
+                writeln!(
+                    w,
+                    "✗ {item}: {}",
+                    result["error"].as_str().unwrap_or("unknown error")
+                )?;
+            }
         }
+        Ok(())
     })?;
-    Ok(())
+
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -628,6 +674,7 @@ mod tests {
         let args = TagArgs {
             id: item_id.clone(),
             labels: vec!["bug".to_string(), "urgent".to_string()],
+            additional_ids: vec![],
         };
         run_tag(&args, Some("test-agent"), OutputMode::Human, &root)
             .expect("run_tag should succeed");
@@ -664,6 +711,7 @@ mod tests {
         let args = TagArgs {
             id: item_id.clone(),
             labels: vec!["initial".to_string()], // already present
+            additional_ids: vec![],
         };
         run_tag(&args, Some("test-agent"), OutputMode::Human, &root)
             .expect("run_tag should succeed even for existing labels");
@@ -697,6 +745,7 @@ mod tests {
         let tag_args = TagArgs {
             id: item_id.clone(),
             labels: vec!["a".to_string(), "b".to_string()],
+            additional_ids: vec![],
         };
         run_tag(&tag_args, Some("test-agent"), OutputMode::Human, &root)
             .expect("run_tag should succeed");
@@ -711,6 +760,7 @@ mod tests {
         let untag_args = UntagArgs {
             id: item_id.clone(),
             labels: vec!["a".to_string()],
+            additional_ids: vec![],
         };
         run_untag(&untag_args, Some("test-agent"), OutputMode::Human, &root)
             .expect("run_untag should succeed");
@@ -738,6 +788,7 @@ mod tests {
         let args = TagArgs {
             id: "bn-a7x".to_string(),
             labels: vec!["bug".to_string()],
+            additional_ids: vec![],
         };
         let result = run_tag(&args, Some("test-agent"), OutputMode::Human, root);
         assert!(result.is_err(), "should fail when no projection DB exists");
@@ -765,6 +816,7 @@ mod tests {
         let args = TagArgs {
             id: "bn-tst9".to_string(),
             labels: vec!["bug".to_string()],
+            additional_ids: vec![],
         };
         let result = run_tag(&args, Some("test-agent"), OutputMode::Human, root);
         assert!(result.is_err(), "should fail when item does not exist");

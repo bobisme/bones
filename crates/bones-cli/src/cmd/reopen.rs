@@ -34,9 +34,13 @@ use bones_core::shard::ShardManager;
 pub struct ReopenArgs {
     /// Item ID to reopen (supports partial IDs).
     pub id: String,
+
+    /// Additional item IDs to reopen in the same command.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
 }
 
-/// JSON output for a `bn reopen` transition.
+/// JSON output for a successful `bn reopen` transition.
 #[derive(Debug, Serialize)]
 struct ReopenOutput {
     id: String,
@@ -44,6 +48,25 @@ struct ReopenOutput {
     new_state: String,
     agent: String,
     event_hash: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ReopenResult {
+    id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReopenBatchOutput {
+    results: Vec<ReopenResult>,
 }
 
 /// Find the `.bones` directory by walking up from `start`.
@@ -60,13 +83,89 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+fn run_reopen_single(
+    conn: &rusqlite::Connection,
+    shard_mgr: &ShardManager,
+    agent: &str,
+    raw_id: &str,
+) -> anyhow::Result<ReopenOutput> {
+    validate::validate_item_id(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
+
+    let resolved_id = resolve_item_id(conn, raw_id)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+
+    let item = query::get_item(conn, &resolved_id, false)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+
+    let current_state: State = item.state.parse().map_err(|_| {
+        anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
+    })?;
+
+    match current_state {
+        State::Open => anyhow::bail!("cannot reopen '{}': item is already open", resolved_id),
+        State::Doing => anyhow::bail!(
+            "cannot reopen '{}': item is in progress (doing)",
+            resolved_id
+        ),
+        State::Done | State::Archived => {}
+    }
+
+    let ts = shard_mgr
+        .next_timestamp()
+        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+    let mut extra = BTreeMap::new();
+    extra.insert("reopen".to_string(), serde_json::Value::Bool(true));
+
+    let move_data = MoveData {
+        state: State::Open,
+        reason: None,
+        extra,
+    };
+
+    let mut event = Event {
+        wall_ts_us: ts,
+        agent: agent.to_string(),
+        itc: "itc:AQ".to_string(),
+        parents: vec![],
+        event_type: EventType::Move,
+        item_id: ItemId::new_unchecked(&resolved_id),
+        data: EventData::Move(move_data),
+        event_hash: String::new(),
+    };
+
+    let line = writer::write_event(&mut event)
+        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+    shard_mgr
+        .append(&line, false, Duration::from_secs(5))
+        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+
+    let projector = project::Projector::new(conn);
+    if let Err(e) = projector.project_event(&event) {
+        tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+    }
+
+    Ok(ReopenOutput {
+        id: resolved_id,
+        previous_state: current_state.to_string(),
+        new_state: State::Open.to_string(),
+        agent: agent.to_string(),
+        event_hash: event.event_hash,
+    })
+}
+
+fn item_ids(args: &ReopenArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
+}
+
 pub fn run_reopen(
     args: &ReopenArgs,
     agent_flag: Option<&str>,
     output: OutputMode,
     project_root: &Path,
 ) -> anyhow::Result<()> {
-    // 1. Require agent identity
     let agent = match agent::require_agent(agent_flag) {
         Ok(a) => a,
         Err(e) => {
@@ -82,12 +181,7 @@ pub fn run_reopen(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    if let Err(e) = validate::validate_item_id(&args.id) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
 
-    // 2. Find .bones directory
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
         let msg = "Not a bones project: .bones directory not found";
         render_error(
@@ -102,132 +196,69 @@ pub fn run_reopen(
         anyhow::anyhow!("{}", msg)
     })?;
 
-    // 3. Open projection DB
     let db_path = bones_dir.join("bones.db");
     let conn = db::open_projection(&db_path)?;
     let _ = project::ensure_tracking_table(&conn);
-
-    // 4. Resolve item ID
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    // 5. Get current item and validate state transition
-    let item = match query::get_item(&conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            let msg = format!("item '{}' not found", resolved_id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "The item may have been deleted", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    let current_state: State = item.state.parse().map_err(|_| {
-        anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
-    })?;
-
-    // Reopen is only valid from done or archived states
-    match current_state {
-        State::Open => {
-            let msg = format!("cannot reopen '{}': item is already open", resolved_id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "Item is already in the open state", "already_open"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-        State::Doing => {
-            let msg = format!(
-                "cannot reopen '{}': item is in progress (doing)",
-                resolved_id
-            );
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Use 'bn done' or 'bn close' to complete it first, or continue working on it",
-                    "invalid_reopen",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-        State::Done | State::Archived => {
-            // Valid — proceed
-        }
-    }
-
-    // 6. Set up shard manager and get timestamp
     let shard_mgr = ShardManager::new(&bones_dir);
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    // 7. Build item.move event (reopen = true signals epoch increment intent)
-    let mut extra = BTreeMap::new();
-    extra.insert("reopen".to_string(), serde_json::Value::Bool(true));
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
 
-    let move_data = MoveData {
-        state: State::Open,
-        reason: None,
-        extra,
-    };
-
-    let mut event = Event {
-        wall_ts_us: ts,
-        agent: agent.clone(),
-        itc: "itc:AQ".to_string(),
-        parents: vec![],
-        event_type: EventType::Move,
-        item_id: ItemId::new_unchecked(&resolved_id),
-        data: EventData::Move(move_data),
-        event_hash: String::new(),
-    };
-
-    // 8. Serialize and write
-    let line = writer::write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
-
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
-
-    // 9. Project into SQLite
-    let projector = project::Projector::new(&conn);
-    if let Err(e) = projector.project_event(&event) {
-        tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+    for raw_id in item_ids(args) {
+        match run_reopen_single(&conn, &shard_mgr, &agent, raw_id) {
+            Ok(ok) => results.push(ReopenResult {
+                id: ok.id,
+                ok: true,
+                previous_state: Some(ok.previous_state),
+                new_state: Some(ok.new_state),
+                event_hash: Some(ok.event_hash),
+                error: None,
+            }),
+            Err(err) => {
+                failures.push(err.to_string());
+                results.push(ReopenResult {
+                    id: raw_id.to_string(),
+                    ok: false,
+                    previous_state: None,
+                    new_state: None,
+                    event_hash: None,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
     }
 
-    // 10. Output
-    let result = ReopenOutput {
-        id: resolved_id.clone(),
-        previous_state: current_state.to_string(),
-        new_state: State::Open.to_string(),
-        agent,
-        event_hash: event.event_hash.clone(),
-    };
+    let payload = ReopenBatchOutput { results };
 
-    render(output, &result, |r, w| {
+    render(output, &payload, |r, w| {
         use std::io::Write;
-        writeln!(w, "✓ {} → open (was {})", r.id, r.previous_state)?;
+        for result in &r.results {
+            if result.ok {
+                writeln!(
+                    w,
+                    "✓ {} → open (was {})",
+                    result.id,
+                    result.previous_state.as_deref().unwrap_or("unknown")
+                )?;
+            } else {
+                writeln!(
+                    w,
+                    "✗ {}: {}",
+                    result.id,
+                    result.error.as_deref().unwrap_or("unknown error")
+                )?;
+            }
+        }
         Ok(())
     })?;
 
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -344,6 +375,7 @@ mod tests {
         let (dir, item_id) = setup_project("done");
         let args = ReopenArgs {
             id: item_id.clone(),
+            ids: vec![],
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "reopen failed: {:?}", result.err());
@@ -359,6 +391,7 @@ mod tests {
         let (dir, item_id) = setup_project("archived");
         let args = ReopenArgs {
             id: item_id.clone(),
+            ids: vec![],
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(
@@ -376,7 +409,7 @@ mod tests {
     #[test]
     fn reopen_rejects_already_open() {
         let (dir, item_id) = setup_project("open");
-        let args = ReopenArgs { id: item_id };
+        let args = ReopenArgs { id: item_id, ids: vec![] };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -389,7 +422,7 @@ mod tests {
     #[test]
     fn reopen_rejects_doing() {
         let (dir, item_id) = setup_project("doing");
-        let args = ReopenArgs { id: item_id };
+        let args = ReopenArgs { id: item_id, ids: vec![] };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -404,6 +437,7 @@ mod tests {
         let (dir, _) = setup_project("done");
         let args = ReopenArgs {
             id: "reopen1".to_string(),
+            ids: vec![],
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(
@@ -425,6 +459,7 @@ mod tests {
         let (dir, item_id) = setup_project("done");
         let args = ReopenArgs {
             id: item_id.clone(),
+            ids: vec![],
         };
         run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
@@ -458,6 +493,7 @@ mod tests {
         let (dir, item_id) = setup_project("done");
         let args = ReopenArgs {
             id: item_id.clone(),
+            ids: vec![],
         };
         run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
@@ -491,6 +527,7 @@ mod tests {
 
         let args = ReopenArgs {
             id: "bn-nonexistent".to_string(),
+            ids: vec![],
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, root);
         assert!(result.is_err());
@@ -501,6 +538,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let args = ReopenArgs {
             id: "bn-test".to_string(),
+            ids: vec![],
         };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -515,12 +553,14 @@ mod tests {
         // Reopen
         let reopen_args = ReopenArgs {
             id: item_id.clone(),
+            ids: vec![],
         };
         run_reopen(&reopen_args, Some("test-agent"), OutputMode::Json, root).unwrap();
 
         // Close again
         let close_args = super::super::done::DoneArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: None,
         };
         super::super::done::run_done(&close_args, Some("test-agent"), OutputMode::Json, root)

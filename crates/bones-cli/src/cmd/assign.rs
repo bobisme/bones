@@ -30,12 +30,20 @@ pub struct AssignArgs {
     /// Agent to assign to this item.
     #[arg(value_name = "ASSIGNEE")]
     pub assignee: String,
+
+    /// Additional item IDs to assign the same agent to.
+    #[arg(long = "ids", value_name = "ID", num_args = 1..)]
+    pub additional_ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct UnassignArgs {
     /// Item ID to unassign from the current agent (supports partial IDs).
     pub id: String,
+
+    /// Additional item IDs to unassign.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -199,20 +207,40 @@ fn run_assign_action(
     Ok(())
 }
 
+fn assign_item_ids(args: &AssignArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.additional_ids.iter().map(String::as_str))
+}
+
 pub fn run_assign(
     args: &AssignArgs,
     agent_flag: Option<&str>,
     output: OutputMode,
     project_root: &Path,
 ) -> anyhow::Result<()> {
-    run_assign_action(
-        &args.id,
-        &args.assignee,
-        AssignAction::Assign,
-        agent_flag,
-        output,
-        project_root,
-    )
+    let mut failures = Vec::new();
+    for raw_id in assign_item_ids(args) {
+        if let Err(e) = run_assign_action(
+            raw_id,
+            &args.assignee,
+            AssignAction::Assign,
+            agent_flag,
+            output,
+            project_root,
+        ) {
+            failures.push(format!("{raw_id}: {e}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
+}
+
+fn unassign_item_ids(args: &UnassignArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
 }
 
 pub fn run_unassign(
@@ -236,14 +264,26 @@ pub fn run_unassign(
         }
     };
 
-    run_assign_action(
-        &args.id,
-        &resolved,
-        AssignAction::Unassign,
-        Some(resolved.as_str()),
-        output,
-        project_root,
-    )
+    let mut failures = Vec::new();
+    for raw_id in unassign_item_ids(args) {
+        if let Err(e) = run_assign_action(
+            raw_id,
+            &resolved,
+            AssignAction::Unassign,
+            Some(resolved.as_str()),
+            output,
+            project_root,
+        ) {
+            failures.push(format!("{raw_id}: {e}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -340,6 +380,7 @@ mod tests {
             &AssignArgs {
                 id: item_id.clone(),
                 assignee: "alice".to_string(),
+                additional_ids: vec![],
             },
             Some("operator"),
             OutputMode::Json,
@@ -356,6 +397,7 @@ mod tests {
         run_unassign(
             &UnassignArgs {
                 id: item_id.clone(),
+                ids: vec![],
             },
             Some("alice"),
             OutputMode::Json,
@@ -375,6 +417,7 @@ mod tests {
             &AssignArgs {
                 id: "asg1".to_string(),
                 assignee: "alice".to_string(),
+                additional_ids: vec![],
             },
             Some("operator"),
             OutputMode::Json,

@@ -116,9 +116,12 @@ fn update_title_json_output() {
     );
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    assert!(json["id"].is_string(), "response must have 'id'");
-    assert!(json["updates"].is_array(), "response must have 'updates'");
-    let updates = json["updates"].as_array().unwrap();
+    let results = json["results"].as_array().expect("response must have 'results'");
+    assert_eq!(results.len(), 1, "should have exactly 1 result");
+    let r = &results[0];
+    assert!(r["id"].is_string(), "result must have 'id'");
+    assert!(r["ok"].as_bool().unwrap(), "result must be ok");
+    let updates = r["updates"].as_array().expect("result must have 'updates'");
     assert_eq!(updates.len(), 1, "should have exactly 1 update");
     assert_eq!(updates[0]["field"].as_str().unwrap(), "title");
     assert_eq!(updates[0]["value"].as_str().unwrap(), "New name");
@@ -302,8 +305,8 @@ fn close_with_reason() {
 
     assert!(output.status.success());
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["new_state"].as_str().unwrap(), "done");
-    assert_eq!(json["reason"].as_str().unwrap(), "Shipped in v2.1");
+    let r = &json["results"].as_array().unwrap()[0];
+    assert_eq!(r["new_state"].as_str().unwrap(), "done");
 }
 
 #[test]
@@ -340,9 +343,10 @@ fn close_json_output() {
 
     assert!(output.status.success());
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["id"].as_str().unwrap(), id);
-    assert_eq!(json["new_state"].as_str().unwrap(), "done");
-    assert!(json["event_hash"].as_str().is_some());
+    let r = &json["results"].as_array().unwrap()[0];
+    assert_eq!(r["id"].as_str().unwrap(), id);
+    assert_eq!(r["new_state"].as_str().unwrap(), "done");
+    assert!(r["event_hash"].as_str().is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -414,9 +418,10 @@ fn reopen_json_output() {
 
     assert!(output.status.success());
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["id"].as_str().unwrap(), id);
-    assert_eq!(json["new_state"].as_str().unwrap(), "open");
-    assert!(json["previous_state"].as_str().is_some());
+    let r = &json["results"].as_array().unwrap()[0];
+    assert_eq!(r["id"].as_str().unwrap(), id);
+    assert_eq!(r["new_state"].as_str().unwrap(), "open");
+    assert!(r["previous_state"].as_str().is_some());
 }
 
 #[test]

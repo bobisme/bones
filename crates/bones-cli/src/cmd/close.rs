@@ -17,6 +17,10 @@ pub struct CloseArgs {
     /// Item ID to close (supports partial IDs).
     pub id: String,
 
+    /// Additional item IDs to close in the same command.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
+
     /// Optional reason for closing this item.
     #[arg(long)]
     pub reason: Option<String>,
@@ -33,6 +37,7 @@ pub fn run_close(
 ) -> anyhow::Result<()> {
     let done_args = DoneArgs {
         id: args.id.clone(),
+        ids: args.ids.clone(),
         reason: args.reason.clone(),
     };
     run_done(&done_args, agent_flag, output, project_root)
@@ -158,6 +163,7 @@ mod tests {
         let (dir, item_id) = setup_project("open");
         let args = CloseArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: None,
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -174,6 +180,7 @@ mod tests {
         let (dir, item_id) = setup_project("doing");
         let args = CloseArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: Some("All done".to_string()),
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -194,6 +201,7 @@ mod tests {
         let (dir, item_id) = setup_project("done");
         let args = CloseArgs {
             id: item_id,
+            ids: vec![],
             reason: None,
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -211,6 +219,7 @@ mod tests {
         let (dir, _) = setup_project("open");
         let args = CloseArgs {
             id: "close1".to_string(),
+            ids: vec![],
             reason: None,
         };
         let result = run_close(&args, Some("test-agent"), OutputMode::Json, dir.path());

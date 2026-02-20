@@ -34,12 +34,16 @@ pub struct DoneArgs {
     /// Item ID to mark as done (supports partial IDs).
     pub id: String,
 
+    /// Additional item IDs to mark as done in the same command.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
+
     /// Optional reason for completing this item.
     #[arg(long)]
     pub reason: Option<String>,
 }
 
-/// JSON output for a `bn done` transition.
+/// JSON output for a successful single `bn done` transition.
 #[derive(Debug, Serialize)]
 struct DoneOutput {
     id: String,
@@ -51,6 +55,27 @@ struct DoneOutput {
     event_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     auto_completed_parent: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoneResult {
+    id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_completed_parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoneBatchOutput {
+    results: Vec<DoneResult>,
 }
 
 /// Find the `.bones` directory by walking up from `start`.
@@ -129,82 +154,21 @@ fn check_goal_auto_complete(
     Ok(None)
 }
 
-pub fn run_done(
-    args: &DoneArgs,
-    agent_flag: Option<&str>,
-    output: OutputMode,
-    project_root: &Path,
-) -> anyhow::Result<()> {
-    // 1. Require agent identity
-    let agent = match agent::require_agent(agent_flag) {
-        Ok(a) => a,
-        Err(e) => {
-            render_error(
-                output,
-                &CliError::with_details(&e.message, "Set --agent, BONES_AGENT, or AGENT", e.code),
-            )?;
-            anyhow::bail!("{}", e.message);
-        }
-    };
+fn run_done_single(
+    conn: &rusqlite::Connection,
+    shard_mgr: &ShardManager,
+    agent: &str,
+    raw_id: &str,
+    reason: Option<&str>,
+) -> anyhow::Result<DoneOutput> {
+    validate::validate_item_id(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
-    if let Err(e) = validate::validate_agent(&agent) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
-    if let Err(e) = validate::validate_item_id(&args.id) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
+    let resolved_id = resolve_item_id(conn, raw_id)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
 
-    // 2. Find .bones directory
-    let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
-        let msg = "Not a bones project: .bones directory not found";
-        render_error(
-            output,
-            &CliError::with_details(
-                msg,
-                "Run 'bn init' to create a new bones project",
-                "not_a_project",
-            ),
-        )
-        .ok();
-        anyhow::anyhow!("{}", msg)
-    })?;
-
-    // 3. Open projection DB
-    let db_path = bones_dir.join("bones.db");
-    let conn = db::open_projection(&db_path)?;
-    let _ = project::ensure_tracking_table(&conn);
-
-    // 4. Resolve item ID
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    // 5. Get current item and validate state transition
-    let item = match query::get_item(&conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            let msg = format!("item '{}' not found", resolved_id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "The item may have been deleted", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
+    let item = query::get_item(conn, &resolved_id, false)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
 
     let current_state: State = item.state.parse().map_err(|_| {
         anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
@@ -213,43 +177,27 @@ pub fn run_done(
     let target_state = State::Done;
 
     if let Err(e) = current_state.can_transition_to(target_state) {
-        let msg = format!(
+        anyhow::bail!(
             "cannot transition '{}' from {} to done: {}",
-            resolved_id, e.from, e.reason
+            resolved_id,
+            e.from,
+            e.reason
         );
-        let suggestion = match current_state {
-            State::Done => "Item is already done".to_string(),
-            State::Archived => {
-                "Item is archived. Use 'bn move --state open' to reopen it first".to_string()
-            }
-            _ => format!(
-                "Current state is '{}', which cannot transition to 'done'",
-                current_state
-            ),
-        };
-        render_error(
-            output,
-            &CliError::with_details(&msg, &suggestion, "invalid_transition"),
-        )?;
-        anyhow::bail!("{}", msg);
     }
 
-    // 6. Set up shard manager and get timestamp
-    let shard_mgr = ShardManager::new(&bones_dir);
     let ts = shard_mgr
         .next_timestamp()
         .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    // 7. Build item.move event
     let move_data = MoveData {
         state: target_state,
-        reason: args.reason.clone(),
+        reason: reason.map(String::from),
         extra: BTreeMap::new(),
     };
 
     let mut event = Event {
         wall_ts_us: ts,
-        agent: agent.clone(),
+        agent: agent.to_string(),
         itc: "itc:AQ".to_string(),
         parents: vec![],
         event_type: EventType::Move,
@@ -258,7 +206,6 @@ pub fn run_done(
         event_hash: String::new(),
     };
 
-    // 8. Serialize and write
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
 
@@ -266,14 +213,13 @@ pub fn run_done(
         .append(&line, false, Duration::from_secs(5))
         .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
 
-    // 9. Project into SQLite
-    let projector = project::Projector::new(&conn);
+    let projector = project::Projector::new(conn);
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
     }
 
-    // 10. Check goal auto-complete
-    let auto_completed_parent = match check_goal_auto_complete(&conn, &resolved_id)? {
+    // Check goal auto-complete
+    let auto_completed_parent = match check_goal_auto_complete(conn, &resolved_id)? {
         Some(parent_id) => {
             let ts2 = shard_mgr
                 .next_timestamp()
@@ -281,7 +227,7 @@ pub fn run_done(
 
             let mut parent_event = Event {
                 wall_ts_us: ts2,
-                agent: agent.clone(),
+                agent: agent.to_string(),
                 itc: "itc:AQ".to_string(),
                 parents: vec![],
                 event_type: EventType::Move,
@@ -313,30 +259,130 @@ pub fn run_done(
         None => None,
     };
 
-    // 11. Output
-    let result = DoneOutput {
-        id: resolved_id.clone(),
+    Ok(DoneOutput {
+        id: resolved_id,
         previous_state: current_state.to_string(),
         new_state: target_state.to_string(),
-        reason: args.reason.clone(),
-        agent,
-        event_hash: event.event_hash.clone(),
-        auto_completed_parent: auto_completed_parent.clone(),
+        reason: reason.map(String::from),
+        agent: agent.to_string(),
+        event_hash: event.event_hash,
+        auto_completed_parent,
+    })
+}
+
+fn item_ids(args: &DoneArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
+}
+
+pub fn run_done(
+    args: &DoneArgs,
+    agent_flag: Option<&str>,
+    output: OutputMode,
+    project_root: &Path,
+) -> anyhow::Result<()> {
+    // 1. Require agent identity
+    let agent = match agent::require_agent(agent_flag) {
+        Ok(a) => a,
+        Err(e) => {
+            render_error(
+                output,
+                &CliError::with_details(&e.message, "Set --agent, BONES_AGENT, or AGENT", e.code),
+            )?;
+            anyhow::bail!("{}", e.message);
+        }
     };
 
-    render(output, &result, |r, w| {
-        use std::io::Write;
-        writeln!(w, "✓ {} → done (was {})", r.id, r.previous_state)?;
-        if let Some(ref reason) = r.reason {
-            writeln!(w, "  reason: {reason}")?;
+    if let Err(e) = validate::validate_agent(&agent) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
+
+    // 2. Find .bones directory
+    let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
+        let msg = "Not a bones project: .bones directory not found";
+        render_error(
+            output,
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a new bones project",
+                "not_a_project",
+            ),
+        )
+        .ok();
+        anyhow::anyhow!("{}", msg)
+    })?;
+
+    // 3. Open projection DB
+    let db_path = bones_dir.join("bones.db");
+    let conn = db::open_projection(&db_path)?;
+    let _ = project::ensure_tracking_table(&conn);
+    let shard_mgr = ShardManager::new(&bones_dir);
+
+    // 4. Process each item independently
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
+    let reason_ref = args.reason.as_deref();
+
+    for raw_id in item_ids(args) {
+        match run_done_single(&conn, &shard_mgr, &agent, raw_id, reason_ref) {
+            Ok(ok) => results.push(DoneResult {
+                id: ok.id,
+                ok: true,
+                previous_state: Some(ok.previous_state),
+                new_state: Some(ok.new_state),
+                event_hash: Some(ok.event_hash),
+                auto_completed_parent: ok.auto_completed_parent,
+                error: None,
+            }),
+            Err(err) => {
+                failures.push(err.to_string());
+                results.push(DoneResult {
+                    id: raw_id.to_string(),
+                    ok: false,
+                    previous_state: None,
+                    new_state: None,
+                    event_hash: None,
+                    auto_completed_parent: None,
+                    error: Some(err.to_string()),
+                });
+            }
         }
-        if let Some(ref parent) = r.auto_completed_parent {
-            writeln!(w, "  ✓ auto-completed parent goal {parent}")?;
+    }
+
+    let payload = DoneBatchOutput { results };
+
+    render(output, &payload, |r, w| {
+        use std::io::Write;
+        for result in &r.results {
+            if result.ok {
+                writeln!(
+                    w,
+                    "✓ {} → done (was {})",
+                    result.id,
+                    result.previous_state.as_deref().unwrap_or("unknown")
+                )?;
+                if let Some(ref parent) = result.auto_completed_parent {
+                    writeln!(w, "  ✓ auto-completed parent goal {parent}")?;
+                }
+            } else {
+                writeln!(
+                    w,
+                    "✗ {}: {}",
+                    result.id,
+                    result.error.as_deref().unwrap_or("unknown error")
+                )?;
+            }
         }
         Ok(())
     })?;
 
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +616,7 @@ mod tests {
         let (dir, item_id) = setup_project("doing");
         let args = DoneArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -586,6 +633,7 @@ mod tests {
         let (dir, item_id) = setup_project("open");
         let args = DoneArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -602,6 +650,7 @@ mod tests {
         let (dir, item_id) = setup_project("doing");
         let args = DoneArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: Some("Shipped in commit abc123".to_string()),
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -631,6 +680,7 @@ mod tests {
         let (dir, item_id) = setup_project("done");
         let args = DoneArgs {
             id: item_id,
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -647,6 +697,7 @@ mod tests {
         let (dir, item_id) = setup_project("archived");
         let args = DoneArgs {
             id: item_id,
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -672,6 +723,7 @@ mod tests {
 
         let args = DoneArgs {
             id: "bn-nonexistent".to_string(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, root);
@@ -683,6 +735,7 @@ mod tests {
         let (dir, _item_id) = setup_project("doing");
         let args = DoneArgs {
             id: "test1".to_string(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -708,6 +761,7 @@ mod tests {
         // Move child2 to doing first
         let args_do = super::super::do_cmd::DoArgs {
             id: last_child.clone(),
+            ids: vec![],
         };
         super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
             .unwrap();
@@ -715,6 +769,7 @@ mod tests {
         // Now done child2
         let args = DoneArgs {
             id: last_child.clone(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());
@@ -736,12 +791,14 @@ mod tests {
         // Move child2 to doing then done
         let args_do = super::super::do_cmd::DoArgs {
             id: second_child.clone(),
+            ids: vec![],
         };
         super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
             .unwrap();
 
         let args = DoneArgs {
             id: second_child.clone(),
+            ids: vec![],
             reason: None,
         };
         run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
@@ -827,6 +884,7 @@ mod tests {
         // Done the child
         let args = DoneArgs {
             id: "bn-child1".to_string(),
+            ids: vec![],
             reason: None,
         };
         run_done(&args, Some("test-agent"), OutputMode::Json, root).unwrap();
@@ -841,6 +899,7 @@ mod tests {
         let (dir, item_id) = setup_project("doing");
         let args = DoneArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: Some("All done".to_string()),
         };
         run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
@@ -872,6 +931,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let args = DoneArgs {
             id: "bn-test".to_string(),
+            ids: vec![],
             reason: None,
         };
         let result = run_done(&args, Some("test-agent"), OutputMode::Json, dir.path());

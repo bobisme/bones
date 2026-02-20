@@ -29,6 +29,10 @@ pub struct DeleteArgs {
     /// Item ID to delete (supports partial IDs).
     pub id: String,
 
+    /// Additional item IDs to delete in the same command.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
+
     /// Optional reason for deletion.
     #[arg(long)]
     pub reason: Option<String>,
@@ -126,6 +130,87 @@ fn confirm_delete(id: &str, title: &str) -> anyhow::Result<bool> {
     Ok(answer == "y" || answer == "yes")
 }
 
+#[derive(Debug, Serialize)]
+struct DeleteResult {
+    id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeleteBatchOutput {
+    results: Vec<DeleteResult>,
+}
+
+fn run_delete_single(
+    conn: &rusqlite::Connection,
+    shard_mgr: &ShardManager,
+    agent: &str,
+    raw_id: &str,
+    reason: Option<&str>,
+    force: bool,
+) -> anyhow::Result<String> {
+    validate::validate_item_id(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
+
+    let resolved_id = match resolve_item_id(conn, raw_id)? {
+        Some(id) => id,
+        None => {
+            if let Some(any_id) = resolve_any_item_id(conn, raw_id)?
+                && let Some(item) = query::get_item(conn, &any_id, true)?
+                && item.is_deleted
+            {
+                anyhow::bail!("item '{}' is already deleted", item.item_id);
+            }
+            anyhow::bail!("item '{}' not found", raw_id);
+        }
+    };
+
+    let item = query::get_item(conn, &resolved_id, false)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+
+    if !force && !confirm_delete(&resolved_id, &item.title)? {
+        anyhow::bail!("deletion of '{}' cancelled", resolved_id);
+    }
+
+    let ts = shard_mgr
+        .next_timestamp()
+        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+    let mut event = Event {
+        wall_ts_us: ts,
+        agent: agent.to_string(),
+        itc: "itc:AQ".to_string(),
+        parents: vec![],
+        event_type: EventType::Delete,
+        item_id: ItemId::new_unchecked(&resolved_id),
+        data: EventData::Delete(DeleteData {
+            reason: reason.map(String::from),
+            extra: BTreeMap::new(),
+        }),
+        event_hash: String::new(),
+    };
+
+    let line = writer::write_event(&mut event)
+        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+    shard_mgr
+        .append(&line, false, Duration::from_secs(5))
+        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+
+    let projector = project::Projector::new(conn);
+    if let Err(e) = projector.project_event(&event) {
+        tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+    }
+
+    Ok(resolved_id)
+}
+
+fn item_ids(args: &DeleteArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
+}
+
 pub fn run_delete(
     args: &DeleteArgs,
     agent_flag: Option<&str>,
@@ -148,11 +233,6 @@ pub fn run_delete(
         anyhow::bail!("{}", e.reason);
     }
 
-    if let Err(e) = validate::validate_item_id(&args.id) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
-
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
         let msg = "Not a bones project: .bones directory not found";
         render_error(
@@ -170,104 +250,55 @@ pub fn run_delete(
     let db_path = bones_dir.join("bones.db");
     let conn = db::open_projection(&db_path)?;
     let _ = project::ensure_tracking_table(&conn);
-
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            if let Some(any_id) = resolve_any_item_id(&conn, &args.id)?
-                && let Some(item) = query::get_item(&conn, &any_id, true)?
-                && item.is_deleted
-            {
-                let msg = format!("item '{}' is already deleted", item.item_id);
-                render_error(
-                    output,
-                    &CliError::with_details(
-                        &msg,
-                        "Deleted items can still be inspected with 'bn show <id>'",
-                        "already_deleted",
-                    ),
-                )?;
-                anyhow::bail!("{}", msg);
-            }
-
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    let item = match query::get_item(&conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            let msg = format!("item '{}' not found", resolved_id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "The item may have been deleted", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    if !args.force && !confirm_delete(&resolved_id, &item.title)? {
-        let msg = "deletion cancelled";
-        render_error(
-            output,
-            &CliError::with_details(msg, "Use --force to skip confirmation", "cancelled"),
-        )?;
-        anyhow::bail!("{}", msg);
-    }
-
     let shard_mgr = ShardManager::new(&bones_dir);
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    let mut event = Event {
-        wall_ts_us: ts,
-        agent,
-        itc: "itc:AQ".to_string(),
-        parents: vec![],
-        event_type: EventType::Delete,
-        item_id: ItemId::new_unchecked(&resolved_id),
-        data: EventData::Delete(DeleteData {
-            reason: args.reason.clone(),
-            extra: BTreeMap::new(),
-        }),
-        event_hash: String::new(),
-    };
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
+    let reason_ref = args.reason.as_deref();
 
-    let line = writer::write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
-
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
-
-    let projector = project::Projector::new(&conn);
-    if let Err(e) = projector.project_event(&event) {
-        tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+    for raw_id in item_ids(args) {
+        match run_delete_single(&conn, &shard_mgr, &agent, raw_id, reason_ref, args.force) {
+            Ok(resolved_id) => results.push(DeleteResult {
+                id: resolved_id,
+                ok: true,
+                error: None,
+            }),
+            Err(err) => {
+                failures.push(err.to_string());
+                results.push(DeleteResult {
+                    id: raw_id.to_string(),
+                    ok: false,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
     }
 
-    render(
-        output,
-        &DeleteOutput {
-            id: resolved_id,
-            deleted: true,
-        },
-        |r, w| {
-            writeln!(w, "✓ deleted {}", r.id)?;
-            Ok(())
-        },
-    )?;
+    let payload = DeleteBatchOutput { results };
 
-    Ok(())
+    render(output, &payload, |r, w| {
+        for result in &r.results {
+            if result.ok {
+                writeln!(w, "✓ deleted {}", result.id)?;
+            } else {
+                writeln!(
+                    w,
+                    "✗ {}: {}",
+                    result.id,
+                    result.error.as_deref().unwrap_or("unknown error")
+                )?;
+            }
+        }
+        Ok(())
+    })?;
+
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -352,6 +383,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = DeleteArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: Some("duplicate".to_string()),
             force: true,
         };
@@ -369,6 +401,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = DeleteArgs {
             id: item_id.clone(),
+            ids: vec![],
             reason: None,
             force: true,
         };

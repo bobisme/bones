@@ -172,6 +172,7 @@ pub fn run_label(
             let delegate = TagArgs {
                 id: add.id.clone(),
                 labels: vec![add.label.clone()],
+                additional_ids: vec![],
             };
             run_tag(&delegate, agent_flag, output, project_root)
         }
@@ -179,6 +180,7 @@ pub fn run_label(
             let delegate = UntagArgs {
                 id: rm.id.clone(),
                 labels: vec![rm.label.clone()],
+                additional_ids: vec![],
             };
             run_untag(&delegate, agent_flag, output, project_root)
         }

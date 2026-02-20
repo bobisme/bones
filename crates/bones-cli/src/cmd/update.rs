@@ -36,6 +36,10 @@ pub struct UpdateArgs {
     /// Item ID to update (supports partial IDs).
     pub id: String,
 
+    /// Additional item IDs to apply the same updates to.
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
+
     /// New title for the item.
     #[arg(long)]
     pub title: Option<String>,
@@ -87,6 +91,91 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+/// Result for batch update output.
+#[derive(Debug, Serialize)]
+struct UpdateResult {
+    id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updates: Option<Vec<FieldUpdate>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateBatchOutput {
+    results: Vec<UpdateResult>,
+}
+
+fn run_update_single(
+    conn: &rusqlite::Connection,
+    shard_mgr: &ShardManager,
+    agent: &str,
+    raw_id: &str,
+    pending: &[(String, serde_json::Value)],
+) -> anyhow::Result<UpdateOutput> {
+    validate::validate_item_id(raw_id)
+        .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
+
+    let resolved_id = resolve_item_id(conn, raw_id)?
+        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+
+    let projector = project::Projector::new(conn);
+    let mut applied: Vec<FieldUpdate> = Vec::new();
+
+    for (field, value) in pending {
+        let ts = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+        let update_data = UpdateData {
+            field: field.clone(),
+            value: value.clone(),
+            extra: BTreeMap::new(),
+        };
+
+        let mut event = Event {
+            wall_ts_us: ts,
+            agent: agent.to_string(),
+            itc: "itc:AQ".to_string(),
+            parents: vec![],
+            event_type: EventType::Update,
+            item_id: ItemId::new_unchecked(&resolved_id),
+            data: EventData::Update(update_data),
+            event_hash: String::new(),
+        };
+
+        let line = writer::write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+
+        if let Err(e) = projector.project_event(&event) {
+            tracing::warn!(
+                "projection failed for field '{field}' (will be fixed on next rebuild): {e}"
+            );
+        }
+
+        applied.push(FieldUpdate {
+            field: field.clone(),
+            value: value.clone(),
+            event_hash: event.event_hash.clone(),
+        });
+    }
+
+    Ok(UpdateOutput {
+        id: resolved_id,
+        agent: agent.to_string(),
+        updates: applied,
+    })
+}
+
+fn item_ids(args: &UpdateArgs) -> impl Iterator<Item = &str> {
+    std::iter::once(args.id.as_str()).chain(args.ids.iter().map(String::as_str))
+}
+
 pub fn run_update(
     args: &UpdateArgs,
     agent_flag: Option<&str>,
@@ -106,10 +195,6 @@ pub fn run_update(
     };
 
     if let Err(e) = validate::validate_agent(&agent) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
-    }
-    if let Err(e) = validate::validate_item_id(&args.id) {
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
@@ -205,29 +290,9 @@ pub fn run_update(
     let db_path = bones_dir.join("bones.db");
     let conn = db::open_projection(&db_path)?;
     let _ = project::ensure_tracking_table(&conn);
-
-    // 6. Resolve item ID
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
-    };
-
-    // 7. Set up shard manager
     let shard_mgr = ShardManager::new(&bones_dir);
-    let projector = project::Projector::new(&conn);
 
-    // 8. Build list of (field, value) updates to apply
+    // 6. Build list of (field, value) updates to apply
     let mut pending: Vec<(String, serde_json::Value)> = Vec::new();
 
     if let Some(ref title) = args.title {
@@ -273,68 +338,62 @@ pub fn run_update(
         ));
     }
 
-    // 9. Emit one item.update event per field
-    let mut applied: Vec<FieldUpdate> = Vec::new();
+    // 7. Process each item independently
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
 
-    for (field, value) in pending {
-        let ts = shard_mgr
-            .next_timestamp()
-            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
-        let update_data = UpdateData {
-            field: field.clone(),
-            value: value.clone(),
-            extra: BTreeMap::new(),
-        };
-
-        let mut event = Event {
-            wall_ts_us: ts,
-            agent: agent.clone(),
-            itc: "itc:AQ".to_string(),
-            parents: vec![],
-            event_type: EventType::Update,
-            item_id: ItemId::new_unchecked(&resolved_id),
-            data: EventData::Update(update_data),
-            event_hash: String::new(),
-        };
-
-        let line = writer::write_event(&mut event)
-            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
-
-        shard_mgr
-            .append(&line, false, Duration::from_secs(5))
-            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
-
-        if let Err(e) = projector.project_event(&event) {
-            tracing::warn!(
-                "projection failed for field '{field}' (will be fixed on next rebuild): {e}"
-            );
+    for raw_id in item_ids(args) {
+        match run_update_single(&conn, &shard_mgr, &agent, raw_id, &pending) {
+            Ok(ok) => results.push(UpdateResult {
+                id: ok.id,
+                ok: true,
+                updates: Some(ok.updates),
+                error: None,
+            }),
+            Err(err) => {
+                failures.push(err.to_string());
+                results.push(UpdateResult {
+                    id: raw_id.to_string(),
+                    ok: false,
+                    updates: None,
+                    error: Some(err.to_string()),
+                });
+            }
         }
-
-        applied.push(FieldUpdate {
-            field,
-            value,
-            event_hash: event.event_hash.clone(),
-        });
     }
 
-    // 10. Output
-    let result = UpdateOutput {
-        id: resolved_id.clone(),
-        agent,
-        updates: applied,
-    };
+    let payload = UpdateBatchOutput { results };
 
-    render(output, &result, |r, w| {
+    render(output, &payload, |r, w| {
         use std::io::Write;
-        writeln!(w, "✓ {} updated ({} field(s))", r.id, r.updates.len())?;
-        for u in &r.updates {
-            writeln!(w, "  {} = {}", u.field, u.value)?;
+        for result in &r.results {
+            if result.ok {
+                let count = result.updates.as_ref().map(|u| u.len()).unwrap_or(0);
+                writeln!(w, "✓ {} updated ({} field(s))", result.id, count)?;
+                if let Some(ref updates) = result.updates {
+                    for u in updates {
+                        writeln!(w, "  {} = {}", u.field, u.value)?;
+                    }
+                }
+            } else {
+                writeln!(
+                    w,
+                    "✗ {}: {}",
+                    result.id,
+                    result.error.as_deref().unwrap_or("unknown error")
+                )?;
+            }
         }
         Ok(())
     })?;
 
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else if failures.len() == 1 {
+        anyhow::bail!("{}", failures[0]);
+    } else {
+        anyhow::bail!("{} item(s) failed", failures.len());
+    }
 }
 
 #[cfg(test)]
@@ -437,6 +496,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id.clone(),
+            ids: vec![],
             title: Some("Updated title".to_string()),
             description: None,
             size: None,
@@ -457,6 +517,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id.clone(),
+            ids: vec![],
             title: None,
             description: None,
             size: None,
@@ -477,6 +538,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id.clone(),
+            ids: vec![],
             title: None,
             description: None,
             size: None,
@@ -497,6 +559,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id.clone(),
+            ids: vec![],
             title: Some("New title".to_string()),
             description: Some("New description".to_string()),
             size: Some("l".to_string()),
@@ -528,6 +591,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id,
+            ids: vec![],
             title: None,
             description: None,
             size: None,
@@ -549,6 +613,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id,
+            ids: vec![],
             title: None,
             description: None,
             size: Some("huge".to_string()),
@@ -565,6 +630,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id,
+            ids: vec![],
             title: None,
             description: None,
             size: None,
@@ -581,6 +647,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id,
+            ids: vec![],
             title: None,
             description: None,
             size: None,
@@ -597,6 +664,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id,
+            ids: vec![],
             title: Some(String::new()),
             description: None,
             size: None,
@@ -627,6 +695,7 @@ mod tests {
 
         let args = UpdateArgs {
             id: "bn-nonexistent".to_string(),
+            ids: vec![],
             title: Some("New title".to_string()),
             description: None,
             size: None,
@@ -642,6 +711,7 @@ mod tests {
         let (dir, _) = setup_project();
         let args = UpdateArgs {
             id: "test1".to_string(),
+            ids: vec![],
             title: Some("Via partial ID".to_string()),
             description: None,
             size: None,
@@ -668,6 +738,7 @@ mod tests {
         let (dir, item_id) = setup_project();
         let args = UpdateArgs {
             id: item_id.clone(),
+            ids: vec![],
             title: Some("Replay-stable title".to_string()),
             description: None,
             size: None,
@@ -700,6 +771,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let args = UpdateArgs {
             id: "bn-test".to_string(),
+            ids: vec![],
             title: Some("X".to_string()),
             description: None,
             size: None,
