@@ -19,6 +19,7 @@ terseid = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
+bumpalo = "3.20.2"
 
 [dev-dependencies]
 proptest = { workspace = true }
