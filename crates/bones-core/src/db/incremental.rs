@@ -127,7 +127,9 @@ pub fn incremental_apply(
         return do_full_rebuild(events_dir, db_path, start, &reason);
     }
 
-    // Read all shard content
+    // Read shard content starting from the cursor position.
+    // Sealed shards that end before `byte_offset` are stat(2)'d but not
+    // read, bounding memory use to new/unseen events.
     let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
     let shards = shard_mgr
@@ -135,16 +137,20 @@ pub fn incremental_apply(
         .map_err(|e| anyhow::anyhow!("list shards: {e}"))?;
     let shards_scanned = shards.len();
 
-    let content = shard_mgr
-        .replay()
-        .map_err(|e| anyhow::anyhow!("replay shards: {e}"))?;
-
-    let content_len = content.len();
     let offset = usize::try_from(byte_offset).unwrap_or(0);
 
-    // Validate cursor hash at the expected position
+    let (new_content, content_len) = shard_mgr
+        .replay_from_offset(offset)
+        .map_err(|e| anyhow::anyhow!("replay shards from offset: {e}"))?;
+
+    // Validate cursor hash: it must appear in the tail of already-processed
+    // content (the 512 bytes just before the cursor offset).  Since we only
+    // loaded content *after* the cursor, we read a small window from the
+    // shard directly.
     if let Some(ref hash) = last_hash {
-        if !validate_cursor_hash(&content, offset, hash) {
+        let tail_ok = validate_cursor_hash_at_offset(&shard_mgr, offset, hash)
+            .unwrap_or(false);
+        if !tail_ok {
             drop(conn);
             return do_full_rebuild(
                 events_dir,
@@ -156,7 +162,7 @@ pub fn incremental_apply(
     }
 
     // If there's no new content, we're up to date
-    if offset >= content_len {
+    if new_content.is_empty() {
         return Ok(ApplyReport {
             events_applied: 0,
             shards_scanned: shards_scanned,
@@ -166,11 +172,10 @@ pub fn incremental_apply(
         });
     }
 
-    // Slice content from the cursor offset to the end
-    let new_content = &content[offset..];
+    // `new_content` already starts at the cursor position.
 
     // Parse only the new events
-    let events = parse_lines(new_content).map_err(|(line_num, e)| {
+    let events = parse_lines(&new_content).map_err(|(line_num, e)| {
         anyhow::anyhow!("parse error at line {line_num} (offset {offset}): {e}")
     })?;
 
@@ -322,26 +327,37 @@ pub fn check_incremental_safety(db: &Connection, events_dir: &Path) -> Result<()
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Validate that the cursor hash appears in the content around the expected
-/// byte offset.
+/// Validate that the cursor hash appears in the 512 bytes immediately before
+/// `offset` in the shard sequence.
 ///
-/// We look for the hash in the line that ends at or just before `offset`.
-/// The offset points to the byte *after* the last processed line (including
-/// the newline), so the hash should appear in the text just before `offset`.
+/// We only read the small window `[offset-512, offset)` rather than the
+/// entire shard content, keeping validation O(1) in total shard size.
+fn validate_cursor_hash_at_offset(
+    shard_mgr: &ShardManager,
+    offset: usize,
+    hash: &str,
+) -> Result<bool> {
+    if offset == 0 {
+        return Ok(false);
+    }
+    let search_start = offset.saturating_sub(512);
+    let window = shard_mgr
+        .read_content_range(search_start, offset)
+        .map_err(|e| anyhow::anyhow!("read cursor hash window: {e}"))?;
+    Ok(window.contains(hash))
+}
+
+/// Validate that the cursor hash appears in the content around the expected
+/// byte offset.  Used only in unit tests where the full content is already
+/// available.
+#[cfg(test)]
 fn validate_cursor_hash(content: &str, offset: usize, hash: &str) -> bool {
     if offset == 0 || offset > content.len() {
         return false;
     }
 
-    // The cursor offset is the end of the last processed content.
-    // Look backwards from the offset to find the last line that was processed,
-    // which should contain the cursor hash.
     let before = &content[..offset];
-
-    // Find the last non-empty line before the offset
-    // The hash is the last field in a TSJSON line, so just check if it
-    // appears in the tail of the processed content.
-    let search_start = offset.saturating_sub(512); // hashes are ~72 chars; 512 is generous
+    let search_start = offset.saturating_sub(512);
     let search_region = &before[search_start..];
     search_region.contains(hash)
 }

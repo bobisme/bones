@@ -48,6 +48,14 @@ pub struct CommentAddArgs {
 pub struct CommentsArgs {
     /// Item ID to show comments for (supports partial IDs).
     pub id: String,
+
+    /// Maximum number of comments to list.
+    #[arg(long, short)]
+    pub limit: Option<u32>,
+
+    /// Offset for pagination.
+    #[arg(long)]
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -325,7 +333,7 @@ pub fn run_comments(
         }
     };
 
-    let comments = timeline_rows(query::get_comments(&conn, &resolved_id)?);
+    let comments = timeline_rows(query::get_comments(&conn, &resolved_id, args.limit, args.offset)?);
 
     render(output, &comments, |rows, w| {
         if rows.is_empty() {
@@ -486,7 +494,7 @@ mod tests {
             .expect("open projection")
             .expect("projection exists");
 
-        let comments = query::get_comments(&conn, &item_id).expect("load comments");
+        let comments = query::get_comments(&conn, &item_id, None, None).expect("load comments");
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].author, "alice");
         assert_eq!(comments[0].body, "Root cause found");
@@ -508,7 +516,7 @@ mod tests {
         let conn = query::try_open_projection(&db_path)
             .expect("open projection")
             .expect("projection exists");
-        let comments = query::get_comments(&conn, "bn-cmt1").expect("load comments");
+        let comments = query::get_comments(&conn, "bn-cmt1", None, None).expect("load comments");
         assert_eq!(comments.len(), 1);
     }
 
@@ -522,7 +530,11 @@ mod tests {
         };
         run_comment_add(&add, Some("alice"), OutputMode::Json, &root).expect("add comment");
 
-        let args = CommentsArgs { id: item_id };
+        let args = CommentsArgs {
+            id: item_id,
+            limit: None,
+            offset: None,
+        };
         run_comments(&args, OutputMode::Json, &root).expect("comments listing should succeed");
     }
 }

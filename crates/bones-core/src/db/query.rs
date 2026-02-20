@@ -439,13 +439,26 @@ pub fn get_labels(conn: &Connection, item_id: &str) -> Result<Vec<QueryLabel>> {
 /// # Errors
 ///
 /// Returns an error if the aggregate query fails.
-pub fn list_labels(conn: &Connection) -> Result<Vec<LabelCount>> {
-    let sql = "SELECT label, COUNT(*) as count \
-               FROM item_labels \
-               GROUP BY label \
-               ORDER BY count DESC, label ASC";
+pub fn list_labels(
+    conn: &Connection,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<LabelCount>> {
+    let limit_clause = match (limit, offset) {
+        (Some(limit), Some(offset)) => format!(" LIMIT {limit} OFFSET {offset}"),
+        (Some(limit), None) => format!(" LIMIT {limit}"),
+        (None, Some(offset)) => format!(" LIMIT -1 OFFSET {offset}"),
+        (None, None) => String::new(),
+    };
 
-    let mut stmt = conn.prepare(sql).context("prepare list_labels")?;
+    let sql = format!(
+        "SELECT label, COUNT(*) as count \
+         FROM item_labels \
+         GROUP BY label \
+         ORDER BY count DESC, label ASC{limit_clause}"
+    );
+
+    let mut stmt = conn.prepare(&sql).context("prepare list_labels")?;
     let rows = stmt
         .query_map([], |row| {
             let count: i64 = row.get(1)?;
@@ -496,12 +509,26 @@ pub fn get_assignees(conn: &Connection, item_id: &str) -> Result<Vec<QueryAssign
 /// # Errors
 ///
 /// Returns an error if the query fails.
-pub fn get_comments(conn: &Connection, item_id: &str) -> Result<Vec<QueryComment>> {
-    let sql = "SELECT comment_id, item_id, event_hash, author, body, created_at_us \
-               FROM item_comments WHERE item_id = ?1 \
-               ORDER BY created_at_us DESC";
+pub fn get_comments(
+    conn: &Connection,
+    item_id: &str,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<QueryComment>> {
+    let limit_clause = match (limit, offset) {
+        (Some(limit), Some(offset)) => format!(" LIMIT {limit} OFFSET {offset}"),
+        (Some(limit), None) => format!(" LIMIT {limit}"),
+        (None, Some(offset)) => format!(" LIMIT -1 OFFSET {offset}"),
+        (None, None) => String::new(),
+    };
 
-    let mut stmt = conn.prepare(sql).context("prepare get_comments")?;
+    let sql = format!(
+        "SELECT comment_id, item_id, event_hash, author, body, created_at_us \
+         FROM item_comments WHERE item_id = ?1 \
+         ORDER BY created_at_us DESC{limit_clause}"
+    );
+
+    let mut stmt = conn.prepare(&sql).context("prepare get_comments")?;
     let rows = stmt
         .query_map(params![item_id], |row| {
             Ok(QueryComment {
@@ -1462,7 +1489,7 @@ mod tests {
         insert_label(&conn, "bn-002", "area:backend");
         insert_label(&conn, "bn-003", "type:bug");
 
-        let labels = list_labels(&conn).unwrap();
+        let labels = list_labels(&conn, None, None).unwrap();
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0].name, "area:backend");
         assert_eq!(labels[0].count, 2);
@@ -1502,7 +1529,7 @@ mod tests {
         )
         .unwrap();
 
-        let comments = get_comments(&conn, "bn-001").unwrap();
+        let comments = get_comments(&conn, "bn-001", None, None).unwrap();
         assert_eq!(comments.len(), 2);
         assert_eq!(comments[0].body, "Second comment");
         assert_eq!(comments[1].body, "First comment");
@@ -1713,6 +1740,32 @@ mod tests {
         assert_eq!(by_type.get("item.update").copied().unwrap_or(0), 1);
         assert_eq!(by_agent.get("alice").copied().unwrap_or(0), 1);
         assert_eq!(by_agent.get("bob").copied().unwrap_or(0), 1);
+    }
+
+    #[test]
+    fn get_comments_paginated() {
+        let conn = test_db();
+        insert_item(&conn, "bn-001", "Item", "open", "default");
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO item_comments (item_id, event_hash, author, body, created_at_us) \
+                 VALUES (?1, ?2, 'alice', ?3, ?4)",
+                params!["bn-001", format!("hash{i}"), format!("Comment {i}"), 100 + i as i64],
+            )
+            .unwrap();
+        }
+
+        // Newest first order: Comment 4 (104), Comment 3 (103), ...
+
+        let page1 = get_comments(&conn, "bn-001", Some(2), None).unwrap();
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page1[0].body, "Comment 4");
+        assert_eq!(page1[1].body, "Comment 3");
+
+        let page2 = get_comments(&conn, "bn-001", Some(2), Some(2)).unwrap();
+        assert_eq!(page2.len(), 2);
+        assert_eq!(page2[0].body, "Comment 2");
+        assert_eq!(page2[1].body, "Comment 1");
     }
 
     fn ensure_tracking_table_for_query_tests(conn: &Connection) {

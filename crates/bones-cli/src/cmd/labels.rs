@@ -15,6 +15,14 @@ pub struct LabelsArgs {
     /// Group labels by namespace prefix (text before `:`).
     #[arg(long)]
     pub namespace: bool,
+
+    /// Maximum number of labels to list.
+    #[arg(long, short)]
+    pub limit: Option<u32>,
+
+    /// Offset for pagination.
+    #[arg(long)]
+    pub offset: Option<u32>,
 }
 
 #[derive(Args, Debug)]
@@ -129,7 +137,7 @@ pub fn run_labels(
         }
     };
 
-    let rows = list_labels(&conn)?;
+    let rows = list_labels(&conn, args.limit, args.offset)?;
     let labels = to_rows(rows);
     let namespaces = args.namespace.then(|| group_by_namespace(&labels));
     let payload = LabelsOutput { labels, namespaces };

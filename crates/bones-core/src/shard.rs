@@ -597,6 +597,145 @@ impl ShardManager {
         Ok(fs::read_to_string(&path)?)
     }
 
+    /// Compute the total concatenated byte size of all shards without reading
+    /// their full contents.
+    ///
+    /// This is used for advancing the projection cursor without paying the
+    /// cost of a full replay.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if any shard file metadata cannot be read.
+    pub fn total_content_len(&self) -> Result<usize, ShardError> {
+        let shards = self.list_shards()?;
+        let mut total = 0usize;
+        for (year, month) in shards {
+            let path = self.shard_path(year, month);
+            let meta = fs::metadata(&path)?;
+            total = total.saturating_add(meta.len() as usize);
+        }
+        Ok(total)
+    }
+
+    /// Read shard content starting from the given absolute byte offset in the
+    /// concatenated shard sequence.
+    ///
+    /// Sealed shards that end entirely before `offset` are skipped without
+    /// reading their contents — only their file sizes are stat(2)'d.
+    /// Only content from `offset` onward is returned, bounding memory use to
+    /// new/unseen events rather than the full log.
+    ///
+    /// Returns `(new_content, total_len)` where:
+    /// - `new_content` is the bytes from `offset` to the end of all shards.
+    /// - `total_len` is the total byte size of all shards concatenated (usable
+    ///   as the new cursor offset after processing `new_content`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if shard metadata or file reads fail.
+    pub fn replay_from_offset(&self, offset: usize) -> Result<(String, usize), ShardError> {
+        let shards = self.list_shards()?;
+        let mut cumulative: usize = 0;
+        let mut result = String::new();
+        let mut found_start = false;
+
+        for (year, month) in shards {
+            let path = self.shard_path(year, month);
+            let shard_len = fs::metadata(&path)?.len() as usize;
+
+            let shard_end = cumulative.saturating_add(shard_len);
+
+            if shard_end <= offset {
+                // This shard ends at or before the cursor — skip entirely.
+                cumulative = shard_end;
+                continue;
+            }
+
+            // This shard overlaps with or is entirely after the cursor.
+            let shard_content = fs::read_to_string(&path)?;
+
+            if !found_start {
+                // Calculate the within-shard byte offset.
+                let within = if cumulative < offset {
+                    offset - cumulative
+                } else {
+                    0
+                };
+                // Guard: within must not exceed shard content length.
+                let within = within.min(shard_content.len());
+                result.push_str(&shard_content[within..]);
+                found_start = true;
+            } else {
+                result.push_str(&shard_content);
+            }
+
+            cumulative = shard_end;
+        }
+
+        Ok((result, cumulative))
+    }
+
+    /// Read bytes from the concatenated shard sequence in `[start_offset, end_offset)`.
+    ///
+    /// Only shards that overlap with the requested range are read.
+    /// Shards entirely outside the range are stat(2)'d but not read.
+    ///
+    /// This is used to read a small window around the projection cursor for
+    /// hash validation without loading the full shard content.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if any shard file cannot be read.
+    pub fn read_content_range(
+        &self,
+        start_offset: usize,
+        end_offset: usize,
+    ) -> Result<String, ShardError> {
+        if start_offset >= end_offset {
+            return Ok(String::new());
+        }
+
+        let shards = self.list_shards()?;
+        let mut cumulative: usize = 0;
+        let mut result = String::new();
+
+        for (year, month) in shards {
+            let path = self.shard_path(year, month);
+            let shard_len = fs::metadata(&path)?.len() as usize;
+            let shard_end = cumulative.saturating_add(shard_len);
+
+            if shard_end <= start_offset {
+                // Shard ends before our range — skip without reading.
+                cumulative = shard_end;
+                continue;
+            }
+
+            if cumulative >= end_offset {
+                // Shard starts after our range — done.
+                break;
+            }
+
+            let shard_content = fs::read_to_string(&path)?;
+
+            // Clip to the slice of this shard that overlaps with [start, end).
+            let within_start = if cumulative < start_offset {
+                (start_offset - cumulative).min(shard_content.len())
+            } else {
+                0
+            };
+            let within_end = if shard_end > end_offset {
+                (end_offset - cumulative).min(shard_content.len())
+            } else {
+                shard_content.len()
+            };
+
+            result.push_str(&shard_content[within_start..within_end]);
+            cumulative = shard_end;
+        }
+
+        Ok(result)
+    }
+
     /// Count event lines across all shards (excluding comments and blanks).
     ///
     /// # Errors
@@ -1348,5 +1487,194 @@ mod tests {
         // Should be after 2020-01-01 in microseconds
         let jan_2020_us: i64 = 1_577_836_800_000_000;
         assert!(ts > jan_2020_us, "system time too small: {ts}");
+    }
+
+    // -----------------------------------------------------------------------
+    // total_content_len
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn total_content_len_empty_repo() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        let len = mgr.total_content_len().expect("len");
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn total_content_len_single_shard() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "line1\n").expect("append");
+        mgr.append_raw(2026, 1, "line2\n").expect("append");
+
+        let full = mgr.replay().expect("replay");
+        let len = mgr.total_content_len().expect("len");
+        assert_eq!(len, full.len());
+    }
+
+    #[test]
+    fn total_content_len_multiple_shards() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("shard 1");
+        mgr.create_shard(2026, 2).expect("shard 2");
+        mgr.append_raw(2026, 1, "jan-event\n").expect("append jan");
+        mgr.append_raw(2026, 2, "feb-event\n").expect("append feb");
+
+        let full = mgr.replay().expect("replay");
+        let len = mgr.total_content_len().expect("len");
+        assert_eq!(len, full.len(), "total_content_len must match replay len");
+    }
+
+    // -----------------------------------------------------------------------
+    // read_content_range
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_content_range_empty_range() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "event\n").expect("append");
+
+        let result = mgr.read_content_range(5, 5).expect("range");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn read_content_range_within_single_shard() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        // shard header is 2 lines; add a known event line
+        mgr.append_raw(2026, 1, "ABCDEF\n").expect("append");
+
+        let full = mgr.replay().expect("replay");
+        // Find the position of "ABCDEF"
+        let pos = full.find("ABCDEF").expect("ABCDEF must be in shard");
+        let range = mgr.read_content_range(pos, pos + 7).expect("range");
+        assert_eq!(range, "ABCDEF\n");
+    }
+
+    #[test]
+    fn read_content_range_across_shard_boundary() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("shard 1");
+        mgr.create_shard(2026, 2).expect("shard 2");
+        mgr.append_raw(2026, 1, "jan-last-line\n").expect("jan");
+        mgr.append_raw(2026, 2, "feb-first-line\n").expect("feb");
+
+        let full = mgr.replay().expect("replay");
+        // Read entire concatenation as a range
+        let range = mgr.read_content_range(0, full.len()).expect("full range");
+        assert_eq!(range, full);
+    }
+
+    #[test]
+    fn read_content_range_beyond_end() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "event\n").expect("append");
+
+        let full = mgr.replay().expect("replay");
+        // Requesting a range beyond the end should return empty
+        let range = mgr
+            .read_content_range(full.len(), full.len() + 100)
+            .expect("beyond end");
+        assert!(range.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // replay_from_offset
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn replay_from_offset_zero_returns_full_content() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "event1\n").expect("e1");
+        mgr.append_raw(2026, 1, "event2\n").expect("e2");
+
+        let full = mgr.replay().expect("full replay");
+        let (from_zero, total_len) = mgr.replay_from_offset(0).expect("from 0");
+        assert_eq!(from_zero, full);
+        assert_eq!(total_len, full.len());
+    }
+
+    #[test]
+    fn replay_from_offset_skips_content_before_cursor() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "event1\n").expect("e1");
+        mgr.append_raw(2026, 1, "event2\n").expect("e2");
+        mgr.append_raw(2026, 1, "event3\n").expect("e3");
+
+        let full = mgr.replay().expect("full replay");
+
+        // Find offset just after event2
+        let cursor = full.find("event3").expect("event3 in content");
+        let (tail, total_len) = mgr.replay_from_offset(cursor).expect("from cursor");
+        assert_eq!(tail, "event3\n");
+        assert_eq!(total_len, full.len());
+    }
+
+    #[test]
+    fn replay_from_offset_at_end_returns_empty() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("create");
+        mgr.append_raw(2026, 1, "event1\n").expect("e1");
+
+        let full = mgr.replay().expect("full replay");
+        let (tail, total_len) = mgr.replay_from_offset(full.len()).expect("at end");
+        assert!(tail.is_empty(), "tail should be empty at end of content");
+        assert_eq!(total_len, full.len());
+    }
+
+    #[test]
+    fn replay_from_offset_skips_sealed_shards_before_cursor() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+
+        // Two shards: a sealed shard (jan) and an active shard (feb)
+        mgr.create_shard(2026, 1).expect("jan");
+        mgr.create_shard(2026, 2).expect("feb");
+        mgr.append_raw(2026, 1, "jan-event1\n").expect("jan e1");
+        mgr.append_raw(2026, 1, "jan-event2\n").expect("jan e2");
+        mgr.append_raw(2026, 2, "feb-event1\n").expect("feb e1");
+        mgr.append_raw(2026, 2, "feb-event2\n").expect("feb e2");
+
+        let full = mgr.replay().expect("full replay");
+        let jan_shard_len = mgr.read_shard(2026, 1).expect("read jan").len();
+
+        // Cursor is at the end of the jan shard — feb events are new
+        let (tail, total_len) = mgr.replay_from_offset(jan_shard_len).expect("from feb start");
+        assert!(!tail.contains("jan-event"), "jan events should not appear in tail");
+        assert!(tail.contains("feb-event1"), "feb events must be in tail");
+        assert!(tail.contains("feb-event2"), "feb events must be in tail");
+        assert_eq!(total_len, full.len());
+    }
+
+    #[test]
+    fn replay_from_offset_total_len_equals_total_content_len() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        mgr.create_shard(2026, 1).expect("shard 1");
+        mgr.create_shard(2026, 2).expect("shard 2");
+        mgr.append_raw(2026, 1, "event-a\n").expect("ea");
+        mgr.append_raw(2026, 2, "event-b\n").expect("eb");
+
+        let total = mgr.total_content_len().expect("total_content_len");
+        let (_, replay_total) = mgr.replay_from_offset(0).expect("replay_from_offset");
+        assert_eq!(
+            total, replay_total,
+            "total_content_len and replay_from_offset total must agree"
+        );
     }
 }

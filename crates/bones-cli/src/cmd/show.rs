@@ -139,7 +139,7 @@ pub fn run_show(
         .map(|d| d.item_id)
         .collect();
 
-    let comments: Vec<ShowComment> = query::get_comments(&conn, &resolved_id)?
+    let comments: Vec<ShowComment> = query::get_comments(&conn, &resolved_id, None, None)?
         .into_iter()
         .map(|c| ShowComment {
             author: c.author,

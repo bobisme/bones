@@ -38,3 +38,7 @@ harness = false
 [[bench]]
 name = "report"
 harness = false
+
+[[bench]]
+name = "large_repo"
+harness = false

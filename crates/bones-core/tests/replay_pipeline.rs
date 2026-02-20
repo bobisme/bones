@@ -369,7 +369,7 @@ fn linear_create_update_move_done_projects_to_sqlite() {
     assert_eq!(assignees.len(), 1);
     assert_eq!(assignees[0].agent, "bob");
 
-    let comments = query::get_comments(&conn, "bn-lin1").expect("comments");
+    let comments = query::get_comments(&conn, "bn-lin1", None, None).expect("comments");
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].body, "Investigating…");
 }
@@ -522,7 +522,7 @@ fn all_11_event_types_project_to_correct_sqlite_state() {
     assert!(deps.is_empty(), "all links removed after unlink");
 
     // Redact: comment body is replaced
-    let comments = query::get_comments(&conn, "bn-all11").expect("comments");
+    let comments = query::get_comments(&conn, "bn-all11", None, None).expect("comments");
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].body, "[redacted]");
 
@@ -723,7 +723,7 @@ fn two_agents_concurrent_comments_both_preserved() {
     );
 
     let conn = project_events(&[root, comment_a, comment_b]);
-    let comments = query::get_comments(&conn, "bn-comments1").expect("comments");
+    let comments = query::get_comments(&conn, "bn-comments1", None, None).expect("comments");
     assert_eq!(comments.len(), 2, "both concurrent comments preserved");
 }
 
@@ -930,8 +930,8 @@ fn incremental_replay_matches_full_replay_10_events() {
     }
 
     // Comments match
-    let full_comments = query::get_comments(&conn_full, "bn-inc1").expect("comments full");
-    let inc_comments = query::get_comments(&conn_inc, "bn-inc1").expect("comments inc");
+    let full_comments = query::get_comments(&conn_full, "bn-inc1", None, None).expect("comments full");
+    let inc_comments = query::get_comments(&conn_inc, "bn-inc1", None, None).expect("comments inc");
     assert_eq!(
         full_comments.len(),
         inc_comments.len(),
@@ -1168,7 +1168,7 @@ fn rebuild_clear_and_replay_identical_to_original() {
     let item1_before = query::get_item(&conn, "bn-rb1", false)
         .expect("query")
         .expect("exists");
-    let comments_before = query::get_comments(&conn, "bn-rb1").expect("comments");
+    let comments_before = query::get_comments(&conn, "bn-rb1", None, None).expect("comments");
     let deps_before = query::get_dependencies(&conn, "bn-rb2").expect("deps");
 
     // Clear all projection data
@@ -1202,7 +1202,7 @@ fn rebuild_clear_and_replay_identical_to_original() {
         "updated_at must match after rebuild"
     );
 
-    let comments_after = query::get_comments(&conn, "bn-rb1").expect("comments after");
+    let comments_after = query::get_comments(&conn, "bn-rb1", None, None).expect("comments after");
     assert_eq!(
         comments_before.len(),
         comments_after.len(),
@@ -1551,7 +1551,7 @@ fn replay_20_mixed_events_correct_sqlite_state() {
     assert_eq!(mix1.size.as_deref(), Some("xl"));
 
     // bn-mix1: 2 comments, first one redacted
-    let mix1_comments = query::get_comments(&conn, "bn-mix1").expect("mix1 comments");
+    let mix1_comments = query::get_comments(&conn, "bn-mix1", None, None).expect("mix1 comments");
     assert_eq!(mix1_comments.len(), 2);
     let redacted = mix1_comments.iter().find(|c| c.event_hash == comment_hash);
     assert!(redacted.is_some(), "first comment should be findable");

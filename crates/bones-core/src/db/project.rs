@@ -1017,7 +1017,7 @@ mod tests {
         );
         projector.project_event(&comment).unwrap();
 
-        let comments = query::get_comments(&conn, "bn-001").unwrap();
+        let comments = query::get_comments(&conn, "bn-001", None, None).unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].body, "This is a comment");
         assert_eq!(comments[0].author, "test-agent");
@@ -1220,7 +1220,7 @@ mod tests {
         assert_eq!(count, 1);
 
         // Check comment body is redacted
-        let comments = query::get_comments(&conn, "bn-001").unwrap();
+        let comments = query::get_comments(&conn, "bn-001", None, None).unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].body, "[redacted]");
     }
@@ -1358,8 +1358,8 @@ mod tests {
         let assignees_inc = query::get_assignees(&conn_inc, "bn-001").unwrap();
         assert_eq!(assignees_full.len(), assignees_inc.len());
 
-        let comments_full = query::get_comments(&conn_full, "bn-001").unwrap();
-        let comments_inc = query::get_comments(&conn_inc, "bn-001").unwrap();
+        let comments_full = query::get_comments(&conn_full, "bn-001", None, None).unwrap();
+        let comments_inc = query::get_comments(&conn_inc, "bn-001", None, None).unwrap();
         assert_eq!(comments_full.len(), comments_inc.len());
     }
 
@@ -1679,7 +1679,7 @@ mod tests {
         assert!(snapshot.is_some());
 
         // Comment was redacted
-        let comments = query::get_comments(&conn, "bn-001").unwrap();
+        let comments = query::get_comments(&conn, "bn-001", None, None).unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].body, "[redacted]");
 
