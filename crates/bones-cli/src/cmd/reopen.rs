@@ -409,7 +409,10 @@ mod tests {
     #[test]
     fn reopen_rejects_already_open() {
         let (dir, item_id) = setup_project("open");
-        let args = ReopenArgs { id: item_id, ids: vec![] };
+        let args = ReopenArgs {
+            id: item_id,
+            ids: vec![],
+        };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -422,7 +425,10 @@ mod tests {
     #[test]
     fn reopen_rejects_doing() {
         let (dir, item_id) = setup_project("doing");
-        let args = ReopenArgs { id: item_id, ids: vec![] };
+        let args = ReopenArgs {
+            id: item_id,
+            ids: vec![],
+        };
         let result = run_reopen(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

@@ -116,10 +116,7 @@ fn list_items_json(dir: &Path) -> Vec<Value> {
     let response: Value =
         serde_json::from_slice(&output.stdout).expect("list --json should produce valid JSON");
     // list --json returns { items: [...], total, limit, offset, has_more }
-    response["items"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    response["items"].as_array().cloned().unwrap_or_default()
 }
 
 /// Run `bn list --json` with extra args and return parsed JSON array.
@@ -135,12 +132,8 @@ fn list_items_filtered(dir: &Path, args: &[&str]) -> Vec<Value> {
         "list filtered failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let response: Value =
-        serde_json::from_slice(&output.stdout).expect("valid JSON");
-    response["items"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    response["items"].as_array().cloned().unwrap_or_default()
 }
 
 // ===========================================================================

@@ -398,7 +398,10 @@ mod tests {
     #[test]
     fn do_rejects_already_doing() {
         let (dir, item_id) = setup_project("doing");
-        let args = DoArgs { id: item_id, ids: vec![] };
+        let args = DoArgs {
+            id: item_id,
+            ids: vec![],
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -411,7 +414,10 @@ mod tests {
     #[test]
     fn do_rejects_done_item() {
         let (dir, item_id) = setup_project("done");
-        let args = DoArgs { id: item_id, ids: vec![] };
+        let args = DoArgs {
+            id: item_id,
+            ids: vec![],
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -424,7 +430,10 @@ mod tests {
     #[test]
     fn do_rejects_archived_item() {
         let (dir, item_id) = setup_project("archived");
-        let args = DoArgs { id: item_id, ids: vec![] };
+        let args = DoArgs {
+            id: item_id,
+            ids: vec![],
+        };
         let result = run_do(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -459,7 +468,10 @@ mod tests {
     #[test]
     fn do_requires_agent() {
         let (dir, item_id) = setup_project("open");
-        let args = DoArgs { id: item_id, ids: vec![] };
+        let args = DoArgs {
+            id: item_id,
+            ids: vec![],
+        };
         // Don't pass agent flag and clear env
         let result = run_do(&args, None, OutputMode::Json, dir.path());
         // This may or may not fail depending on env vars; just verify no panic

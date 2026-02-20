@@ -84,7 +84,10 @@ fn dup_json_returns_candidates_for_similar_items() {
     init_project(dir.path());
 
     let source = create_item(dir.path(), "Authentication timeout regression");
-    create_item(dir.path(), "Authentication timeout regression in API gateway");
+    create_item(
+        dir.path(),
+        "Authentication timeout regression in API gateway",
+    );
     rebuild(dir.path());
 
     let output = bn_cmd(dir.path())
@@ -127,7 +130,10 @@ fn verify_json_schema_is_stable() {
     init_project(dir.path());
     create_item(dir.path(), "Verify me");
 
-    let output = bn_cmd(dir.path()).args(["verify", "--json"]).output().unwrap();
+    let output = bn_cmd(dir.path())
+        .args(["verify", "--json"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("verify --json must parse");

@@ -450,14 +450,22 @@ pub fn run_untag(
                     writeln!(
                         w,
                         "✓ {item}: labels unchanged (none present): {}",
-                        if all_labels.is_empty() { "(none)".to_string() } else { all_labels.join(", ") }
+                        if all_labels.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            all_labels.join(", ")
+                        }
                     )?;
                 } else {
                     writeln!(
                         w,
                         "✓ {item}: removed {} → labels: {}",
                         removed_list.join(", "),
-                        if all_labels.is_empty() { "(none)".to_string() } else { all_labels.join(", ") }
+                        if all_labels.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            all_labels.join(", ")
+                        }
                     )?;
                 }
             } else {

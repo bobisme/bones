@@ -116,7 +116,9 @@ fn update_title_json_output() {
     );
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    let results = json["results"].as_array().expect("response must have 'results'");
+    let results = json["results"]
+        .as_array()
+        .expect("response must have 'results'");
     assert_eq!(results.len(), 1, "should have exactly 1 result");
     let r = &results[0];
     assert!(r["id"].is_string(), "result must have 'id'");

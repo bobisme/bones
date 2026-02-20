@@ -221,7 +221,10 @@ fn next_empty_project_returns_message() {
     rebuild(dir.path()); // projection DB must exist for triage commands
 
     // No items — should still succeed but signal "nothing ready".
-    let output = bn_cmd(dir.path()).args(["next", "--json"]).output().unwrap();
+    let output = bn_cmd(dir.path())
+        .args(["next", "--json"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
@@ -272,7 +275,9 @@ fn next_agent_slots_returns_assignments() {
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
     // Should return NextAssignments: { assignments: [...] }
-    let assignments = json["assignments"].as_array().expect("should have 'assignments' array");
+    let assignments = json["assignments"]
+        .as_array()
+        .expect("should have 'assignments' array");
     assert!(
         !assignments.is_empty(),
         "assignments should be non-empty for a project with items"
@@ -280,11 +285,23 @@ fn next_agent_slots_returns_assignments() {
 
     // Each assignment must have required fields.
     for assignment in assignments {
-        assert!(assignment["agent_slot"].is_number(), "agent_slot must be a number");
+        assert!(
+            assignment["agent_slot"].is_number(),
+            "agent_slot must be a number"
+        );
         assert!(assignment["id"].is_string(), "assignment must have 'id'");
-        assert!(assignment["title"].is_string(), "assignment must have 'title'");
-        assert!(assignment["score"].is_number(), "assignment must have 'score'");
-        assert!(assignment["explanation"].is_string(), "assignment must have 'explanation'");
+        assert!(
+            assignment["title"].is_string(),
+            "assignment must have 'title'"
+        );
+        assert!(
+            assignment["score"].is_number(),
+            "assignment must have 'score'"
+        );
+        assert!(
+            assignment["explanation"].is_string(),
+            "assignment must have 'explanation'"
+        );
     }
 }
 
@@ -400,7 +417,10 @@ fn triage_empty_project_succeeds() {
     init_project(dir.path());
     rebuild(dir.path()); // projection DB must exist for triage commands
 
-    bn_cmd(dir.path()).args(["triage", "--json"]).assert().success();
+    bn_cmd(dir.path())
+        .args(["triage", "--json"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -615,7 +635,9 @@ fn health_density_is_between_zero_and_one() {
     setup_triage_graph(dir.path());
 
     let health = run_json(dir.path(), &["health"]);
-    let density = health["density"].as_f64().expect("density must be a number");
+    let density = health["density"]
+        .as_f64()
+        .expect("density must be a number");
     assert!(
         (0.0..=1.0).contains(&density),
         "density must be in [0, 1], got {density}"
@@ -672,7 +694,9 @@ fn health_scc_count_equals_node_count_for_dag() {
     setup_triage_graph(dir.path());
 
     let health = run_json(dir.path(), &["health"]);
-    let scc_count = health["scc_count"].as_u64().expect("scc_count must be a number");
+    let scc_count = health["scc_count"]
+        .as_u64()
+        .expect("scc_count must be a number");
     assert_eq!(
         scc_count, 10,
         "DAG with 10 nodes should have scc_count == 10 (each node is its own SCC)"
@@ -720,7 +744,9 @@ fn cycles_empty_project_returns_empty_array() {
     rebuild(dir.path()); // projection DB must exist for cycles command
 
     let result = run_json(dir.path(), &["cycles"]);
-    let cycles = result["cycles"].as_array().expect("'cycles' must be an array");
+    let cycles = result["cycles"]
+        .as_array()
+        .expect("'cycles' must be an array");
     assert!(cycles.is_empty(), "empty project has no cycles");
 }
 
@@ -815,10 +841,7 @@ fn did_records_feedback_and_returns_json() {
         "did",
         "'action' field should be 'did'"
     );
-    assert!(
-        json["agent"].is_string(),
-        "'agent' field must be a string"
-    );
+    assert!(json["agent"].is_string(), "'agent' field must be a string");
     assert!(
         json["ts"].is_number(),
         "'ts' field must be a numeric timestamp"
@@ -1020,15 +1043,11 @@ fn next_json_id_matches_known_schema() {
 fn next_without_init_fails_with_message() {
     let dir = TempDir::new().unwrap();
     // No init — projection DB doesn't exist.
-    bn_cmd(dir.path())
-        .args(["next"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("projection")
-                .or(predicate::str::contains("not found"))
-                .or(predicate::str::contains("init")),
-        );
+    bn_cmd(dir.path()).args(["next"]).assert().failure().stderr(
+        predicate::str::contains("projection")
+            .or(predicate::str::contains("not found"))
+            .or(predicate::str::contains("init")),
+    );
 }
 
 #[test]
@@ -1048,15 +1067,11 @@ fn triage_without_init_fails_with_message() {
 #[test]
 fn plan_without_init_fails_with_message() {
     let dir = TempDir::new().unwrap();
-    bn_cmd(dir.path())
-        .args(["plan"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("projection")
-                .or(predicate::str::contains("not found"))
-                .or(predicate::str::contains("init")),
-        );
+    bn_cmd(dir.path()).args(["plan"]).assert().failure().stderr(
+        predicate::str::contains("projection")
+            .or(predicate::str::contains("not found"))
+            .or(predicate::str::contains("init")),
+    );
 }
 
 #[test]

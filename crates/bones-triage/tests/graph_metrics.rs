@@ -18,7 +18,7 @@ use bones_triage::metrics::basic::{
 use bones_triage::metrics::betweenness::betweenness_centrality;
 use bones_triage::metrics::eigenvector::eigenvector_centrality;
 use bones_triage::metrics::hits::hits;
-use bones_triage::metrics::pagerank::{pagerank, PageRankConfig};
+use bones_triage::metrics::pagerank::{PageRankConfig, pagerank};
 
 // ---------------------------------------------------------------------------
 // Helper: build NormalizedGraph from edge list
@@ -667,10 +667,7 @@ fn disconnected_betweenness() {
 
     // Endpoints have 0.
     for ep in ["A", "C", "X", "Z"] {
-        assert!(
-            (bc[ep] - 0.0).abs() < 1e-10,
-            "{ep} betweenness should be 0"
-        );
+        assert!((bc[ep] - 0.0).abs() < 1e-10, "{ep} betweenness should be 0");
     }
 }
 
@@ -934,10 +931,7 @@ fn bowtie_betweenness() {
         bc["center"]
     );
     for id in ["A", "B", "X", "Y"] {
-        assert!(
-            (bc[id] - 0.0).abs() < 1e-10,
-            "{id} betweenness should be 0"
-        );
+        assert!((bc[id] - 0.0).abs() < 1e-10, "{id} betweenness should be 0");
     }
 }
 
@@ -1125,10 +1119,7 @@ fn w_graph_betweenness() {
         bc["C"]
     );
     for id in ["A", "B", "D", "E"] {
-        assert!(
-            (bc[id] - 0.0).abs() < 1e-10,
-            "{id} betweenness should be 0"
-        );
+        assert!((bc[id] - 0.0).abs() < 1e-10, "{id} betweenness should be 0");
     }
 }
 

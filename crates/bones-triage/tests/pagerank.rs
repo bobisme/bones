@@ -141,8 +141,7 @@ fn random_graph_data(
 
     let node_ids: Vec<String> = (0..n).map(|i| format!("n{i}")).collect();
 
-    let mut edge_set: std::collections::HashSet<(usize, usize)> =
-        std::collections::HashSet::new();
+    let mut edge_set: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
     let mut edges: Vec<(String, String)> = Vec::new();
 
     let attempts = params.edges * 3; // allow extra attempts for rejected self-loops
@@ -203,9 +202,7 @@ fn make_mutated_graph(
     let (node_ids, mut edges) = random_graph_data(seed, params);
 
     // Add the new edge if it isn't already present.
-    let already = edges
-        .iter()
-        .any(|(a, b)| a == extra_from && b == extra_to);
+    let already = edges.iter().any(|(a, b)| a == extra_from && b == extra_to);
     if !already {
         edges.push((extra_from.to_string(), extra_to.to_string()));
     }
@@ -472,8 +469,9 @@ fn equivalence_edge_removal_20_seeds() {
 fn equivalence_deep_chain_add_middle_edge() {
     // Chain: n0 → n1 → ... → n19
     // Add edge n5 → n15 (skips several levels)
-    let chain_edges: Vec<(String, String)> =
-        (0..19).map(|i| (format!("n{i}"), format!("n{}", i + 1))).collect();
+    let chain_edges: Vec<(String, String)> = (0..19)
+        .map(|i| (format!("n{i}"), format!("n{}", i + 1)))
+        .collect();
     let edge_refs: Vec<(&str, &str)> = chain_edges
         .iter()
         .map(|(a, b)| (a.as_str(), b.as_str()))
@@ -503,8 +501,13 @@ fn equivalence_deep_chain_add_middle_edge() {
 #[test]
 fn equivalence_wide_fan_add_spoke() {
     // Wide fan: hub "h" → n0, n1, ..., n19
-    let edges: Vec<(String, String)> = (0..20).map(|i| ("h".to_string(), format!("n{i}"))).collect();
-    let edge_refs: Vec<(&str, &str)> = edges.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let edges: Vec<(String, String)> = (0..20)
+        .map(|i| ("h".to_string(), format!("n{i}")))
+        .collect();
+    let edge_refs: Vec<(&str, &str)> = edges
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
 
     let base = build_graph(&edge_refs);
     let config = default_config();
@@ -536,8 +539,11 @@ fn equivalence_graph_with_cycles() {
     // Two interleaved cycles: A↔B, B↔C, with outgoing edges to D and E
     // A → B → C → A (cycle), B → D, C → E
     let edges = [
-        ("A", "B"), ("B", "C"), ("C", "A"), // cycle
-        ("B", "D"), ("C", "E"),
+        ("A", "B"),
+        ("B", "C"),
+        ("C", "A"), // cycle
+        ("B", "D"),
+        ("C", "E"),
     ];
     let base = build_graph(&edges);
     let config = default_config();
@@ -545,8 +551,12 @@ fn equivalence_graph_with_cycles() {
 
     // Add A → E
     let new_edges = [
-        ("A", "B"), ("B", "C"), ("C", "A"),
-        ("B", "D"), ("C", "E"), ("A", "E"),
+        ("A", "B"),
+        ("B", "C"),
+        ("C", "A"),
+        ("B", "D"),
+        ("C", "E"),
+        ("A", "E"),
     ];
     let mutated = build_graph(&new_edges);
     let changes = vec![EdgeChange {
@@ -585,9 +595,12 @@ fn equivalence_diamond_with_bypass() {
 fn equivalence_sparse_forest() {
     // Several independent chains: no edges between them.  Add a cross edge.
     let edges: Vec<(&str, &str)> = vec![
-        ("a0", "a1"), ("a1", "a2"),
-        ("b0", "b1"), ("b1", "b2"),
-        ("c0", "c1"), ("c1", "c2"),
+        ("a0", "a1"),
+        ("a1", "a2"),
+        ("b0", "b1"),
+        ("b1", "b2"),
+        ("c0", "c1"),
+        ("c1", "c2"),
     ];
     let base = build_graph(&edges);
     let config = default_config();
@@ -625,10 +638,26 @@ fn fallback_fires_when_frontier_exceeds_half_nodes() {
     // New graph is completely different structure.
     let ng_new = build_graph(&[("A", "C"), ("C", "D"), ("D", "B")]);
     let changes = vec![
-        EdgeChange { from: "A".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Removed },
-        EdgeChange { from: "A".to_string(), to: "C".to_string(), kind: EdgeChangeKind::Added },
-        EdgeChange { from: "C".to_string(), to: "D".to_string(), kind: EdgeChangeKind::Added },
-        EdgeChange { from: "D".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Added },
+        EdgeChange {
+            from: "A".to_string(),
+            to: "B".to_string(),
+            kind: EdgeChangeKind::Removed,
+        },
+        EdgeChange {
+            from: "A".to_string(),
+            to: "C".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
+        EdgeChange {
+            from: "C".to_string(),
+            to: "D".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
+        EdgeChange {
+            from: "D".to_string(),
+            to: "B".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
     ];
 
     let result = pagerank_incremental(&ng_new, &prev.scores, &changes, &config);
@@ -674,11 +703,31 @@ fn fallback_result_is_correct() {
 
     let ng_new = build_graph(&[("A", "C"), ("C", "D"), ("D", "B")]);
     let changes = vec![
-        EdgeChange { from: "A".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Removed },
-        EdgeChange { from: "B".to_string(), to: "C".to_string(), kind: EdgeChangeKind::Removed },
-        EdgeChange { from: "A".to_string(), to: "C".to_string(), kind: EdgeChangeKind::Added },
-        EdgeChange { from: "C".to_string(), to: "D".to_string(), kind: EdgeChangeKind::Added },
-        EdgeChange { from: "D".to_string(), to: "B".to_string(), kind: EdgeChangeKind::Added },
+        EdgeChange {
+            from: "A".to_string(),
+            to: "B".to_string(),
+            kind: EdgeChangeKind::Removed,
+        },
+        EdgeChange {
+            from: "B".to_string(),
+            to: "C".to_string(),
+            kind: EdgeChangeKind::Removed,
+        },
+        EdgeChange {
+            from: "A".to_string(),
+            to: "C".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
+        EdgeChange {
+            from: "C".to_string(),
+            to: "D".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
+        EdgeChange {
+            from: "D".to_string(),
+            to: "B".to_string(),
+            kind: EdgeChangeKind::Added,
+        },
     ];
 
     let result = pagerank_incremental(&ng_new, &prev.scores, &changes, &config);
@@ -692,8 +741,13 @@ fn fallback_result_is_correct() {
 fn fallback_not_fired_for_small_single_edge_change() {
     // A single-edge change on a 10-node sparse graph should NOT trigger fallback
     // (frontier is small relative to graph size).
-    let edges: Vec<(String, String)> = (0..9).map(|i| (format!("n{i}"), format!("n{}", i + 1))).collect();
-    let edge_refs: Vec<(&str, &str)> = edges.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let edges: Vec<(String, String)> = (0..9)
+        .map(|i| (format!("n{i}"), format!("n{}", i + 1)))
+        .collect();
+    let edge_refs: Vec<(&str, &str)> = edges
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
 
     let base = build_graph(&edge_refs);
     let config = default_config();

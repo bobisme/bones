@@ -79,9 +79,8 @@ pub fn run_progress(
     let item_id = resolve_item_id(&conn, &args.id)?;
 
     // Get the parent item.
-    let parent = query::get_item(&conn, &item_id, false)?.ok_or_else(|| {
-        anyhow::anyhow!("Item not found: {}", args.id)
-    })?;
+    let parent = query::get_item(&conn, &item_id, false)?
+        .ok_or_else(|| anyhow::anyhow!("Item not found: {}", args.id))?;
 
     // Build progress tree recursively.
     let progress = build_progress(&conn, &parent)?;
@@ -163,9 +162,7 @@ fn build_progress(
                 && query::get_item(conn, &dep.depends_on_item_id, false)
                     .ok()
                     .flatten()
-                    .is_some_and(|blocker| {
-                        blocker.state != "done" && blocker.state != "archived"
-                    })
+                    .is_some_and(|blocker| blocker.state != "done" && blocker.state != "archived")
         });
 
         if is_blocked && child.state != "done" && child.state != "archived" {
@@ -212,11 +209,7 @@ fn render_progress_human(
     } else {
         "[task"
     };
-    writeln!(
-        w,
-        "{prefix}{} {kind_tag}, {}]",
-        report.title, report.state
-    )?;
+    writeln!(w, "{prefix}{} {kind_tag}, {}]", report.title, report.state)?;
 
     if report.progress.total == 0 {
         writeln!(w, "{prefix}  (no children)")?;
@@ -234,16 +227,9 @@ fn render_progress_human(
     let bar_width = 16;
     let filled = (fraction * bar_width as f64).round() as usize;
     let empty = bar_width - filled;
-    let bar = format!(
-        "{}{}",
-        "█".repeat(filled),
-        "░".repeat(empty)
-    );
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
     let pct = (fraction * 100.0).round() as usize;
-    writeln!(
-        w,
-        "{prefix}  Progress: {done}/{total} ({pct}%) {bar}"
-    )?;
+    writeln!(w, "{prefix}  Progress: {done}/{total} ({pct}%) {bar}")?;
 
     // Children.
     for child in &report.children {
@@ -490,7 +476,9 @@ mod tests {
 
         drop(conn);
 
-        let args = ProgressArgs { id: "bn-goal".to_string() };
+        let args = ProgressArgs {
+            id: "bn-goal".to_string(),
+        };
         let result = run_progress(&args, OutputMode::Json, dir.path());
         assert!(result.is_ok());
     }

@@ -24,11 +24,7 @@ struct FailureRow<'a>(&'a RedactionFailure);
 
 impl Renderable for FailureRow<'_> {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
-        writeln!(
-            w,
-            "FAIL {}  target={}",
-            self.0.item_id, self.0.event_hash
-        )?;
+        writeln!(w, "FAIL {}  target={}", self.0.item_id, self.0.event_hash)?;
         for loc in &self.0.residual_locations {
             match loc {
                 ResidualLocation::MissingRedactionRecord => {
@@ -52,8 +48,8 @@ impl Renderable for FailureRow<'_> {
     }
 
     fn render_json(&self, w: &mut dyn Write) -> io::Result<()> {
-        let val = serde_json::to_string(&self.0)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let val =
+            serde_json::to_string(&self.0).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         write!(w, "{val}")
     }
 
@@ -157,10 +153,7 @@ pub fn run_redact_verify(
                     "missing_projection",
                 ),
             )?;
-            anyhow::bail!(
-                "projection database not found at {}",
-                db_path.display()
-            );
+            anyhow::bail!("projection database not found at {}", db_path.display());
         }
     };
 
@@ -204,8 +197,7 @@ pub fn run_redact_verify(
 
             // Print failures first
             if !report.failures.is_empty() {
-                let rows: Vec<FailureRow> =
-                    report.failures.iter().map(FailureRow).collect();
+                let rows: Vec<FailureRow> = report.failures.iter().map(FailureRow).collect();
                 render_list(&rows, output)?;
             }
 
@@ -213,10 +205,7 @@ pub fn run_redact_verify(
             render_item(&ReportSummary(&report), output)?;
 
             if !report.is_ok() {
-                anyhow::bail!(
-                    "redact-verify: {} failure(s) found",
-                    report.failed
-                );
+                anyhow::bail!("redact-verify: {} failure(s) found", report.failed);
             }
         }
     }

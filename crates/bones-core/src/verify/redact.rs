@@ -18,10 +18,10 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
+use crate::event::Event;
 use crate::event::data::EventData;
 use crate::event::parser::parse_lines;
 use crate::event::types::EventType;
-use crate::event::Event;
 use crate::shard::ShardManager;
 
 // ---------------------------------------------------------------------------
@@ -200,10 +200,8 @@ fn collect_redaction_targets(events_dir: &Path) -> Result<Vec<RedactionTarget>> 
         .map_err(|(line_num, e)| anyhow::anyhow!("parse error at line {line_num}: {e}"))?;
 
     // Build a hash → event index for looking up original events.
-    let events_by_hash: HashMap<&str, &Event> = events
-        .iter()
-        .map(|e| (e.event_hash.as_str(), e))
-        .collect();
+    let events_by_hash: HashMap<&str, &Event> =
+        events.iter().map(|e| (e.event_hash.as_str(), e)).collect();
 
     // Find all redact events and pair them with their targets.
     let mut targets = Vec::new();
@@ -216,10 +214,9 @@ fn collect_redaction_targets(events_dir: &Path) -> Result<Vec<RedactionTarget>> 
         };
 
         let original = events_by_hash.get(redact_data.target_hash.as_str());
-        let (original_event_type, original_text) = original.map_or(
-            (None, None),
-            |orig| (Some(orig.event_type), extract_searchable_text(orig)),
-        );
+        let (original_event_type, original_text) = original.map_or((None, None), |orig| {
+            (Some(orig.event_type), extract_searchable_text(orig))
+        });
 
         targets.push(RedactionTarget {
             item_id: event.item_id.as_str().to_string(),
@@ -309,9 +306,7 @@ fn check_comment_redacted(
 ) -> Result<()> {
     // Check if a comment with this event_hash exists and has un-redacted body.
     let mut stmt = db
-        .prepare(
-            "SELECT comment_id, body FROM item_comments WHERE event_hash = ?1",
-        )
+        .prepare("SELECT comment_id, body FROM item_comments WHERE event_hash = ?1")
         .context("prepare comment redaction check")?;
 
     let rows: Vec<(i64, String)> = stmt
@@ -396,16 +391,18 @@ fn check_fts5_residual(
 /// to reduce false positives.
 fn extract_probe_words(text: &str) -> Vec<String> {
     const STOP_WORDS: &[&str] = &[
-        "the", "and", "for", "are", "but", "not", "you", "all", "can",
-        "had", "her", "was", "one", "our", "out", "has", "have", "been",
-        "from", "this", "that", "they", "with", "which", "their", "would",
-        "there", "what", "about", "will", "make", "like", "just", "than",
-        "them", "very", "when", "some", "could", "more", "also", "into",
-        "other", "then", "these", "only", "after", "most",
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was", "one",
+        "our", "out", "has", "have", "been", "from", "this", "that", "they", "with", "which",
+        "their", "would", "there", "what", "about", "will", "make", "like", "just", "than", "them",
+        "very", "when", "some", "could", "more", "also", "into", "other", "then", "these", "only",
+        "after", "most",
     ];
 
     text.split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| w.len() >= 4 && !STOP_WORDS.contains(&w.as_str()))
         .take(5) // Limit probe words to avoid excessive queries
         .collect()
@@ -510,11 +507,7 @@ mod tests {
     }
 
     /// Write events to the shard and project them into the DB.
-    fn write_and_project(
-        dir: &TempDir,
-        conn: &Connection,
-        events: &[Event],
-    ) {
+    fn write_and_project(dir: &TempDir, conn: &Connection, events: &[Event]) {
         let bones_dir = dir.path().join(".bones");
         let shard_mgr = ShardManager::new(&bones_dir);
         let projector = project::Projector::new(conn);
@@ -622,12 +615,7 @@ mod tests {
 
         let create = make_create_event("bn-tst1", "Test item", 1000);
         let comment = make_comment_event("bn-tst1", "Contains secret info", 2000);
-        let redact = make_redact_event(
-            "bn-tst1",
-            &comment.event_hash,
-            "accidental secret",
-            3000,
-        );
+        let redact = make_redact_event("bn-tst1", &comment.event_hash, "accidental secret", 3000);
 
         write_and_project(&dir, &conn, &[create, comment, redact]);
 
@@ -650,12 +638,7 @@ mod tests {
         write_and_project(&dir, &conn, &[create, comment.clone()]);
 
         // Write redact event to shard ONLY (don't project it)
-        let redact = make_redact_event(
-            "bn-tst1",
-            &comment.event_hash,
-            "accidental secret",
-            3000,
-        );
+        let redact = make_redact_event("bn-tst1", &comment.event_hash, "accidental secret", 3000);
         let bones_dir = dir.path().join(".bones");
         let shard_mgr = ShardManager::new(&bones_dir);
         let mut redact_clone = redact.clone();
@@ -671,14 +654,18 @@ mod tests {
 
         let failure = &report.failures[0];
         assert_eq!(failure.item_id, "bn-tst1");
-        assert!(failure
-            .residual_locations
-            .iter()
-            .any(|l| matches!(l, ResidualLocation::MissingRedactionRecord)));
-        assert!(failure
-            .residual_locations
-            .iter()
-            .any(|l| matches!(l, ResidualLocation::CommentNotRedacted { .. })));
+        assert!(
+            failure
+                .residual_locations
+                .iter()
+                .any(|l| matches!(l, ResidualLocation::MissingRedactionRecord))
+        );
+        assert!(
+            failure
+                .residual_locations
+                .iter()
+                .any(|l| matches!(l, ResidualLocation::CommentNotRedacted { .. }))
+        );
     }
 
     #[test]
@@ -689,18 +676,8 @@ mod tests {
         let create2 = make_create_event("bn-bbb", "Item B", 1001);
         let comment1 = make_comment_event("bn-aaa", "Secret A", 2000);
         let comment2 = make_comment_event("bn-bbb", "Secret B", 2001);
-        let redact1 = make_redact_event(
-            "bn-aaa",
-            &comment1.event_hash,
-            "reason A",
-            3000,
-        );
-        let redact2 = make_redact_event(
-            "bn-bbb",
-            &comment2.event_hash,
-            "reason B",
-            3001,
-        );
+        let redact1 = make_redact_event("bn-aaa", &comment1.event_hash, "reason A", 3000);
+        let redact2 = make_redact_event("bn-bbb", &comment2.event_hash, "reason B", 3001);
 
         write_and_project(
             &dir,
@@ -733,24 +710,20 @@ mod tests {
         let comment_fail = make_comment_event("bn-mix1", "Dangerous secret", 2001);
 
         // Redact both comments
-        let redact_ok = make_redact_event(
-            "bn-mix1",
-            &comment_ok.event_hash,
-            "reason 1",
-            3000,
-        );
-        let redact_fail = make_redact_event(
-            "bn-mix1",
-            &comment_fail.event_hash,
-            "reason 2",
-            3001,
-        );
+        let redact_ok = make_redact_event("bn-mix1", &comment_ok.event_hash, "reason 1", 3000);
+        let redact_fail = make_redact_event("bn-mix1", &comment_fail.event_hash, "reason 2", 3001);
 
         // Write and project all events normally (both redactions applied)
         write_and_project(
             &dir,
             &conn,
-            &[create, comment_ok, comment_fail.clone(), redact_ok, redact_fail],
+            &[
+                create,
+                comment_ok,
+                comment_fail.clone(),
+                redact_ok,
+                redact_fail,
+            ],
         );
 
         let events_dir = dir.path().join(".bones").join("events");

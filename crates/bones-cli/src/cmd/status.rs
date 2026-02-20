@@ -138,9 +138,7 @@ pub fn run_status(
         },
     };
 
-    render(output, &payload, |report, w| {
-        render_status_human(report, w)
-    })
+    render(output, &payload, |report, w| render_status_human(report, w))
 }
 
 /// Count items that are blocked by at least one open/doing dependency.
@@ -168,7 +166,10 @@ fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Res
     if let Some(ref agent) = report.agent {
         writeln!(w, "Agent: {agent}")?;
     } else {
-        writeln!(w, "Agent: (none — set --agent, BONES_AGENT, AGENT, or USER)")?;
+        writeln!(
+            w,
+            "Agent: (none — set --agent, BONES_AGENT, AGENT, or USER)"
+        )?;
     }
 
     // Assigned items section.
@@ -203,10 +204,7 @@ fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Res
     writeln!(
         w,
         "Project: {} open, {} doing, {} done, {} archived",
-        report.project.open,
-        report.project.doing,
-        report.project.done,
-        report.project.archived,
+        report.project.open, report.project.doing, report.project.done, report.project.archived,
     )?;
 
     Ok(())
@@ -354,7 +352,8 @@ mod tests {
             "INSERT INTO item_dependencies (item_id, depends_on_item_id, link_type, created_at_us) \
              VALUES ('bn-b', 'bn-a', 'blocks', 1000)",
             [],
-        ).expect("insert dep");
+        )
+        .expect("insert dep");
 
         assert_eq!(count_blocked_items(&conn), 1);
     }
