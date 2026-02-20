@@ -5,3 +5,4 @@
 
 pub mod merge;
 pub mod prolly;
+pub mod protocol;
