@@ -6,6 +6,8 @@
 //! - **Errors**: Use `anyhow::Result` for return types.
 //! - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
+pub mod semantic;
+
 use tracing::{info, instrument};
 
 #[instrument]
