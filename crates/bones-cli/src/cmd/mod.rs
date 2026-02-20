@@ -25,6 +25,7 @@ pub mod labels;
 pub mod list;
 pub mod log;
 pub mod migrate;
+pub mod migrate_format;
 pub mod mine;
 pub mod move_cmd;
 pub mod next;

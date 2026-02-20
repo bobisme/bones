@@ -27,6 +27,7 @@ use tracing::warn;
 use crate::event::Event;
 use crate::event::canonical::canonicalize_json;
 use crate::event::data::EventData;
+use crate::event::migrate_event;
 use crate::event::types::EventType;
 use crate::model::item_id::ItemId;
 
@@ -502,6 +503,7 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
 pub fn parse_lines(input: &str) -> Result<Vec<Event>, (usize, ParseError)> {
     let mut events = Vec::new();
     let mut version_checked = false;
+    let mut shard_version = CURRENT_VERSION;
 
     for (i, line) in input.lines().enumerate() {
         let line_no = i + 1;
@@ -510,14 +512,19 @@ pub fn parse_lines(input: &str) -> Result<Vec<Event>, (usize, ParseError)> {
         // pattern triggers version validation.
         if !version_checked && line.trim_start().starts_with(HEADER_PREFIX) {
             version_checked = true;
-            if let Err(msg) = detect_version(line) {
-                return Err((line_no, ParseError::VersionMismatch(msg)));
+            match detect_version(line) {
+                Ok(v) => shard_version = v,
+                Err(msg) => return Err((line_no, ParseError::VersionMismatch(msg))),
             }
             continue; // header line itself is not an event
         }
 
         match parse_line(line) {
-            Ok(ParsedLine::Event(event)) => events.push(*event),
+            Ok(ParsedLine::Event(event)) => {
+                let event = migrate_event(*event, shard_version)
+                    .map_err(|e| (line_no, ParseError::VersionMismatch(e.to_string())))?;
+                events.push(event);
+            }
             Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => {}
             // Forward-compatible: unknown event types are skipped with a
             // warning.  This allows newer event types to be added without

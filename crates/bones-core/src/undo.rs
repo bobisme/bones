@@ -104,13 +104,12 @@ pub fn compensating_event(
 
         // item.update → item.update with previous field value
         EventData::Update(d) => {
-            let prev = find_previous_field_value(prior_events, &d.field)
-                .ok_or_else(|| {
-                    UndoError::NoPriorState(format!(
-                        "no prior value for field '{}' found in event history",
-                        d.field
-                    ))
-                })?;
+            let prev = find_previous_field_value(prior_events, &d.field).ok_or_else(|| {
+                UndoError::NoPriorState(format!(
+                    "no prior value for field '{}' found in event history",
+                    d.field
+                ))
+            })?;
             (
                 EventType::Update,
                 EventData::Update(UpdateData {
@@ -123,8 +122,7 @@ pub fn compensating_event(
 
         // item.move → item.move back to prior state
         EventData::Move(d) => {
-            let prior_state = find_previous_state(prior_events)
-                .unwrap_or(State::Open);
+            let prior_state = find_previous_state(prior_events).unwrap_or(State::Open);
             (
                 EventType::Move,
                 EventData::Move(MoveData {
@@ -230,10 +228,7 @@ fn find_previous_state(prior_events: &[&Event]) -> Option<State> {
 ///
 /// Scans backwards through prior events looking for `item.update` targeting
 /// the same field, then falls back to the initial value from `item.create`.
-fn find_previous_field_value(
-    prior_events: &[&Event],
-    field: &str,
-) -> Option<serde_json::Value> {
+fn find_previous_field_value(prior_events: &[&Event], field: &str) -> Option<serde_json::Value> {
     for event in prior_events.iter().rev() {
         match &event.data {
             EventData::Update(d) if d.field == field => return Some(d.value.clone()),
@@ -252,10 +247,9 @@ fn initial_create_field_value(create: &CreateData, field: &str) -> Option<serde_
             .description
             .as_ref()
             .map(|d| serde_json::Value::String(d.clone())),
-        "size" => create.size.map(|s| {
-            serde_json::to_value(s)
-                .unwrap_or_else(|_| serde_json::Value::Null)
-        }),
+        "size" => create
+            .size
+            .map(|s| serde_json::to_value(s).unwrap_or_else(|_| serde_json::Value::Null)),
         "urgency" => serde_json::to_value(create.urgency).ok(),
         "labels" => Some(serde_json::Value::Array(
             create
@@ -295,11 +289,7 @@ fn build_create_from_history(prior_events: &[&Event]) -> Option<CreateData> {
 }
 
 /// Apply a single field update to a `CreateData` struct (for undo-delete reconstruction).
-fn apply_update_to_create(
-    create: &mut CreateData,
-    field: &str,
-    value: &serde_json::Value,
-) {
+fn apply_update_to_create(create: &mut CreateData, field: &str, value: &serde_json::Value) {
     match field {
         "title" => {
             if let Some(s) = value.as_str() {
@@ -659,8 +649,7 @@ mod tests {
     #[test]
     fn compensating_event_references_original_in_parents() {
         let create_event = minimal_create();
-        let comp =
-            compensating_event(&create_event, &[], "undoer", 2_000_000).unwrap();
+        let comp = compensating_event(&create_event, &[], "undoer", 2_000_000).unwrap();
         assert_eq!(comp.parents, vec!["blake3:create001"]);
     }
 

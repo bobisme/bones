@@ -212,7 +212,10 @@ pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) 
     } else {
         println!(
             "Campaign: {} seeds, {} agents, {} rounds, faults={:.0}%",
-            report.seeds_run, args.agents, args.rounds, args.faults * 100.0
+            report.seeds_run,
+            args.agents,
+            args.rounds,
+            args.faults * 100.0
         );
         println!(
             "Results: {}/{} passed, {} interesting states",
@@ -229,7 +232,11 @@ pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) 
             );
             // Show first few failures
             for failure in report.failures.iter().take(5) {
-                println!("  seed {}: {} violations", failure.seed, failure.violations.len());
+                println!(
+                    "  seed {}: {} violations",
+                    failure.seed,
+                    failure.violations.len()
+                );
                 for v in &failure.violations {
                     println!("    - {v}");
                 }

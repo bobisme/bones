@@ -42,7 +42,10 @@ pub fn hybrid_search(
     let lexical_ranked: Vec<&str> = lexical_hits.iter().map(|h| h.item_id.as_str()).collect();
 
     let semantic_ranked_owned = if let Some(model) = model {
-        match model.embed(query).and_then(|embedding| knn_search(db, &embedding, limit)) {
+        match model
+            .embed(query)
+            .and_then(|embedding| knn_search(db, &embedding, limit))
+        {
             Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
             Err(e) => {
                 warn!("semantic layer unavailable, falling back to lexical-only fusion: {e}");
@@ -57,12 +60,7 @@ pub fn hybrid_search(
     // Structural scoring for free-text search is not available yet.
     let structural_ranked: Vec<&str> = Vec::new();
 
-    let fused = rrf_fuse(
-        &lexical_ranked,
-        &semantic_ranked,
-        &structural_ranked,
-        rrf_k,
-    );
+    let fused = rrf_fuse(&lexical_ranked, &semantic_ranked, &structural_ranked, rrf_k);
 
     let mut out = Vec::with_capacity(fused.len().min(limit));
     for (item_id, score) in fused.into_iter().take(limit) {

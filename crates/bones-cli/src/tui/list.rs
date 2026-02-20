@@ -352,9 +352,10 @@ impl ListView {
         if len == 0 {
             return;
         }
-        let i = self.table_state.selected().map_or(0, |i| {
-            if i + 1 >= len { len - 1 } else { i + 1 }
-        });
+        let i =
+            self.table_state
+                .selected()
+                .map_or(0, |i| if i + 1 >= len { len - 1 } else { i + 1 });
         self.table_state.select(Some(i));
     }
 
@@ -363,7 +364,10 @@ impl ListView {
         if len == 0 {
             return;
         }
-        let i = self.table_state.selected().map_or(0, |i| i.saturating_sub(1));
+        let i = self
+            .table_state
+            .selected()
+            .map_or(0, |i| i.saturating_sub(1));
         self.table_state.select(Some(i));
     }
 
@@ -579,10 +583,8 @@ impl ListView {
                 self.apply_filter_and_sort();
             }
             FilterField::Kind => {
-                self.filter.kind = cycle_option(
-                    self.filter.kind.as_deref(),
-                    &["task", "goal", "bug"],
-                );
+                self.filter.kind =
+                    cycle_option(self.filter.kind.as_deref(), &["task", "goal", "bug"]);
                 self.apply_filter_and_sort();
             }
             FilterField::Urgency => {
@@ -608,10 +610,8 @@ impl ListView {
                 self.apply_filter_and_sort();
             }
             FilterField::Kind => {
-                self.filter.kind = cycle_option_rev(
-                    self.filter.kind.as_deref(),
-                    &["task", "goal", "bug"],
-                );
+                self.filter.kind =
+                    cycle_option_rev(self.filter.kind.as_deref(), &["task", "goal", "bug"]);
                 self.apply_filter_and_sort();
             }
             FilterField::Urgency => {
@@ -716,12 +716,12 @@ fn truncate(s: &str, max_chars: usize) -> String {
 fn build_row(item: &WorkItem, title_width: u16) -> Row<'static> {
     let id_cell = Cell::from(item.item_id.clone());
     let title_cell = Cell::from(truncate(&item.title, title_width as usize));
-    let state_cell = Cell::from(item.state.clone())
-        .style(Style::default().fg(state_color(&item.state)));
-    let kind_cell = Cell::from(item.kind.clone())
-        .style(Style::default().fg(kind_color(&item.kind)));
-    let urgency_cell = Cell::from(item.urgency.clone())
-        .style(Style::default().fg(urgency_color(&item.urgency)));
+    let state_cell =
+        Cell::from(item.state.clone()).style(Style::default().fg(state_color(&item.state)));
+    let kind_cell =
+        Cell::from(item.kind.clone()).style(Style::default().fg(kind_color(&item.kind)));
+    let urgency_cell =
+        Cell::from(item.urgency.clone()).style(Style::default().fg(urgency_color(&item.urgency)));
     let labels_str = item.labels.join(", ");
     let labels_cell = Cell::from(labels_str);
 
@@ -784,10 +784,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &mut ListView) {
         .collect();
 
     let block_title = match app.input_mode {
-        InputMode::Search => format!(
-            " bones — search: {} ",
-            app.search_buf
-        ),
+        InputMode::Search => format!(" bones — search: {} ", app.search_buf),
         _ => format!(
             " bones — {} of {} items  [sort: {}] ",
             app.visible_items.len(),
@@ -825,9 +822,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &mut ListView) {
     // -----------------------------------------------------------------------
     // Filter popup overlay
     // -----------------------------------------------------------------------
-    if app.input_mode == InputMode::FilterPopup
-        || app.input_mode == InputMode::FilterLabel
-    {
+    if app.input_mode == InputMode::FilterPopup || app.input_mode == InputMode::FilterLabel {
         render_filter_popup(frame, app, area);
     }
 }
@@ -846,7 +841,9 @@ fn build_status_bar(app: &ListView) -> Line<'static> {
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(Color::White);
     let val_style = Style::default().fg(Color::Cyan);
     let dim_style = Style::default().fg(Color::DarkGray);
@@ -938,7 +935,9 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         height: popup_area.height.saturating_sub(2),
     };
 
-    let focused_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let focused_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().fg(Color::White);
     let dim_style = Style::default().fg(Color::DarkGray);
     let val_style = Style::default().fg(Color::Green);
@@ -954,10 +953,18 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         if row_y >= inner.y + inner.height {
             break;
         }
-        let row_area = Rect { y: row_y, height: 1, ..inner };
+        let row_area = Rect {
+            y: row_y,
+            height: 1,
+            ..inner
+        };
 
         let is_focused = app.filter_field == *field;
-        let label_style = if is_focused { focused_style } else { normal_style };
+        let label_style = if is_focused {
+            focused_style
+        } else {
+            normal_style
+        };
         let prefix = if is_focused { "► " } else { "  " };
 
         let val_display = value.as_deref().unwrap_or("(any)");
@@ -975,7 +982,11 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     let label_row_y = inner.y + 3;
     if label_row_y < inner.y + inner.height {
         let is_focused = app.filter_field == FilterField::Label;
-        let label_style = if is_focused { focused_style } else { normal_style };
+        let label_style = if is_focused {
+            focused_style
+        } else {
+            normal_style
+        };
         let prefix = if is_focused { "► " } else { "  " };
         let editing = app.input_mode == InputMode::FilterLabel;
         let val_display = if app.label_buf.is_empty() {
@@ -1036,8 +1047,7 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
-        .context("enter alternate screen")?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).context("enter alternate screen")?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).context("create terminal")
 }
@@ -1076,10 +1086,7 @@ pub fn run_list_tui(project_root: &std::path::Path) -> Result<()> {
     result
 }
 
-fn run_loop(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &mut ListView,
-) -> Result<()> {
+fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut ListView) -> Result<()> {
     let tick_rate = Duration::from_millis(200);
 
     loop {
@@ -1140,7 +1147,16 @@ mod tests {
     #[test]
     fn filter_state_empty_matches_all() {
         let filter = FilterState::default();
-        let item = make_item("bn-001", "hello", "open", "task", "default", vec![], 100, 200);
+        let item = make_item(
+            "bn-001",
+            "hello",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
         assert!(filter.matches(&item));
         assert!(filter.is_empty());
     }
@@ -1150,8 +1166,26 @@ mod tests {
         let mut filter = FilterState::default();
         filter.state = Some("open".to_string());
 
-        let open = make_item("bn-001", "open item", "open", "task", "default", vec![], 100, 200);
-        let doing = make_item("bn-002", "doing item", "doing", "task", "default", vec![], 100, 200);
+        let open = make_item(
+            "bn-001",
+            "open item",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
+        let doing = make_item(
+            "bn-002",
+            "doing item",
+            "doing",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
 
         assert!(filter.matches(&open));
         assert!(!filter.matches(&doing));
@@ -1162,8 +1196,26 @@ mod tests {
         let mut filter = FilterState::default();
         filter.kind = Some("bug".to_string());
 
-        let bug = make_item("bn-001", "a bug", "open", "bug", "default", vec![], 100, 200);
-        let task = make_item("bn-002", "a task", "open", "task", "default", vec![], 100, 200);
+        let bug = make_item(
+            "bn-001",
+            "a bug",
+            "open",
+            "bug",
+            "default",
+            vec![],
+            100,
+            200,
+        );
+        let task = make_item(
+            "bn-002",
+            "a task",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
 
         assert!(filter.matches(&bug));
         assert!(!filter.matches(&task));
@@ -1174,8 +1226,26 @@ mod tests {
         let mut filter = FilterState::default();
         filter.urgency = Some("urgent".to_string());
 
-        let urgent = make_item("bn-001", "urgent", "open", "task", "urgent", vec![], 100, 200);
-        let default = make_item("bn-002", "default", "open", "task", "default", vec![], 100, 200);
+        let urgent = make_item(
+            "bn-001",
+            "urgent",
+            "open",
+            "task",
+            "urgent",
+            vec![],
+            100,
+            200,
+        );
+        let default = make_item(
+            "bn-002",
+            "default",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
 
         assert!(filter.matches(&urgent));
         assert!(!filter.matches(&default));
@@ -1196,8 +1266,16 @@ mod tests {
             100,
             200,
         );
-        let without_label =
-            make_item("bn-002", "item2", "open", "task", "default", vec![], 100, 200);
+        let without_label = make_item(
+            "bn-002",
+            "item2",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
 
         assert!(filter.matches(&with_label));
         assert!(!filter.matches(&without_label));
@@ -1311,8 +1389,26 @@ mod tests {
             ..Default::default()
         };
         let items = vec![
-            make_item("bn-001", "open", "open", "task", "default", vec![], 100, 200),
-            make_item("bn-002", "doing", "doing", "task", "default", vec![], 101, 201),
+            make_item(
+                "bn-001",
+                "open",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                200,
+            ),
+            make_item(
+                "bn-002",
+                "doing",
+                "doing",
+                "task",
+                "default",
+                vec![],
+                101,
+                201,
+            ),
             make_item("bn-003", "open2", "open", "bug", "urgent", vec![], 102, 202),
         ];
         let result = filter.apply(&items);
@@ -1328,8 +1424,26 @@ mod tests {
     fn sort_priority_orders_urgent_first() {
         let mut items = vec![
             make_item("bn-001", "punt", "open", "task", "punt", vec![], 100, 200),
-            make_item("bn-002", "default", "open", "task", "default", vec![], 100, 200),
-            make_item("bn-003", "urgent", "open", "task", "urgent", vec![], 100, 200),
+            make_item(
+                "bn-002",
+                "default",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                200,
+            ),
+            make_item(
+                "bn-003",
+                "urgent",
+                "open",
+                "task",
+                "urgent",
+                vec![],
+                100,
+                200,
+            ),
         ];
         sort_items(&mut items, SortField::Priority);
         assert_eq!(items[0].urgency, "urgent");
@@ -1353,9 +1467,36 @@ mod tests {
     #[test]
     fn sort_created_desc_orders_newest_first() {
         let mut items = vec![
-            make_item("bn-001", "oldest", "open", "task", "default", vec![], 100, 500),
-            make_item("bn-002", "newest", "open", "task", "default", vec![], 300, 500),
-            make_item("bn-003", "middle", "open", "task", "default", vec![], 200, 500),
+            make_item(
+                "bn-001",
+                "oldest",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                500,
+            ),
+            make_item(
+                "bn-002",
+                "newest",
+                "open",
+                "task",
+                "default",
+                vec![],
+                300,
+                500,
+            ),
+            make_item(
+                "bn-003",
+                "middle",
+                "open",
+                "task",
+                "default",
+                vec![],
+                200,
+                500,
+            ),
         ];
         sort_items(&mut items, SortField::Created);
         assert_eq!(items[0].created_at_us, 300);
@@ -1475,9 +1616,36 @@ mod tests {
         let mut view = ListView {
             db_path: PathBuf::from("/nonexistent"),
             all_items: vec![
-                make_item("bn-001", "First", "open", "task", "urgent", vec![], 100, 300),
-                make_item("bn-002", "Second", "doing", "task", "default", vec![], 200, 200),
-                make_item("bn-003", "Third", "done", "bug", "punt", vec!["fix"], 300, 100),
+                make_item(
+                    "bn-001",
+                    "First",
+                    "open",
+                    "task",
+                    "urgent",
+                    vec![],
+                    100,
+                    300,
+                ),
+                make_item(
+                    "bn-002",
+                    "Second",
+                    "doing",
+                    "task",
+                    "default",
+                    vec![],
+                    200,
+                    200,
+                ),
+                make_item(
+                    "bn-003",
+                    "Third",
+                    "done",
+                    "bug",
+                    "punt",
+                    vec!["fix"],
+                    300,
+                    100,
+                ),
             ],
             visible_items: Vec::new(),
             filter: FilterState::default(),

@@ -210,10 +210,8 @@ pub fn compute_whittle_indices(
         .node_indices()
         .filter_map(|idx| graph.node_weight(idx).map(|id| (idx, id.as_str())))
         .collect();
-    let id_to_idx: HashMap<&str, NodeIndex> = idx_to_id
-        .iter()
-        .map(|(&idx, &id)| (id, idx))
-        .collect();
+    let id_to_idx: HashMap<&str, NodeIndex> =
+        idx_to_id.iter().map(|(&idx, &id)| (id, idx)).collect();
 
     let mut indices: Vec<WhittleIndex> = Vec::with_capacity(graph.node_count());
 
@@ -229,14 +227,8 @@ pub fn compute_whittle_indices(
         // weighted by probability of unblocking. For simplicity, P(unblock) = 1
         // if this item is the ONLY remaining blocker, otherwise 1/k where k is
         // the number of unsatisfied blockers.
-        let unblock_value = compute_unblock_value(
-            graph,
-            idx,
-            scores,
-            &idx_to_id,
-            &id_to_idx,
-            &in_progress_set,
-        );
+        let unblock_value =
+            compute_unblock_value(graph, idx, scores, &idx_to_id, &id_to_idx, &in_progress_set);
 
         // Expected completion time from size.
         let size_str = sizes.get(item_id.as_str()).map(String::as_str);
@@ -245,13 +237,14 @@ pub fn compute_whittle_indices(
         // Dynamic block discount: if any of this item's dependencies
         // (predecessors in the graph) are currently in-progress, apply a
         // discount because this item cannot be started yet.
-        let is_dynamically_blocked = graph
-            .neighbors_directed(idx, Direction::Incoming)
-            .any(|pred_idx| {
-                idx_to_id
-                    .get(&pred_idx)
-                    .is_some_and(|pred_id| in_progress_set.contains(pred_id))
-            });
+        let is_dynamically_blocked =
+            graph
+                .neighbors_directed(idx, Direction::Incoming)
+                .any(|pred_idx| {
+                    idx_to_id
+                        .get(&pred_idx)
+                        .is_some_and(|pred_id| in_progress_set.contains(pred_id))
+                });
 
         let total_value = base_value + unblock_value;
         let raw_index = total_value / expected_time;
@@ -447,8 +440,7 @@ mod tests {
         let s = scores(&[("bn-a", 10.0)]);
         let sz = sizes(&[("bn-a", "s")]); // time = 1.0
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         assert_eq!(indices.len(), 1);
         assert_eq!(indices[0].item_id, "bn-a");
@@ -464,8 +456,7 @@ mod tests {
         let s = scores(&[("bn-a", 5.0), ("bn-b", 10.0)]);
         let sz = sizes(&[("bn-a", "m"), ("bn-b", "m")]); // same size
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         assert_eq!(indices[0].item_id, "bn-b");
         assert_eq!(indices[1].item_id, "bn-a");
@@ -477,8 +468,7 @@ mod tests {
         let s = scores(&[("bn-a", 10.0), ("bn-b", 10.0)]);
         let sz = sizes(&[("bn-a", "l"), ("bn-b", "s")]); // bn-a: 4, bn-b: 1
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         // bn-b: 10/1 = 10, bn-a: 10/4 = 2.5
         assert_eq!(indices[0].item_id, "bn-b");
@@ -494,8 +484,7 @@ mod tests {
         let s = scores(&[("bn-a", 5.0), ("bn-b", 8.0)]);
         let sz = sizes(&[("bn-a", "s"), ("bn-b", "s")]); // both time=1
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         // bn-a: (5 + 8*1.0) / 1 = 13.0 (sole blocker, P=1)
         // bn-b: (8 + 0) / 1 = 8.0
@@ -518,8 +507,7 @@ mod tests {
         let s = scores(&[("bn-a", 5.0), ("bn-b", 5.0), ("bn-c", 10.0)]);
         let sz = sizes(&[("bn-a", "s"), ("bn-b", "s"), ("bn-c", "s")]);
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         let a = indices.iter().find(|i| i.item_id == "bn-a").unwrap();
         let b = indices.iter().find(|i| i.item_id == "bn-b").unwrap();
@@ -574,8 +562,7 @@ mod tests {
         let sz = sizes(&[("bn-a", "s"), ("bn-b", "s"), ("bn-c", "s")]);
 
         // Without in-progress: each gets P=0.5, unblock=5
-        let indices_base =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices_base = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
         let b_base = indices_base.iter().find(|i| i.item_id == "bn-b").unwrap();
 
         // With bn-a in-progress: bn-a is partially satisfied for bn-c, so
@@ -599,8 +586,7 @@ mod tests {
         let s = scores(&[]); // no scores
         let sz = sizes(&[]);
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         assert_eq!(indices.len(), 1);
         assert!((indices[0].index - 0.0).abs() < f64::EPSILON);
@@ -612,8 +598,7 @@ mod tests {
         let s = scores(&[("bn-a", 10.0)]);
         let sz = sizes(&[]); // no sizes
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         // Default size = medium = 2 time units
         // Index = 10 / 2 = 5
@@ -640,10 +625,8 @@ mod tests {
         let s = scores(&[("bn-a", 5.0), ("bn-b", 5.0), ("bn-c", 5.0)]);
         let sz = sizes(&[("bn-a", "m"), ("bn-b", "m"), ("bn-c", "m")]);
 
-        let indices1 =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
-        let indices2 =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices1 = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices2 = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         let ids1: Vec<&str> = indices1.iter().map(|i| i.item_id.as_str()).collect();
         let ids2: Vec<&str> = indices2.iter().map(|i| i.item_id.as_str()).collect();
@@ -661,8 +644,7 @@ mod tests {
         let s = scores(&[("bn-a", 3.0), ("bn-b", 3.0), ("bn-c", 3.0)]);
         let sz = sizes(&[("bn-a", "s"), ("bn-b", "s"), ("bn-c", "s")]);
 
-        let indices =
-            compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
+        let indices = compute_whittle_indices(&graph, &s, &sz, &[], &WhittleConfig::default());
 
         let a = indices.iter().find(|i| i.item_id == "bn-a").unwrap();
         let b = indices.iter().find(|i| i.item_id == "bn-b").unwrap();

@@ -534,6 +534,14 @@ enum Commands {
 
     #[command(
         next_help_heading = "Project Maintenance",
+        about = "Rewrite event shards to the current format version",
+        long_about = "Read all .bones/events/*.events shards, apply version transforms, and rewrite them in the current format. Original files are preserved as .events.bak backups.",
+        after_help = "EXAMPLES:\n    # Rewrite all shards to current format\n    bn migrate-format\n\n    # Overwrite existing .bak backups\n    bn migrate-format --force-backup"
+    )]
+    MigrateFormat(cmd::migrate_format::MigrateFormatArgs),
+
+    #[command(
+        next_help_heading = "Project Maintenance",
         about = "Rebuild the projection",
         long_about = "Rebuild the local projection database from append-only event shards.",
         after_help = "EXAMPLES:\n    # Full rebuild\n    bn rebuild\n\n    # Incremental rebuild\n    bn rebuild --incremental\n\n    # Emit machine-readable output\n    bn rebuild --json"
@@ -862,6 +870,9 @@ fn main() -> anyhow::Result<()> {
         Commands::MigrateFromBeads(args) => timing::timed("cmd.migrate_from_beads", || {
             cmd::migrate::run_migrate(&args, &project_root)
         }),
+        Commands::MigrateFormat(args) => timing::timed("cmd.migrate_format", || {
+            cmd::migrate_format::run_migrate_format(&args, &project_root)
+        }),
         Commands::Hooks {
             command: HookCommand::Install,
         } => timing::timed("cmd.hooks.install", || {
@@ -913,13 +924,11 @@ fn main() -> anyhow::Result<()> {
             cmd::completions::run_completions(args.shell, &mut command)
         }),
 
-        Commands::Sim(ref args) => timing::timed("cmd.sim", || {
-            cmd::sim::run_sim(args, output, &project_root)
-        }),
+        Commands::Sim(ref args) => {
+            timing::timed("cmd.sim", || cmd::sim::run_sim(args, output, &project_root))
+        }
 
-        Commands::Tui => timing::timed("cmd.tui", || {
-            tui::list::run_list_tui(&project_root)
-        }),
+        Commands::Tui => timing::timed("cmd.tui", || tui::list::run_list_tui(&project_root)),
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
             git::merge_driver::merge_driver_main(&base, &ours, &theirs)
         }),

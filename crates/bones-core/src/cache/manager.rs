@@ -128,10 +128,7 @@ impl CacheManager {
             if reader.created_at_us() == current_fp {
                 match reader.read_all() {
                     Ok(events) => {
-                        tracing::debug!(
-                            count = events.len(),
-                            "loaded events from binary cache"
-                        );
+                        tracing::debug!(count = events.len(), "loaded events from binary cache");
                         return Ok(LoadResult {
                             events,
                             source: LoadSource::Cache,
@@ -313,8 +310,8 @@ fn fingerprint_dir(dir: &Path) -> Result<u64> {
 mod tests {
     use super::*;
     use crate::event::data::{CreateData, MoveData};
-    use crate::event::{Event, EventData, EventType};
     use crate::event::writer;
+    use crate::event::{Event, EventData, EventType};
     use crate::model::item::{Kind, State, Urgency};
     use crate::model::item_id::ItemId;
     use crate::shard::ShardManager;

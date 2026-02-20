@@ -318,7 +318,10 @@ fn gold_dataset_loads_and_validates() {
             "duplicate pair references unknown item: {}",
             pair[1]
         );
-        assert_ne!(pair[0], pair[1], "duplicate pair must reference two different items");
+        assert_ne!(
+            pair[0], pair[1],
+            "duplicate pair must reference two different items"
+        );
     }
 
     // Validate all query relevant IDs exist in items
@@ -385,7 +388,10 @@ fn ndcg_perfect_ranking() {
     let ranked = vec!["a".to_string(), "b".to_string(), "c".to_string()];
     let relevant: HashSet<&str> = ["a", "b"].iter().copied().collect();
     let score = ndcg_at_k(&ranked, &relevant, 10);
-    assert!(score > 0.99, "perfect ranking should give NDCG ≈ 1.0, got {score}");
+    assert!(
+        score > 0.99,
+        "perfect ranking should give NDCG ≈ 1.0, got {score}"
+    );
 }
 
 #[test]
@@ -393,7 +399,10 @@ fn ndcg_worst_ranking() {
     let ranked = vec!["x".to_string(), "y".to_string(), "z".to_string()];
     let relevant: HashSet<&str> = ["a", "b"].iter().copied().collect();
     let score = ndcg_at_k(&ranked, &relevant, 10);
-    assert_eq!(score, 0.0, "no relevant items in results should give NDCG = 0.0");
+    assert_eq!(
+        score, 0.0,
+        "no relevant items in results should give NDCG = 0.0"
+    );
 }
 
 #[test]
@@ -413,7 +422,10 @@ fn ndcg_empty_relevant() {
     let ranked = vec!["a".to_string()];
     let relevant: HashSet<&str> = HashSet::new();
     let score = ndcg_at_k(&ranked, &relevant, 10);
-    assert_eq!(score, 1.0, "empty relevant set should give NDCG = 1.0 (vacuous)");
+    assert_eq!(
+        score, 1.0,
+        "empty relevant set should give NDCG = 1.0 (vacuous)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -592,10 +604,9 @@ fn ci_regression_gate_search_quality() {
         let (Some(a_id), Some(b_id)) = (pair.first(), pair.get(1)) else {
             continue;
         };
-        let (Some(&a_title), Some(&b_title)) = (
-            title_map.get(a_id.as_str()),
-            title_map.get(b_id.as_str()),
-        ) else {
+        let (Some(&a_title), Some(&b_title)) =
+            (title_map.get(a_id.as_str()), title_map.get(b_id.as_str()))
+        else {
             continue;
         };
 

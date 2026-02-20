@@ -214,8 +214,7 @@ pub fn run_single_seed(
 
     // Run the full oracle suite.
     let mut oracle_rng = DeterministicRng::new(seed.wrapping_add(0xDEAD));
-    let oracle_result =
-        ConvergenceOracle::check_all(&result.states, &all_events, &mut oracle_rng);
+    let oracle_result = ConvergenceOracle::check_all(&result.states, &all_events, &mut oracle_rng);
 
     if oracle_result.passed {
         Ok(Ok(()))
@@ -239,8 +238,7 @@ pub fn replay_seed(seed: u64, config: &CampaignConfig) -> Result<DetailedTrace> 
     let all_events = collect_emitted_events(&result);
 
     let mut oracle_rng = DeterministicRng::new(seed.wrapping_add(0xDEAD));
-    let oracle =
-        ConvergenceOracle::check_all(&result.states, &all_events, &mut oracle_rng);
+    let oracle = ConvergenceOracle::check_all(&result.states, &all_events, &mut oracle_rng);
 
     Ok(DetailedTrace {
         result,
@@ -461,7 +459,11 @@ mod tests {
         assert!(!trace.result.trace.is_empty());
         assert!(!trace.all_events.is_empty());
         // With correct CRDT and no destructive faults, oracle should pass
-        assert!(trace.oracle.passed, "oracle should pass: {:?}", trace.oracle.violations);
+        assert!(
+            trace.oracle.passed,
+            "oracle should pass: {:?}",
+            trace.oracle.violations
+        );
     }
 
     #[test]

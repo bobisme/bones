@@ -266,8 +266,8 @@ pub fn compact_item(
     let payload = state.to_snapshot_payload(item_id, events.len(), earliest_ts, latest_ts);
 
     // Serialize payload to JSON value for SnapshotData.
-    let state_json = serde_json::to_value(&payload)
-        .expect("SnapshotPayload should always serialize");
+    let state_json =
+        serde_json::to_value(&payload).expect("SnapshotPayload should always serialize");
 
     // Build the snapshot event.
     // Use the latest event's timestamp + 1µs for the snapshot,
@@ -283,10 +283,9 @@ pub fn compact_item(
     let mut sorted_parents = parents;
     sorted_parents.sort();
 
-    let itc = events.last().map_or_else(
-        || "itc:AQ".to_string(),
-        |e| e.itc.clone(),
-    );
+    let itc = events
+        .last()
+        .map_or_else(|| "itc:AQ".to_string(), |e| e.itc.clone());
 
     let item_id_parsed = ItemId::new_unchecked(item_id);
 
@@ -305,8 +304,8 @@ pub fn compact_item(
     };
 
     // Compute and set the event hash.
-    snapshot_event.event_hash = writer::compute_event_hash(&snapshot_event)
-        .expect("snapshot event should always hash");
+    snapshot_event.event_hash =
+        writer::compute_event_hash(&snapshot_event).expect("snapshot event should always hash");
 
     Some(snapshot_event)
 }
@@ -448,10 +447,7 @@ pub fn verify_compaction(
 /// If compaction is correct, the snapshot is the join of all events, so
 /// merging the snapshot with the original state should produce identical
 /// state (idempotency of join with self's join).
-pub fn verify_lattice_join(
-    original_events: &[Event],
-    snapshot_event: &Event,
-) -> Result<bool> {
+pub fn verify_lattice_join(original_events: &[Event], snapshot_event: &Event) -> Result<bool> {
     // Build original state.
     let mut original_state = WorkItemState::new();
     for event in original_events {
@@ -472,10 +468,7 @@ pub fn verify_lattice_join(
 /// Extract and deserialize the [`SnapshotPayload`] from an `item.snapshot` event.
 pub fn extract_snapshot_payload(event: &Event) -> Result<SnapshotPayload> {
     if event.event_type != EventType::Snapshot {
-        bail!(
-            "expected item.snapshot event, got {}",
-            event.event_type
-        );
+        bail!("expected item.snapshot event, got {}", event.event_type);
     }
 
     let state_json = match &event.data {
@@ -597,13 +590,7 @@ mod tests {
         }
     }
 
-    fn create_event(
-        title: &str,
-        wall_ts: i64,
-        agent: &str,
-        hash: &str,
-        item_id: &str,
-    ) -> Event {
+    fn create_event(title: &str, wall_ts: i64, agent: &str, hash: &str, item_id: &str) -> Event {
         make_event(
             EventType::Create,
             EventData::Create(CreateData {
@@ -624,13 +611,7 @@ mod tests {
         )
     }
 
-    fn move_event(
-        state: State,
-        wall_ts: i64,
-        agent: &str,
-        hash: &str,
-        item_id: &str,
-    ) -> Event {
+    fn move_event(state: State, wall_ts: i64, agent: &str, hash: &str, item_id: &str) -> Event {
         make_event(
             EventType::Move,
             EventData::Move(MoveData {
@@ -666,13 +647,7 @@ mod tests {
         )
     }
 
-    fn comment_event(
-        body: &str,
-        wall_ts: i64,
-        agent: &str,
-        hash: &str,
-        item_id: &str,
-    ) -> Event {
+    fn comment_event(body: &str, wall_ts: i64, agent: &str, hash: &str, item_id: &str) -> Event {
         make_event(
             EventType::Comment,
             EventData::Comment(CommentData {
@@ -826,8 +801,7 @@ mod tests {
 
         // Serialize to JSON and back.
         let json = serde_json::to_string(&payload).expect("serialize");
-        let roundtripped: SnapshotPayload =
-            serde_json::from_str(&json).expect("deserialize");
+        let roundtripped: SnapshotPayload = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(roundtripped.item_id, payload.item_id);
         assert_eq!(roundtripped.title.value, payload.title.value);
@@ -883,7 +857,13 @@ mod tests {
 
     #[test]
     fn not_eligible_open_item() {
-        let events = vec![create_event("Title", 1_000_000, "alice", "blake3:c1", "bn-test1")];
+        let events = vec![create_event(
+            "Title",
+            1_000_000,
+            "alice",
+            "blake3:c1",
+            "bn-test1",
+        )];
         let mut state = WorkItemState::new();
         for event in &events {
             state.apply_event(event);
@@ -926,9 +906,13 @@ mod tests {
     #[test]
     fn compact_items_batch() {
         let item1_events = sample_item_events("bn-test1");
-        let item2_events = vec![
-            create_event("Open item", 1_000_000, "alice", "blake3:o1", "bn-test2"),
-        ];
+        let item2_events = vec![create_event(
+            "Open item",
+            1_000_000,
+            "alice",
+            "blake3:o1",
+            "bn-test2",
+        )];
 
         let mut events_by_item = BTreeMap::new();
         events_by_item.insert("bn-test1".to_string(), item1_events);

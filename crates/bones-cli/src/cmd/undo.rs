@@ -50,11 +50,7 @@ pub struct UndoArgs {
     pub last_n: usize,
 
     /// Undo a specific event by its BLAKE3 hash (e.g. `blake3:abcdef...`).
-    #[arg(
-        long = "event",
-        value_name = "EVENT_HASH",
-        conflicts_with = "id"
-    )]
+    #[arg(long = "event", value_name = "EVENT_HASH", conflicts_with = "id")]
     pub event_hash: Option<String>,
 
     /// Preview the compensating events without emitting them to the event log.
@@ -112,10 +108,7 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 /// Read ALL events for a given item ID from the event shards, sorted ascending.
-fn load_item_events(
-    shard_mgr: &ShardManager,
-    item_id: &str,
-) -> anyhow::Result<Vec<Event>> {
+fn load_item_events(shard_mgr: &ShardManager, item_id: &str) -> anyhow::Result<Vec<Event>> {
     let mut events = Vec::new();
 
     for (year, month) in shard_mgr
@@ -239,9 +232,7 @@ fn emit_compensating_event(
             compensating_hash: None,
             compensating_type: None,
             skipped: true,
-            skip_reason: Some(format!(
-                "{et} is grow-only and cannot be undone"
-            )),
+            skip_reason: Some(format!("{et} is grow-only and cannot be undone")),
             dry_run,
         },
         Err(UndoError::NoPriorState(msg)) => UndoEventResult {
@@ -258,8 +249,7 @@ fn emit_compensating_event(
 
             if dry_run {
                 // Compute hash for display but don't write
-                let _ = writer::compute_event_hash(&comp_event)
-                    .map(|h| comp_event.event_hash = h);
+                let _ = writer::compute_event_hash(&comp_event).map(|h| comp_event.event_hash = h);
                 return UndoEventResult {
                     original_hash: original.event_hash.clone(),
                     original_type: original.event_type.as_str().to_string(),
@@ -336,7 +326,11 @@ pub fn run_undo(
         let msg = "either an item ID or --event <hash> must be provided";
         render_error(
             output,
-            &CliError::with_details(msg, "Usage: bn undo <item-id>  OR  bn undo --event <hash>", "missing_args"),
+            &CliError::with_details(
+                msg,
+                "Usage: bn undo <item-id>  OR  bn undo --event <hash>",
+                "missing_args",
+            ),
         )?;
         anyhow::bail!("{msg}");
     }
@@ -361,7 +355,11 @@ pub fn run_undo(
         let msg = "Not a bones project: .bones directory not found";
         render_error(
             output,
-            &CliError::with_details(msg, "Run 'bn init' to create a bones project", "not_a_project"),
+            &CliError::with_details(
+                msg,
+                "Run 'bn init' to create a bones project",
+                "not_a_project",
+            ),
         )
         .ok();
         anyhow::anyhow!("{msg}")
@@ -381,15 +379,14 @@ pub fn run_undo(
     // Mode 1: undo by event hash
     // ---------------------------------------------------------------------------
     if let Some(ref hash) = args.event_hash {
-        let (target_event, all_events) =
-            match find_event_by_hash(&shard_mgr, hash)? {
-                Some(pair) => pair,
-                None => {
-                    let msg = format!("event '{hash}' not found in event log");
-                    render_error(output, &CliError::with_details(&msg, "", "not_found"))?;
-                    anyhow::bail!("{msg}");
-                }
-            };
+        let (target_event, all_events) = match find_event_by_hash(&shard_mgr, hash)? {
+            Some(pair) => pair,
+            None => {
+                let msg = format!("event '{hash}' not found in event log");
+                render_error(output, &CliError::with_details(&msg, "", "not_found"))?;
+                anyhow::bail!("{msg}");
+            }
+        };
 
         let item_id = target_event.item_id.as_str().to_string();
 
@@ -588,7 +585,9 @@ mod tests {
             event_hash: String::new(),
         };
         let line = writer::write_event(&mut create_event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&create_event).unwrap();
 
         // emit item.move (open → doing)
@@ -608,7 +607,9 @@ mod tests {
             event_hash: String::new(),
         };
         let line2 = writer::write_event(&mut move_event).unwrap();
-        shard_mgr.append(&line2, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line2, false, Duration::from_secs(5))
+            .unwrap();
         projector.project_event(&move_event).unwrap();
 
         (dir, item_id.to_string())
@@ -679,10 +680,12 @@ mod tests {
         };
         let result = run_undo(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not found or has no events"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not found or has no events")
+        );
     }
 
     #[test]

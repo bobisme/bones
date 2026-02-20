@@ -17,6 +17,7 @@
 
 pub mod canonical;
 pub mod data;
+pub mod migrate;
 pub mod parser;
 pub mod types;
 pub mod validate;
@@ -27,6 +28,7 @@ pub use data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DataParseError, DeleteData,
     EventData, LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
 };
+pub use migrate::{RawEvent, migrate_event};
 pub use parser::{
     CURRENT_VERSION, FIELD_COMMENT, ParseError, ParsedLine, PartialEvent, PartialParsedLine,
     SHARD_HEADER, detect_version, parse_line, parse_line_partial, parse_lines,

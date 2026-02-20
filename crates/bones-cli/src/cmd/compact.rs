@@ -16,7 +16,7 @@ use bones_core::shard::ShardManager;
 use clap::Args;
 use serde::Serialize;
 
-use crate::output::{OutputMode, render, render_error, CliError};
+use crate::output::{CliError, OutputMode, render, render_error};
 
 /// Arguments for `bn compact`.
 #[derive(Args, Debug)]
@@ -51,11 +51,7 @@ pub struct CompactOutput {
 }
 
 /// Execute `bn compact`.
-pub fn run_compact(
-    args: &CompactArgs,
-    output: OutputMode,
-    project_root: &Path,
-) -> Result<()> {
+pub fn run_compact(args: &CompactArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     let bones_dir = project_root.join(".bones");
     let events_dir = bones_dir.join("events");
 
@@ -73,9 +69,7 @@ pub fn run_compact(
 
     // Read all events from all shards.
     let shard_mgr = ShardManager::new(&bones_dir);
-    let all_text = shard_mgr
-        .replay()
-        .context("read event shards")?;
+    let all_text = shard_mgr.replay().context("read event shards")?;
 
     // Parse events and group by item_id.
     let mut events_by_item: BTreeMap<String, Vec<bones_core::event::Event>> = BTreeMap::new();
@@ -117,9 +111,7 @@ pub fn run_compact(
                     Ok(true) => {}
                     Ok(false) => {
                         all_ok = false;
-                        eprintln!(
-                            "WARN: verification failed for {item_id}: state mismatch"
-                        );
+                        eprintln!("WARN: verification failed for {item_id}: state mismatch");
                     }
                     Err(e) => {
                         all_ok = false;
@@ -144,15 +136,12 @@ pub fn run_compact(
     // Write snapshot events to the active shard (unless dry run).
     if !args.dry_run && !snapshots.is_empty() {
         // Only write if verification passed (or was skipped).
-        let should_write = verification
-            .as_ref()
-            .is_none_or(|v| v != "some_failed");
+        let should_write = verification.as_ref().is_none_or(|v| v != "some_failed");
 
         if should_write {
             let (year, month) = shard_mgr.rotate_if_needed()?;
             for snapshot in &snapshots {
-                let line = writer::write_line(snapshot)
-                    .context("serialize snapshot event")?;
+                let line = writer::write_line(snapshot).context("serialize snapshot event")?;
                 shard_mgr
                     .append_raw(year, month, &line)
                     .context("append snapshot to shard")?;
