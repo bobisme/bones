@@ -188,7 +188,10 @@ fn fts5_finds_relevant_items_for_most_queries() {
         }
     }
 
-    assert!(evaluated > 0, "expected at least one evaluable lexical query");
+    assert!(
+        evaluated > 0,
+        "expected at least one evaluable lexical query"
+    );
     let hit_rate = hits as f64 / evaluated as f64;
     assert!(
         hit_rate >= 0.50,
@@ -205,7 +208,11 @@ fn structural_similarity_prefers_duplicates_over_adversarial_pairs() {
     let duplicate_mean = dataset
         .duplicates
         .iter()
-        .filter_map(|[a, b]| structural_similarity(a, b, &conn, &graph).ok().map(|s| s.mean()))
+        .filter_map(|[a, b]| {
+            structural_similarity(a, b, &conn, &graph)
+                .ok()
+                .map(|s| s.mean())
+        })
         .sum::<f32>()
         / dataset.duplicates.len() as f32;
 
@@ -247,7 +254,8 @@ fn fusion_precision_beats_lexical_with_three_ranked_layers() {
         }
 
         let semantic_ranked: Vec<String> = query.relevant.clone();
-        let structural_ranked = structural_ranked_for_query(query, &dataset.items, &conn, &graph, 10);
+        let structural_ranked =
+            structural_ranked_for_query(query, &dataset.items, &conn, &graph, 10);
 
         let lexical_refs: Vec<&str> = lexical_ranked.iter().map(String::as_str).collect();
         let semantic_refs: Vec<&str> = semantic_ranked.iter().map(String::as_str).collect();
@@ -301,8 +309,7 @@ fn duplicate_detection_recovers_known_pairs() {
             continue;
         };
 
-        let Ok(candidates) = find_duplicates(query_title, &conn, &graph, &config, false, 20)
-        else {
+        let Ok(candidates) = find_duplicates(query_title, &conn, &graph, &config, false, 20) else {
             continue;
         };
 

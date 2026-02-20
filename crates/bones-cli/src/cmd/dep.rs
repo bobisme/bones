@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use clap::{Args, Subcommand};
 use serde::Serialize;
+#[cfg(test)]
 use serde_json::json;
 
 use bones_core::db::query::{item_exists, try_open_projection};
@@ -293,7 +294,6 @@ fn run_dep_add(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         let arrow = if r.link_type == "blocks" {
             "blocks"
         } else {
@@ -412,7 +412,6 @@ fn run_dep_rm(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         writeln!(w, "✓ removed link: {} → {}", r.from, r.to)
     })?;
 

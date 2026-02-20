@@ -14,10 +14,9 @@ use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
 use clap::Args;
-use serde::Serialize;
 use serde_json::json;
 
-use bones_core::db::query::{ItemFilter, get_item, item_exists, list_items, try_open_projection};
+use bones_core::db::query::{get_item, item_exists, try_open_projection};
 use bones_triage::graph::{
     build::RawGraph, find_all_cycles, normalize::NormalizedGraph, stats::GraphStats,
 };

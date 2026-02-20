@@ -3,7 +3,7 @@
 //! Tests the discover_repos() function with real temporary directories,
 //! and verifies graceful degradation when repos are unavailable.
 
-use bones_core::config::{discover_repos, RepoConfig, UserConfig};
+use bones_core::config::{RepoConfig, UserConfig, discover_repos};
 use std::fs;
 use tempfile::TempDir;
 
@@ -59,10 +59,7 @@ fn aggregate_three_repos() {
 
     // All repos should be available.
     for (name, path, available) in &discovered {
-        assert!(
-            *available,
-            "Repo {name} at {path:?} should be available"
-        );
+        assert!(*available, "Repo {name} at {path:?} should be available");
     }
 
     // Verify names and paths.

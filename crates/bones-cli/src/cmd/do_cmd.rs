@@ -235,7 +235,6 @@ pub fn run_do(
     let payload = DoBatchOutput { results };
 
     render(output, &payload, |r, w| {
-        use std::io::Write;
         for result in &r.results {
             if result.ok {
                 writeln!(

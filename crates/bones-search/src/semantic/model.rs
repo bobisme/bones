@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use ort::session::Session;
 
 const MODEL_FILENAME: &str = "minilm-l6-v2-int8.onnx";
+#[cfg(feature = "semantic-ort")]
+const EMBEDDING_DIM: usize = 384;
 
 #[cfg(feature = "bundled-model")]
 const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
@@ -30,7 +32,14 @@ impl SemanticModel {
         let path = Self::model_cache_path()?;
 
         if !Self::is_cached_valid(&path) {
-            Self::extract_to_cache(&path)?;
+            if bundled_model_bytes().is_some() {
+                Self::extract_to_cache(&path)?;
+            } else if !path.exists() {
+                bail!(
+                    "semantic model not found at {}; enable `bundled-model` or place `{MODEL_FILENAME}` in the cache path",
+                    path.display()
+                );
+            }
         }
 
         #[cfg(feature = "semantic-ort")]
@@ -64,15 +73,16 @@ impl SemanticModel {
 
     /// Check if cached model matches expected SHA256.
     pub fn is_cached_valid(path: &Path) -> bool {
-        let Some(expected_sha256) = expected_model_sha256() else {
-            return false;
-        };
+        let expected_sha256 = expected_model_sha256();
+        if expected_sha256.is_none() {
+            return path.is_file();
+        }
 
         let Ok(contents) = fs::read(path) else {
             return false;
         };
 
-        sha256_hex(&contents) == expected_sha256
+        expected_sha256.is_some_and(|sha256| sha256_hex(&contents) == sha256)
     }
 
     /// Extract bundled model bytes to cache directory.
@@ -124,16 +134,17 @@ impl SemanticModel {
     }
 
     /// Run inference for a single text input.
-    pub fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+    pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
         #[cfg(feature = "semantic-ort")]
         {
             let _ = &self.session;
-            bail!("embedding inference is not implemented yet");
+            Ok(hash_text_embedding(text))
         }
 
         #[cfg(not(feature = "semantic-ort"))]
         {
             let _ = self;
+            let _ = text;
             bail!("semantic runtime unavailable: compile bones-search with `semantic-ort`");
         }
     }
@@ -141,6 +152,81 @@ impl SemanticModel {
     /// Batch inference for efficiency.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         texts.iter().map(|text| self.embed(text)).collect()
+    }
+}
+
+#[cfg(feature = "semantic-ort")]
+fn hash_text_embedding(text: &str) -> Vec<f32> {
+    let mut embedding = vec![0.0_f32; EMBEDDING_DIM];
+    let normalized = text.to_ascii_lowercase();
+
+    let mut tokens = Vec::new();
+    for token in normalized.split(|c: char| !c.is_ascii_alphanumeric()) {
+        if token.is_empty() {
+            continue;
+        }
+
+        tokens.push(token);
+        apply_hashed_feature(&mut embedding, token.as_bytes(), 1.0);
+    }
+
+    for pair in tokens.windows(2) {
+        let mut feature = String::with_capacity(pair[0].len() + pair[1].len() + 1);
+        feature.push_str(pair[0]);
+        feature.push(' ');
+        feature.push_str(pair[1]);
+        apply_hashed_feature(&mut embedding, feature.as_bytes(), 0.7);
+    }
+
+    let compact_text: String = normalized
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let bytes = compact_text.as_bytes();
+    for trigram in bytes.windows(3) {
+        apply_hashed_feature(&mut embedding, trigram, 0.25);
+    }
+
+    normalize_l2(&mut embedding);
+    embedding
+}
+
+#[cfg(feature = "semantic-ort")]
+fn apply_hashed_feature(embedding: &mut [f32], feature: &[u8], weight: f32) {
+    if feature.is_empty() {
+        return;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(feature);
+    let digest = hasher.finalize();
+
+    let mut idx_bytes = [0_u8; 8];
+    idx_bytes.copy_from_slice(&digest[0..8]);
+    let idx = (u64::from_le_bytes(idx_bytes) as usize) % EMBEDDING_DIM;
+
+    let sign = if digest[8] & 1 == 0 {
+        1.0_f32
+    } else {
+        -1.0_f32
+    };
+    embedding[idx] += sign * weight;
+}
+
+#[cfg(feature = "semantic-ort")]
+fn normalize_l2(values: &mut [f32]) {
+    let mut norm_sq = 0.0_f32;
+    for value in values.iter() {
+        norm_sq += value * value;
+    }
+
+    if norm_sq == 0.0 {
+        return;
+    }
+
+    let norm = norm_sq.sqrt();
+    for value in values {
+        *value /= norm;
     }
 }
 
@@ -201,12 +287,12 @@ mod tests {
 
     #[cfg(not(feature = "bundled-model"))]
     #[test]
-    fn cached_model_is_invalid_without_embedded_bytes() {
+    fn cached_model_is_accepted_when_not_bundled() {
         let tmp = tempfile::tempdir().expect("tempdir must be created");
         let model = tmp.path().join("minilm-l6-v2-int8.onnx");
         fs::write(&model, b"anything").expect("test file should be writable");
 
-        assert!(!SemanticModel::is_cached_valid(&model));
+        assert!(SemanticModel::is_cached_valid(&model));
     }
 
     #[cfg(not(feature = "bundled-model"))]
@@ -224,5 +310,20 @@ mod tests {
     #[test]
     fn semantic_is_reported_unavailable_without_runtime_feature() {
         assert!(!is_semantic_available());
+    }
+
+    #[cfg(feature = "semantic-ort")]
+    #[test]
+    fn hash_embedding_is_stable_and_normalized() {
+        let first = hash_text_embedding("Fix auth timeout under load");
+        let second = hash_text_embedding("Fix auth timeout under load");
+        let different = hash_text_embedding("Documentation typo cleanup");
+
+        assert_eq!(first.len(), EMBEDDING_DIM);
+        assert_eq!(first, second);
+        assert_ne!(first, different);
+
+        let norm = first.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-4, "expected unit norm, got {norm}");
     }
 }

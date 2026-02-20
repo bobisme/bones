@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use petgraph::{Direction, algo::toposort, graph::NodeIndex, visit::IntoNodeIdentifiers};
+use petgraph::{Direction, algo::toposort, visit::IntoNodeIdentifiers};
 
 use crate::graph::normalize::NormalizedGraph;
 

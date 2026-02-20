@@ -213,9 +213,32 @@ fn percentile(sorted: &[Duration], percentile: usize) -> Duration {
 
 fn build_item_ids(item_count: usize) -> Vec<ItemId> {
     let mut generated = Vec::with_capacity(item_count);
+    let mut seen = std::collections::HashSet::with_capacity(item_count);
 
     for index in 0..item_count {
-        let id = generate_item_id(&format!("tier-item-{index}"), index, |_| false);
+        let mut attempt = 0usize;
+        let id = loop {
+            let seed = if attempt == 0 {
+                format!("tier-item-{index}")
+            } else {
+                format!("tier-item-{index}#{attempt}")
+            };
+
+            let candidate = generate_item_id(&seed, item_count, |raw| seen.contains(raw));
+            let raw = candidate.as_str();
+
+            if ItemId::parse(raw).is_ok() && !seen.contains(raw) {
+                break candidate;
+            }
+
+            attempt += 1;
+            assert!(
+                attempt < 10_000,
+                "failed to generate valid unique benchmark item id for index {index}"
+            );
+        };
+
+        seen.insert(id.to_string());
         generated.push(id);
     }
 

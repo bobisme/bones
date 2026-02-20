@@ -14,7 +14,7 @@ use tempfile::TempDir;
 // ---------------------------------------------------------------------------
 
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bn").expect("bn binary must exist");
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir);
     cmd.env("AGENT", "test-agent");
     cmd.env("BONES_LOG", "error");
@@ -80,7 +80,10 @@ fn stats_json_output_has_expected_top_level_fields() {
     // Top-level fields must be present
     assert!(stats["by_state"].is_object(), "by_state must be an object");
     assert!(stats["by_kind"].is_object(), "by_kind must be an object");
-    assert!(stats["by_urgency"].is_object(), "by_urgency must be an object");
+    assert!(
+        stats["by_urgency"].is_object(),
+        "by_urgency must be an object"
+    );
     assert!(
         stats["events_by_type"].is_object(),
         "events_by_type must be an object"
@@ -237,11 +240,7 @@ fn export_produces_valid_jsonl_with_expected_fields() {
     let export_path = dir.path().join("export.jsonl");
 
     bn_cmd(dir.path())
-        .args([
-            "export",
-            "--output",
-            export_path.to_str().unwrap(),
-        ])
+        .args(["export", "--output", export_path.to_str().unwrap()])
         .assert()
         .success();
 
@@ -255,7 +254,10 @@ fn export_produces_valid_jsonl_with_expected_fields() {
             serde_json::from_str(line).expect("each export line must be valid JSON");
 
         // Required fields per schema
-        assert!(record["timestamp"].is_number(), "timestamp must be a number");
+        assert!(
+            record["timestamp"].is_number(),
+            "timestamp must be a number"
+        );
         assert!(record["agent"].is_string(), "agent must be a string");
         assert!(record["type"].is_string(), "type must be a string");
         assert!(record["item_id"].is_string(), "item_id must be a string");
@@ -277,10 +279,7 @@ fn export_to_stdout_exits_successfully() {
     create_item(dir.path(), "Stdout export test");
 
     // Export without --output (goes to stdout)
-    let output = bn_cmd(dir.path())
-        .args(["export"])
-        .output()
-        .unwrap();
+    let output = bn_cmd(dir.path()).args(["export"]).output().unwrap();
 
     assert!(
         output.status.success(),
@@ -289,7 +288,10 @@ fn export_to_stdout_exits_successfully() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.trim().is_empty(), "stdout export should produce output");
+    assert!(
+        !stdout.trim().is_empty(),
+        "stdout export should produce output"
+    );
 
     // Verify stdout is valid JSONL
     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
@@ -352,7 +354,10 @@ fn export_import_roundtrip_preserves_item_count() {
     // Verify export has the right line count
     let content = std::fs::read_to_string(&export_path).unwrap();
     let line_count = content.lines().filter(|l| !l.trim().is_empty()).count();
-    assert_eq!(line_count, item_count, "export should have {item_count} lines");
+    assert_eq!(
+        line_count, item_count,
+        "export should have {item_count} lines"
+    );
 
     // Import into a fresh project
     let dest_dir = TempDir::new().unwrap();
@@ -543,19 +548,10 @@ fn import_jsonl_skips_malformed_lines_and_reports_to_stderr() {
     init_project(dir.path());
 
     let bad_file = dir.path().join("bad.jsonl");
-    std::fs::write(
-        &bad_file,
-        "not valid json\n{incomplete json\n",
-    )
-    .unwrap();
+    std::fs::write(&bad_file, "not valid json\n{incomplete json\n").unwrap();
 
     let result = bn_cmd(dir.path())
-        .args([
-            "import",
-            "--jsonl",
-            "--input",
-            bad_file.to_str().unwrap(),
-        ])
+        .args(["import", "--jsonl", "--input", bad_file.to_str().unwrap()])
         .output()
         .unwrap();
 
@@ -582,11 +578,7 @@ fn import_jsonl_reports_skipped_count_in_summary() {
     let valid_line = r#"{"timestamp":1771563284510882,"agent":"test-agent","type":"item.create","item_id":"bn-abc","data":{"kind":"task","title":"Valid item"}}"#;
     let bad_line = "not json at all";
     let mixed_file = dir.path().join("mixed.jsonl");
-    std::fs::write(
-        &mixed_file,
-        format!("{valid_line}\n{bad_line}\n"),
-    )
-    .unwrap();
+    std::fs::write(&mixed_file, format!("{valid_line}\n{bad_line}\n")).unwrap();
 
     let result = bn_cmd(dir.path())
         .args([
@@ -625,15 +617,9 @@ fn import_without_mode_flag_fails_with_useful_error() {
     init_project(dir.path());
 
     // Provide a file path but no --jsonl or --github flag
-    let result = bn_cmd(dir.path())
-        .args(["import"])
-        .output()
-        .unwrap();
+    let result = bn_cmd(dir.path()).args(["import"]).output().unwrap();
 
-    assert!(
-        !result.status.success(),
-        "import with no flags should fail"
-    );
+    assert!(!result.status.success(), "import with no flags should fail");
 
     let stderr = String::from_utf8_lossy(&result.stderr);
     // Should tell user what flags are available

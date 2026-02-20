@@ -233,7 +233,6 @@ fn run_archive_single(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         writeln!(w, "✓ {} → archived (was {})", r.id, r.previous_state)?;
         Ok(())
     })?;
@@ -279,7 +278,6 @@ fn run_archive_auto(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         if r.archived_count == 0 {
             writeln!(w, "No done items older than {} day(s) to archive", r.days)?;
         } else {

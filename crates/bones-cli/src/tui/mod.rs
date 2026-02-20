@@ -37,7 +37,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, Tabs},
 };
 use std::{
     io::{self, Stdout},
@@ -132,7 +132,8 @@ impl TuiApp {
                 Some(DialogAction::LinkTo(id)) => {
                     // User chose to link/navigate to an existing item
                     self.create_dialog = None;
-                    self.triage_view.set_status(format!("Selected existing: {id}"));
+                    self.triage_view
+                        .set_status(format!("Selected existing: {id}"));
                 }
             }
             return Ok(());

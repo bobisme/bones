@@ -8,8 +8,8 @@ use bones_core::config::load_project_config;
 use bones_core::db::{fts, query};
 use bones_search::find_duplicates;
 use bones_search::fusion::scoring::SearchConfig;
+use bones_triage::graph::RawGraph;
 use clap::Args;
-use petgraph::graph::DiGraph;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
@@ -107,7 +107,12 @@ pub fn run_dedup(
         maybe_related_threshold: 0.50,
     };
 
-    let empty_graph: DiGraph<String, ()> = DiGraph::new();
+    let dependency_graph = RawGraph::from_sqlite(&conn)
+        .map(|raw| raw.graph)
+        .unwrap_or_else(|err| {
+            tracing::warn!("unable to load dependency graph for dedup: {err}");
+            petgraph::graph::DiGraph::new()
+        });
     let mut pair_scores: HashMap<(String, String), f64> = HashMap::new();
 
     for item in &open_items {
@@ -148,9 +153,14 @@ pub fn run_dedup(
         }
 
         let limit = candidate_ids.len().max(10);
-        let Ok(candidates) =
-            find_duplicates(&query_text, &conn, &empty_graph, &search_cfg, false, limit)
-        else {
+        let Ok(candidates) = find_duplicates(
+            &query_text,
+            &conn,
+            &dependency_graph,
+            &search_cfg,
+            false,
+            limit,
+        ) else {
             continue;
         };
 

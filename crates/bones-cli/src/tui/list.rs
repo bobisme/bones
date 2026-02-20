@@ -7,25 +7,15 @@
 
 use anyhow::{Context, Result};
 use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};
-use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    },
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
 };
 use std::{
-    io::{self, Stdout},
     path::PathBuf,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -352,10 +342,10 @@ impl ListView {
         if len == 0 {
             return;
         }
-        let i =
-            self.table_state
-                .selected()
-                .map_or(0, |i| if i + 1 >= len { len - 1 } else { i + 1 });
+        let i = self
+            .table_state
+            .selected()
+            .map_or(0, |i| if i + 1 >= len { len - 1 } else { i + 1 });
         self.table_state.select(Some(i));
     }
 
@@ -432,11 +422,11 @@ impl ListView {
                 }
             }
 
-            // Enter: select item (placeholder — detail view is bn-37f)
+            // Enter: surface the current selection in the status line
             KeyCode::Enter => {
                 if let Some(item) = self.selected_item() {
                     let id = item.item_id.clone();
-                    self.set_status(format!("Selected: {id} (detail view: bn tui --detail)"));
+                    self.set_status(format!("Selected: {id}"));
                 }
             }
 
@@ -745,15 +735,8 @@ fn build_row(item: &WorkItem, title_width: u16) -> Row<'static> {
     ])
 }
 
-/// Render the full list view into the terminal frame.
-fn render(frame: &mut ratatui::Frame<'_>, app: &mut ListView) {
-    let area = frame.area();
-    render_into(frame, app, area);
-}
-
 /// Render the list view into a specific area of the frame.
 fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
-
     // Layout: main table + status bar (3 lines at bottom).
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -816,7 +799,7 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
                 .title(block_title)
                 .title_style(Style::default().add_modifier(Modifier::BOLD)),
         )
-        .highlight_style(
+        .row_highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
@@ -1053,72 +1036,6 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
             },
         );
     }
-}
-
-// ---------------------------------------------------------------------------
-// Terminal setup / teardown
-// ---------------------------------------------------------------------------
-
-fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
-    enable_raw_mode().context("enable raw mode")?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).context("enter alternate screen")?;
-    let backend = CrosstermBackend::new(stdout);
-    Terminal::new(backend).context("create terminal")
-}
-
-fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    disable_raw_mode().context("disable raw mode")?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )
-    .context("leave alternate screen")?;
-    terminal.show_cursor().context("show cursor")?;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
-
-/// Run the TUI list view to completion.
-///
-/// Reads from the bones projection at `project_root/.bones/bones.db`.
-///
-/// # Errors
-///
-/// Returns an error if terminal setup fails or the database cannot be opened.
-pub fn run_list_tui(project_root: &std::path::Path) -> Result<()> {
-    let db_path = project_root.join(".bones/bones.db");
-    let mut app = ListView::new(db_path)?;
-
-    let mut terminal = setup_terminal()?;
-    let result = run_loop(&mut terminal, &mut app);
-    restore_terminal(&mut terminal)?;
-
-    result
-}
-
-fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut ListView) -> Result<()> {
-    let tick_rate = Duration::from_millis(200);
-
-    loop {
-        terminal.draw(|frame| render(frame, app))?;
-
-        if event::poll(tick_rate).context("event poll")? {
-            if let Event::Key(key) = event::read().context("event read")? {
-                app.handle_key(key)?;
-            }
-        }
-
-        if app.should_quit {
-            break;
-        }
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

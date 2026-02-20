@@ -365,7 +365,6 @@ pub fn run_update(
     let payload = UpdateBatchOutput { results };
 
     render(output, &payload, |r, w| {
-        use std::io::Write;
         for result in &r.results {
             if result.ok {
                 let count = result.updates.as_ref().map(|u| u.len()).unwrap_or(0);

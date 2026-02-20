@@ -333,7 +333,12 @@ pub fn run_comments(
         }
     };
 
-    let comments = timeline_rows(query::get_comments(&conn, &resolved_id, args.limit, args.offset)?);
+    let comments = timeline_rows(query::get_comments(
+        &conn,
+        &resolved_id,
+        args.limit,
+        args.offset,
+    )?);
 
     render(output, &comments, |rows, w| {
         if rows.is_empty() {

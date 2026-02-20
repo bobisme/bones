@@ -146,24 +146,34 @@ pub fn load_user_config() -> Result<UserConfig> {
 }
 
 pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
-    config.repos.iter().map(|repo_config| {
-        let path = &repo_config.path;
-        let bones_dir = path.join(".bones");
-        
-        let available = path.exists() && bones_dir.exists();
-        
-        if !available {
-            if !path.exists() {
-                eprintln!("Warning: Repository '{}' configured at {} does not exist", 
-                         repo_config.name, path.display());
-            } else {
-                eprintln!("Warning: Repository '{}' at {} does not contain .bones/ directory", 
-                         repo_config.name, path.display());
+    config
+        .repos
+        .iter()
+        .map(|repo_config| {
+            let path = &repo_config.path;
+            let bones_dir = path.join(".bones");
+
+            let available = path.exists() && bones_dir.exists();
+
+            if !available {
+                if !path.exists() {
+                    eprintln!(
+                        "Warning: Repository '{}' configured at {} does not exist",
+                        repo_config.name,
+                        path.display()
+                    );
+                } else {
+                    eprintln!(
+                        "Warning: Repository '{}' at {} does not contain .bones/ directory",
+                        repo_config.name,
+                        path.display()
+                    );
+                }
             }
-        }
-        
-        (repo_config.name.clone(), path.clone(), available)
-    }).collect()
+
+            (repo_config.name.clone(), path.clone(), available)
+        })
+        .collect()
 }
 
 pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveConfig> {
@@ -310,11 +320,11 @@ path = "/home/alice/src/frontend"
     #[test]
     fn discover_repos_validates_bones_directory() {
         let temp_dir = make_temp_dir("discover-valid");
-        
+
         // Create first repo with .bones/
         let repo1_path = temp_dir.join("repo1");
         std::fs::create_dir_all(repo1_path.join(".bones")).expect("create repo1/.bones");
-        
+
         // Create second repo with .bones/
         let repo2_path = temp_dir.join("repo2");
         std::fs::create_dir_all(repo2_path.join(".bones")).expect("create repo2/.bones");
@@ -334,7 +344,7 @@ path = "/home/alice/src/frontend"
         };
 
         let discovered = discover_repos(&config);
-        
+
         assert_eq!(discovered.len(), 2);
         assert_eq!(discovered[0], ("repo1".to_string(), repo1_path, true));
         assert_eq!(discovered[1], ("repo2".to_string(), repo2_path, true));
@@ -349,16 +359,14 @@ path = "/home/alice/src/frontend"
 
         let config = UserConfig {
             output: None,
-            repos: vec![
-                RepoConfig {
-                    name: "missing".to_string(),
-                    path: nonexistent.clone(),
-                },
-            ],
+            repos: vec![RepoConfig {
+                name: "missing".to_string(),
+                path: nonexistent.clone(),
+            }],
         };
 
         let discovered = discover_repos(&config);
-        
+
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].0, "missing");
         assert_eq!(discovered[0].1, nonexistent);
@@ -376,16 +384,14 @@ path = "/home/alice/src/frontend"
 
         let config = UserConfig {
             output: None,
-            repos: vec![
-                RepoConfig {
-                    name: "incomplete".to_string(),
-                    path: repo_path.clone(),
-                },
-            ],
+            repos: vec![RepoConfig {
+                name: "incomplete".to_string(),
+                path: repo_path.clone(),
+            }],
         };
 
         let discovered = discover_repos(&config);
-        
+
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].0, "incomplete");
         assert_eq!(discovered[0].1, repo_path);

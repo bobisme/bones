@@ -7,7 +7,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use bones_core::db::query::{self, ItemFilter, QueryItem};
+use bones_core::db::query::{self, ItemFilter};
 use clap::Args;
 use serde::Serialize;
 
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn count_blocked_items_empty_db() {
-        let (dir, conn) = setup_db();
+        let (_dir, conn) = setup_db();
         assert_eq!(count_blocked_items(&conn), 0);
     }
 

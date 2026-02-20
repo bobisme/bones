@@ -10,7 +10,7 @@
 //! Results are fused using Reciprocal Rank Fusion (RRF) and classified into
 //! risk levels (likely_duplicate, possibly_related, maybe_related, none).
 
-use crate::fusion::{DupCandidate, SearchConfig, classify_risk, hybrid_search};
+use crate::fusion::{DupCandidate, SearchConfig, classify_risk, hybrid_search_with_graph};
 use crate::semantic::SemanticModel;
 use anyhow::Result;
 use petgraph::graph::DiGraph;
@@ -24,7 +24,7 @@ use rusqlite::Connection;
 pub fn find_duplicates(
     query_title: &str,
     db: &Connection,
-    _graph: &DiGraph<String, ()>,
+    graph: &DiGraph<String, ()>,
     config: &SearchConfig,
     semantic_enabled: bool,
     limit: usize,
@@ -35,7 +35,8 @@ pub fn find_duplicates(
         None
     };
 
-    let fused = hybrid_search(query_title, db, model.as_ref(), limit, config.rrf_k)?;
+    let fused =
+        hybrid_search_with_graph(query_title, db, model.as_ref(), graph, limit, config.rrf_k)?;
 
     let mut candidates: Vec<DupCandidate> = fused
         .into_iter()
@@ -90,7 +91,7 @@ mod tests {
         .unwrap();
         proj.project_event(&make_create(
             "bn-002",
-            "Auth timeout in staging",
+            "Authentication timeout in staging",
             Some("Intermittent auth failures"),
             "h2",
         ))
@@ -128,7 +129,7 @@ mod tests {
         let config = SearchConfig::default();
         let graph: DiGraph<String, ()> = DiGraph::new();
 
-        let out = find_duplicates("authentication timeout", &conn, &graph, &config, false, 10)
+        let out = find_duplicates("timeout", &conn, &graph, &config, false, 10)
             .expect("search should succeed");
 
         assert!(!out.is_empty());
@@ -145,5 +146,34 @@ mod tests {
             .expect("search should succeed");
 
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn find_duplicates_uses_structural_graph_when_available() {
+        let conn = setup_db();
+        let config = SearchConfig {
+            maybe_related_threshold: 0.0,
+            ..SearchConfig::default()
+        };
+
+        let mut graph: DiGraph<String, ()> = DiGraph::new();
+        let auth_a = graph.add_node("bn-001".to_string());
+        let auth_b = graph.add_node("bn-002".to_string());
+        graph.add_edge(auth_a, auth_b, ());
+
+        let direct = crate::structural::structural_similarity("bn-001", "bn-002", &conn, &graph)
+            .expect("direct structural similarity should compute");
+        assert!(
+            direct.mean() > 0.0,
+            "expected positive direct structural similarity"
+        );
+
+        let out = find_duplicates("timeout", &conn, &graph, &config, false, 10)
+            .expect("search should succeed");
+
+        assert!(
+            out.iter().any(|c| c.structural_rank != usize::MAX),
+            "expected structural ranks to be populated when graph is provided"
+        );
     }
 }

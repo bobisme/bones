@@ -1750,7 +1750,12 @@ mod tests {
             conn.execute(
                 "INSERT INTO item_comments (item_id, event_hash, author, body, created_at_us) \
                  VALUES (?1, ?2, 'alice', ?3, ?4)",
-                params!["bn-001", format!("hash{i}"), format!("Comment {i}"), 100 + i as i64],
+                params![
+                    "bn-001",
+                    format!("hash{i}"),
+                    format!("Comment {i}"),
+                    100 + i as i64
+                ],
             )
             .unwrap();
         }

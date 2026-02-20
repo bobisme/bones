@@ -11,7 +11,7 @@ use bones_core::event::data::{CreateData, EventData, MoveData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
 use bones_core::model::item::{Kind, State, Urgency};
-use bones_core::model::item_id::{generate_item_id, ItemId};
+use bones_core::model::item_id::{ItemId, generate_item_id};
 use bones_core::shard::ShardManager;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -31,19 +31,20 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
         .context("look up item")?
         .ok_or_else(|| anyhow::anyhow!("item '{}' not found", item_id))?;
 
-    let current_state: State = current_item
-        .state
-        .parse()
-        .map_err(|_| anyhow::anyhow!("item '{}' has invalid state '{}'", item_id, current_item.state))?;
+    let current_state: State = current_item.state.parse().map_err(|_| {
+        anyhow::anyhow!(
+            "item '{}' has invalid state '{}'",
+            item_id,
+            current_item.state
+        )
+    })?;
 
     let target_state = State::Doing;
     current_state
         .can_transition_to(target_state)
         .map_err(|e| anyhow::anyhow!("cannot transition '{}': {}", item_id, e.reason))?;
 
-    let ts = shard_mgr
-        .next_timestamp()
-        .context("get timestamp")?;
+    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
 
     let mut event = Event {
         wall_ts_us: ts,
@@ -86,19 +87,20 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
         .context("look up item")?
         .ok_or_else(|| anyhow::anyhow!("item '{}' not found", item_id))?;
 
-    let current_state: State = current_item
-        .state
-        .parse()
-        .map_err(|_| anyhow::anyhow!("item '{}' has invalid state '{}'", item_id, current_item.state))?;
+    let current_state: State = current_item.state.parse().map_err(|_| {
+        anyhow::anyhow!(
+            "item '{}' has invalid state '{}'",
+            item_id,
+            current_item.state
+        )
+    })?;
 
     let target_state = State::Done;
     current_state
         .can_transition_to(target_state)
         .map_err(|e| anyhow::anyhow!("cannot transition '{}': {}", item_id, e.reason))?;
 
-    let ts = shard_mgr
-        .next_timestamp()
-        .context("get timestamp")?;
+    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
 
     let mut event = Event {
         wall_ts_us: ts,
@@ -132,7 +134,12 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
 ///
 /// Generates a unique item ID, writes the create event, and projects it.
 /// Returns the generated item ID string.
-pub fn create_task(project_root: &Path, db_path: &Path, agent: &str, title: &str) -> Result<String> {
+pub fn create_task(
+    project_root: &Path,
+    db_path: &Path,
+    agent: &str,
+    title: &str,
+) -> Result<String> {
     let conn = Connection::open(db_path).context("open projection db")?;
     let bones_dir = project_root.join(".bones");
     let shard_mgr = ShardManager::new(&bones_dir);
@@ -151,9 +158,7 @@ pub fn create_task(project_root: &Path, db_path: &Path, agent: &str, title: &str
         .is_ok()
     });
 
-    let ts = shard_mgr
-        .next_timestamp()
-        .context("get timestamp")?;
+    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
 
     let mut event = Event {
         wall_ts_us: ts,
@@ -220,7 +225,6 @@ mod tests {
 
     fn insert_item(conn: &Connection, project_root: &Path, id: &str, title: &str) {
         let bones_dir = project_root.join(".bones");
-        let db_path = bones_dir.join("bones.db");
         let shard_mgr = ShardManager::new(&bones_dir);
         let ts = shard_mgr.next_timestamp().unwrap();
         let mut event = Event {
@@ -244,7 +248,9 @@ mod tests {
             event_hash: String::new(),
         };
         let line = writer::write_event(&mut event).unwrap();
-        shard_mgr.append(&line, false, Duration::from_secs(5)).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
         let projector = Projector::new(conn);
         projector.project_event(&event).unwrap();
     }
@@ -289,7 +295,12 @@ mod tests {
         // done → doing is not allowed
         let result = do_item(&project_root, &db_path, "test-agent", "bn-001");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("cannot transition"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot transition")
+        );
     }
 
     #[test]

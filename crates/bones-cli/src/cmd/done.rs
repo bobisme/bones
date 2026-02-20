@@ -352,7 +352,6 @@ pub fn run_done(
     let payload = DoneBatchOutput { results };
 
     render(output, &payload, |r, w| {
-        use std::io::Write;
         for result in &r.results {
             if result.ok {
                 writeln!(

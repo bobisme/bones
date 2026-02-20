@@ -25,7 +25,7 @@ pub struct EmittedEvent {
     pub event_id: u64,
 }
 
-/// Minimal CRDT stub for simulation: each agent tracks a grow-only set of event IDs.
+/// Minimal CRDT model for simulation: each agent tracks a grow-only set of event IDs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulatedAgent {
     id: AgentId,

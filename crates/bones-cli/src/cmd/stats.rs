@@ -29,23 +29,19 @@ struct Aging {
 
 /// Report payload for `bn stats`.
 #[derive(Debug, Serialize)]
-pub struct ProjectStats {
-    pub by_state: std::collections::HashMap<String, usize>,
-    pub by_kind: std::collections::HashMap<String, usize>,
-    pub by_urgency: std::collections::HashMap<String, usize>,
-    pub events_by_type: std::collections::HashMap<String, usize>,
-    pub events_by_agent: std::collections::HashMap<String, usize>,
-    pub shard_bytes: u64,
-    pub velocity: Velocity,
-    pub aging: Aging,
+struct ProjectStats {
+    by_state: std::collections::HashMap<String, usize>,
+    by_kind: std::collections::HashMap<String, usize>,
+    by_urgency: std::collections::HashMap<String, usize>,
+    events_by_type: std::collections::HashMap<String, usize>,
+    events_by_agent: std::collections::HashMap<String, usize>,
+    shard_bytes: u64,
+    velocity: Velocity,
+    aging: Aging,
 }
 
 /// Execute `bn stats`.
-pub fn run_stats(
-    _args: &StatsArgs,
-    output: OutputMode,
-    project_root: &Path,
-) -> anyhow::Result<()> {
+pub fn run_stats(_args: &StatsArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
     let conn = match query::try_open_projection(&db_path)? {
         Some(conn) => conn,
@@ -84,7 +80,9 @@ pub fn run_stats(
         aging,
     };
 
-    render(output, &payload, |payload, w| render_stats_human(payload, w))
+    render(output, &payload, |payload, w| {
+        render_stats_human(payload, w)
+    })
 }
 
 fn compute_velocity(conn: &rusqlite::Connection, now_us: i64) -> anyhow::Result<Velocity> {
@@ -114,7 +112,8 @@ fn compute_aging(conn: &rusqlite::Connection, now_us: i64) -> anyhow::Result<Agi
                AND state IN ('open', 'doing')",
         )?;
 
-        let (sum, count): (i64, i64) = stmt.query_row([now_us], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let (sum, count): (i64, i64) =
+            stmt.query_row([now_us], |row| Ok((row.get(0)?, row.get(1)?)))?;
         (sum, usize::try_from(count).unwrap_or(usize::MAX))
     };
 
@@ -228,11 +227,23 @@ fn render_stats_human(stats: &ProjectStats, w: &mut dyn Write) -> std::io::Resul
     }
 
     writeln!(w, "\nVelocity (last 7 / 30 days):")?;
-    writeln!(w, "  opened:  {} / {}", stats.velocity.opened_7d, stats.velocity.opened_30d)?;
-    writeln!(w, "  closed:  {} / {}", stats.velocity.closed_7d, stats.velocity.closed_30d)?;
+    writeln!(
+        w,
+        "  opened:  {} / {}",
+        stats.velocity.opened_7d, stats.velocity.opened_30d
+    )?;
+    writeln!(
+        w,
+        "  closed:  {} / {}",
+        stats.velocity.closed_7d, stats.velocity.closed_30d
+    )?;
 
     writeln!(w, "\nAging:")?;
-    writeln!(w, "  avg open age (days): {:.1}", stats.aging.avg_open_age_days)?;
+    writeln!(
+        w,
+        "  avg open age (days): {:.1}",
+        stats.aging.avg_open_age_days
+    )?;
     writeln!(w, "  stale (>30 days):    {}", stats.aging.stale_count_30d)?;
 
     writeln!(w, "\nEvents by type:")?;

@@ -9,8 +9,8 @@ use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::db::query;
 use bones_search::find_duplicates;
 use bones_search::fusion::SearchConfig;
+use bones_triage::graph::RawGraph;
 use clap::Args;
-use petgraph::graph::DiGraph;
 use serde::Serialize;
 use std::io::Write;
 
@@ -149,7 +149,12 @@ pub fn run_similar(
     };
 
     let search_config = SearchConfig::default();
-    let graph: DiGraph<String, ()> = DiGraph::new();
+    let graph = RawGraph::from_sqlite(&conn)
+        .map(|raw| raw.graph)
+        .unwrap_or_else(|err| {
+            tracing::warn!("unable to load dependency graph for similar: {err}");
+            petgraph::graph::DiGraph::new()
+        });
 
     // Fetch limit+1 to guarantee enough results after self-exclusion
     let fetch_limit = args.limit.saturating_add(1);

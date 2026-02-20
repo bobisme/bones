@@ -473,7 +473,6 @@ mod tests {
 
         // Merge A and B — A's add survives because B never saw the tag.
         let mut merged = state_a.clone();
-        use crate::crdt::merge::Merge;
         merged.merge(&state_b);
 
         let mut states = HashMap::new();
@@ -521,7 +520,6 @@ mod tests {
 
         // Merge: B's tag2 survives A's tombstone of tag1.
         let mut merged = state_a.clone();
-        use crate::crdt::merge::Merge;
         merged.merge(&state_b);
 
         let mut states = HashMap::new();

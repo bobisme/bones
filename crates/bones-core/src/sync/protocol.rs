@@ -6,7 +6,7 @@
 //! The protocol is transport-agnostic: any type implementing [`SyncTransport`]
 //! can be used (TCP, HTTP, MCP, USB drive via file exchange, etc.).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::event::Event;
 use crate::sync::prolly::{Hash, ProllyTree};
@@ -136,10 +136,7 @@ pub fn sync<T: SyncTransport>(
     // Round 3: exchange missing events.
     // Send our events that the remote lacks.
     let events_to_send: Vec<Event> = to_send.into_iter().cloned().collect();
-    let send_size: usize = events_to_send
-        .iter()
-        .map(|e| estimate_event_size(e))
-        .sum();
+    let send_size: usize = events_to_send.iter().map(|e| estimate_event_size(e)).sum();
     transport.send_events(&events_to_send)?;
     report.events_sent = events_to_send.len();
     report.bytes_transferred += send_size;
@@ -372,7 +369,7 @@ pub fn sync_in_memory(
     InMemoryTransport::wire(&mut local_tx, &mut remote_tx);
 
     let remote_root = local_tx.recv_hash()?;
-    let local_root = remote_tx.recv_hash()?;
+    let _local_root = remote_tx.recv_hash()?;
 
     let mut rounds = 1;
 
@@ -426,10 +423,7 @@ pub fn sync_in_memory(
 
     // --- Round 3: event exchange ---
     let local_send_size: usize = local_to_send.iter().map(|e| estimate_event_size(e)).sum();
-    let remote_send_size: usize = remote_to_send
-        .iter()
-        .map(|e| estimate_event_size(e))
-        .sum();
+    let remote_send_size: usize = remote_to_send.iter().map(|e| estimate_event_size(e)).sum();
 
     local_tx.send_events(&local_to_send)?;
     remote_tx.send_events(&remote_to_send)?;
@@ -477,8 +471,8 @@ pub struct SyncInMemoryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::data::{CreateData, EventData};
     use crate::event::EventType;
+    use crate::event::data::{CreateData, EventData};
     use crate::model::item::Kind;
     use crate::model::item::Urgency;
     use crate::model::item_id::ItemId;
@@ -532,10 +526,7 @@ mod tests {
 
     #[test]
     fn sync_empty_to_populated() {
-        let remote_events = vec![
-            make_event("a", 1, "x"),
-            make_event("b", 2, "y"),
-        ];
+        let remote_events = vec![make_event("a", 1, "x"), make_event("b", 2, "y")];
 
         let result = sync_in_memory(&[], &remote_events).unwrap();
         assert_eq!(result.local_received.len(), 2);
@@ -546,10 +537,7 @@ mod tests {
 
     #[test]
     fn sync_populated_to_empty() {
-        let local_events = vec![
-            make_event("a", 1, "x"),
-            make_event("b", 2, "y"),
-        ];
+        let local_events = vec![make_event("a", 1, "x"), make_event("b", 2, "y")];
 
         let result = sync_in_memory(&local_events, &[]).unwrap();
         assert!(result.local_received.is_empty());
@@ -637,20 +625,12 @@ mod tests {
 
         let mut a = shared.clone();
         for i in 0..50 {
-            a.push(make_event(
-                &format!("a{i:03}"),
-                1000 + i,
-                &format!("a{i}"),
-            ));
+            a.push(make_event(&format!("a{i:03}"), 1000 + i, &format!("a{i}")));
         }
 
         let mut b = shared;
         for i in 0..50 {
-            b.push(make_event(
-                &format!("b{i:03}"),
-                2000 + i,
-                &format!("b{i}"),
-            ));
+            b.push(make_event(&format!("b{i:03}"), 2000 + i, &format!("b{i}")));
         }
 
         let result = sync_in_memory(&a, &b).unwrap();

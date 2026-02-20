@@ -14,7 +14,6 @@ const MICROS_PER_DAY: f64 = 86_400_000_000.0;
 pub(crate) struct RankedItem {
     pub id: String,
     pub title: String,
-    pub state: String,
     pub size: Option<String>,
     pub urgency: Urgency,
     pub score: f64,
@@ -150,7 +149,6 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             RankedItem {
                 id: item.item_id.clone(),
                 title: item.title.clone(),
-                state: item.state.clone(),
                 size: item.size.clone(),
                 urgency,
                 score,

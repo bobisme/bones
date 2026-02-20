@@ -8,7 +8,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bn").expect("bn binary must exist");
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir);
     cmd.env("AGENT", "test-agent");
     cmd.env("BONES_LOG", "error");
@@ -137,7 +137,7 @@ fn create_without_agent_fails_with_actionable_message() {
     let dir = TempDir::new().unwrap();
     bn_cmd(dir.path()).args(["init"]).assert().success();
 
-    let mut cmd = Command::cargo_bin("bn").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir.path())
         .env_remove("AGENT")
         .env_remove("BONES_AGENT")

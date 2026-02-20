@@ -162,7 +162,6 @@ fn run_feedback(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         let verb = match r.action.as_str() {
             "did" => "✓",
             _ => "⊘",

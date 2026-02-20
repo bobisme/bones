@@ -930,7 +930,8 @@ fn incremental_replay_matches_full_replay_10_events() {
     }
 
     // Comments match
-    let full_comments = query::get_comments(&conn_full, "bn-inc1", None, None).expect("comments full");
+    let full_comments =
+        query::get_comments(&conn_full, "bn-inc1", None, None).expect("comments full");
     let inc_comments = query::get_comments(&conn_inc, "bn-inc1", None, None).expect("comments inc");
     assert_eq!(
         full_comments.len(),

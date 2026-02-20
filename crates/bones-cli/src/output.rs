@@ -44,6 +44,7 @@ impl OutputMode {
     }
 
     /// Returns `true` if table output was requested.
+    #[cfg(test)]
     pub fn is_table(self) -> bool {
         matches!(self, Self::Table)
     }
@@ -289,6 +290,7 @@ pub fn render_error(mode: OutputMode, error: &CliError) -> anyhow::Result<()> {
 ///
 /// In JSON mode, outputs `{"error": {"error_code": "...", "message": "...", "suggestion": "..."}}`.
 /// In human mode, outputs `error: <message>\n  suggestion: <suggestion>`.
+#[cfg(test)]
 pub fn render_bones_error(
     mode: OutputMode,
     error: &bones_core::error::BonesError,
@@ -313,6 +315,7 @@ impl From<&bones_core::error::BonesError> for CliError {
 }
 
 /// Render a success message to stdout.
+#[cfg(test)]
 pub fn render_success(mode: OutputMode, message: &str) -> anyhow::Result<()> {
     let stdout = io::stdout();
     let mut out = stdout.lock();

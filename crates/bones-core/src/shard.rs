@@ -1654,8 +1654,13 @@ mod tests {
         let jan_shard_len = mgr.read_shard(2026, 1).expect("read jan").len();
 
         // Cursor is at the end of the jan shard — feb events are new
-        let (tail, total_len) = mgr.replay_from_offset(jan_shard_len).expect("from feb start");
-        assert!(!tail.contains("jan-event"), "jan events should not appear in tail");
+        let (tail, total_len) = mgr
+            .replay_from_offset(jan_shard_len)
+            .expect("from feb start");
+        assert!(
+            !tail.contains("jan-event"),
+            "jan events should not appear in tail"
+        );
         assert!(tail.contains("feb-event1"), "feb events must be in tail");
         assert!(tail.contains("feb-event2"), "feb events must be in tail");
         assert_eq!(total_len, full.len());

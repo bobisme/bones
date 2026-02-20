@@ -8,11 +8,11 @@ use anyhow::{Context, Result};
 use bones_core::db::query;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -52,14 +52,14 @@ impl TriageView {
         let now_us = chrono::Utc::now().timestamp_micros();
         let snapshot = triage_support::build_triage_snapshot(&conn, now_us)
             .context("build triage snapshot")?;
-        
+
         // Filter to unblocked items (ready for action)
         self.recommendations = snapshot.unblocked_ranked;
-        
+
         if self.state.selected().is_none() && !self.recommendations.is_empty() {
             self.state.select(Some(0));
         }
-        
+
         self.needs_refresh = false;
         Ok(())
     }
@@ -81,22 +81,20 @@ impl TriageView {
                 Ok(None)
             }
             KeyCode::Char('d') => {
-                 if let Some(item) = self.selected_item() {
+                if let Some(item) = self.selected_item() {
                     Ok(Some(TriageAction::Do(item.id.clone())))
                 } else {
                     Ok(None)
                 }
             }
             KeyCode::Char('D') => {
-                 if let Some(item) = self.selected_item() {
+                if let Some(item) = self.selected_item() {
                     Ok(Some(TriageAction::Done(item.id.clone())))
                 } else {
                     Ok(None)
                 }
             }
-            KeyCode::Char('c') => {
-                Ok(Some(TriageAction::Create))
-            }
+            KeyCode::Char('c') => Ok(Some(TriageAction::Create)),
             KeyCode::Char('r') => {
                 self.reload()?;
                 self.set_status("Refreshed".to_string());
@@ -108,20 +106,32 @@ impl TriageView {
 
     fn select_next(&mut self) {
         let len = self.recommendations.len();
-        if len == 0 { return; }
-        let i = self.state.selected().map_or(0, |i| if i + 1 >= len { 0 } else { i + 1 });
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .state
+            .selected()
+            .map_or(0, |i| if i + 1 >= len { 0 } else { i + 1 });
         self.state.select(Some(i));
     }
 
     fn select_prev(&mut self) {
         let len = self.recommendations.len();
-        if len == 0 { return; }
-        let i = self.state.selected().map_or(0, |i| if i == 0 { len - 1 } else { i - 1 });
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .state
+            .selected()
+            .map_or(0, |i| if i == 0 { len - 1 } else { i - 1 });
         self.state.select(Some(i));
     }
 
     fn selected_item(&self) -> Option<&RankedItem> {
-        self.state.selected().and_then(|i| self.recommendations.get(i))
+        self.state
+            .selected()
+            .and_then(|i| self.recommendations.get(i))
     }
 
     pub fn set_status(&mut self, msg: String) {
@@ -142,7 +152,7 @@ impl TriageView {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(main_area);
-        
+
         let list_area = content_chunks[0];
         let detail_area = content_chunks[1];
 
@@ -152,13 +162,20 @@ impl TriageView {
     }
 
     fn render_list(&mut self, frame: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self.recommendations
+        let items: Vec<ListItem> = self
+            .recommendations
             .iter()
             .map(|item| {
                 let score_bar = self.score_bar(item.score);
                 let content = Line::from(vec![
-                    Span::styled(format!("{:<10} ", item.id), Style::default().fg(Color::Cyan)),
-                    Span::styled(format!("{:<6.2} ", item.score), Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("{:<10} ", item.id),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        format!("{:<6.2} {score_bar:<5} ", item.score),
+                        Style::default().fg(Color::Yellow),
+                    ),
                     Span::raw(&item.title),
                 ]);
                 ListItem::new(content)
@@ -166,8 +183,17 @@ impl TriageView {
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Recommendations "))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::White).bg(Color::DarkGray))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Recommendations "),
+            )
+            .highlight_style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::White)
+                    .bg(Color::DarkGray),
+            )
             .highlight_symbol("► ");
 
         frame.render_stateful_widget(list, area, &mut self.state);
@@ -175,7 +201,7 @@ impl TriageView {
 
     fn render_detail(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default().borders(Borders::ALL).title(" Details ");
-        
+
         if let Some(item) = self.selected_item() {
             let text = vec![
                 Line::from(vec![
@@ -198,15 +224,12 @@ impl TriageView {
                     Span::raw(format!("{} active items", item.unblocks_active)),
                 ]),
             ];
-            
-            let p = Paragraph::new(text)
-                .block(block)
-                .wrap(Wrap { trim: true });
+
+            let p = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
             frame.render_widget(p, area);
         } else {
-             let p = Paragraph::new("No item selected")
-                .block(block);
-             frame.render_widget(p, area);
+            let p = Paragraph::new("No item selected").block(block);
+            frame.render_widget(p, area);
         }
     }
 
@@ -233,8 +256,7 @@ impl TriageView {
             }
         }
 
-        let p = Paragraph::new(Line::from(spans))
-            .block(Block::default().borders(Borders::ALL));
+        let p = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::ALL));
         frame.render_widget(p, area);
     }
 
@@ -257,9 +279,9 @@ mod tests {
     use super::*;
     use bones_core::db::migrations;
     use bones_core::db::project::{Projector, ensure_tracking_table};
+    use bones_core::event::Event;
     use bones_core::event::data::{CreateData, EventData};
     use bones_core::event::types::EventType;
-    use bones_core::event::Event;
     use bones_core::model::item::{Kind, Size, Urgency};
     use bones_core::model::item_id::ItemId;
     use rusqlite::Connection;
@@ -307,12 +329,12 @@ mod tests {
         insert_item(&conn, "bn-1", "Urgent Task", Urgency::Urgent);
         insert_item(&conn, "bn-2", "Default Task", Urgency::Default);
 
-        let mut view = TriageView::new(db_path.clone()).unwrap();
-        
+        let view = TriageView::new(db_path.clone()).unwrap();
+
         // Initial load should have items
         assert_eq!(view.recommendations.len(), 2);
         assert_eq!(view.recommendations[0].id, "bn-1"); // Urgent first
-        
+
         // Initial selection
         assert_eq!(view.state.selected(), Some(0));
     }
@@ -325,7 +347,7 @@ mod tests {
         insert_item(&conn, "bn-2", "Task 2", Urgency::Default);
 
         let mut view = TriageView::new(db_path).unwrap();
-        
+
         // Select next
         view.handle_key(KeyEvent::from(KeyCode::Char('j'))).unwrap();
         assert_eq!(view.state.selected(), Some(1));
@@ -346,7 +368,7 @@ mod tests {
         insert_item(&conn, "bn-1", "Task 1", Urgency::Default);
 
         let mut view = TriageView::new(db_path).unwrap();
-        
+
         // 'd' -> Do
         let action = view.handle_key(KeyEvent::from(KeyCode::Char('d'))).unwrap();
         match action {
@@ -364,7 +386,7 @@ mod tests {
         // 'c' -> Create
         let action = view.handle_key(KeyEvent::from(KeyCode::Char('c'))).unwrap();
         match action {
-            Some(TriageAction::Create) => {},
+            Some(TriageAction::Create) => {}
             _ => panic!("Expected Create action"),
         }
     }

@@ -511,6 +511,14 @@ enum Commands {
     Diagnose,
 
     #[command(
+        next_help_heading = "Project Maintenance",
+        about = "Inspect and update configuration",
+        long_about = "Show resolved config values, inspect raw scope files, and update supported keys in project or user scope.",
+        after_help = "EXAMPLES:\n    # Show resolved config\n    bn config show\n\n    # Show raw project config\n    bn config show --project\n\n    # Set project threshold\n    bn config set search.duplicate_threshold 0.85\n\n    # Set user output preference\n    bn config set --scope user user.output json"
+    )]
+    Config(cmd::config::ConfigArgs),
+
+    #[command(
         next_help_heading = "Sync",
         about = "Synchronize local and remote state",
         long_about = "Synchronize with remote: git pull, rebuild projection, then git push.",
@@ -910,6 +918,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Diagnose => timing::timed("cmd.diagnose", || {
             cmd::diagnose::run_diagnose(output, &project_root)
         }),
+        Commands::Config(ref args) => timing::timed("cmd.config", || {
+            cmd::config::run_config(args, &project_root, cli.json)
+        }),
         Commands::Rebuild { incremental } => timing::timed("cmd.rebuild", || {
             cmd::rebuild::run_rebuild(&project_root, incremental)
         }),
@@ -1101,6 +1112,12 @@ mod tests {
     }
 
     #[test]
+    fn config_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "config", "show"]);
+        assert!(matches!(cli.command, Commands::Config(_)));
+    }
+
+    #[test]
     fn tag_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "tag", "item-123", "bug", "urgent"]);
         assert!(matches!(cli.command, Commands::Tag(_)));
@@ -1186,6 +1203,7 @@ mod tests {
             vec!["bn", "import", "--jsonl"],
             vec!["bn", "completions", "bash"],
             vec!["bn", "diagnose"],
+            vec!["bn", "config", "show"],
             vec!["bn", "undo", "bn-abc"],
         ];
         for args in &subcommands {

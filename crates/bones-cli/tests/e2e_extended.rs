@@ -15,7 +15,7 @@ use tempfile::TempDir;
 
 /// Build a Command targeting the bones-cli binary, rooted in `dir`.
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bn").expect("bones-cli binary must exist");
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir);
     cmd.env("AGENT", "test-agent");
     cmd.env("BONES_LOG", "error");
@@ -256,7 +256,7 @@ fn update_requires_agent() {
     let id = create_item(dir.path(), "My item");
 
     // No AGENT env
-    let mut cmd = Command::cargo_bin("bn").unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir.path())
         .env_remove("AGENT")
         .env_remove("BONES_AGENT")

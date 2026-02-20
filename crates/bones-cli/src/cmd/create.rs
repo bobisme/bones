@@ -26,6 +26,7 @@ use bones_core::model::item_id::generate_item_id;
 use bones_core::shard::ShardManager;
 use bones_search::find_duplicates;
 use bones_search::fusion::scoring::SearchConfig;
+use bones_triage::graph::RawGraph;
 
 #[derive(Args, Debug)]
 pub struct CreateArgs {
@@ -309,13 +310,24 @@ pub fn run_create(
                 maybe_related_threshold: 0.50,
             };
 
-            // Look up dependency graph for structural similarity (if needed)
-            // For now, use an empty graph - structural search will be skipped
-            use petgraph::graph::DiGraph;
-            let empty_graph: DiGraph<String, ()> = DiGraph::new();
+            let dependency_graph = RawGraph::from_sqlite(&conn)
+                .map(|raw| raw.graph)
+                .unwrap_or_else(|err| {
+                    tracing::warn!(
+                        "unable to load dependency graph for duplicate detection: {err}"
+                    );
+                    petgraph::graph::DiGraph::new()
+                });
 
             // Run duplicate detection
-            match find_duplicates(&args.title, &conn, &empty_graph, &search_config, false, 10) {
+            match find_duplicates(
+                &args.title,
+                &conn,
+                &dependency_graph,
+                &search_config,
+                false,
+                10,
+            ) {
                 Ok(candidates) => {
                     if !candidates.is_empty() {
                         // Convert to DuplicateMatch for output
@@ -428,7 +440,6 @@ pub fn run_create(
     };
 
     render(output, &result, |r, w| {
-        use std::io::Write;
         writeln!(w, "✓ Created {} — {}", r.id, r.title)?;
         if let Some(ref parent) = r.parent {
             writeln!(w, "  parent: {parent}")?;

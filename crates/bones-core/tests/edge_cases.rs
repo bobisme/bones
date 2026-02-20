@@ -590,8 +590,8 @@ fn empty_db_get_dependencies_returns_empty() {
 #[test]
 fn empty_db_get_comments_returns_empty() {
     let conn = test_db();
-    let comments =
-        query::get_comments(&conn, "bn-ec-nocomments", None, None).expect("get_comments on empty db");
+    let comments = query::get_comments(&conn, "bn-ec-nocomments", None, None)
+        .expect("get_comments on empty db");
     assert!(comments.is_empty(), "no comments in empty db");
 }
 

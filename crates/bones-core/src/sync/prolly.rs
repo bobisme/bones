@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::event::Event;
-use crate::model::item_id::ItemId;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -82,7 +81,11 @@ fn hash_bytes(data: &[u8]) -> Hash {
 /// The event_hash suffix makes the ordering fully deterministic even when
 /// two events share the same item and timestamp.
 fn sort_key(e: &Event) -> (String, i64, String) {
-    (e.item_id.as_str().to_string(), e.wall_ts_us, e.event_hash.clone())
+    (
+        e.item_id.as_str().to_string(),
+        e.wall_ts_us,
+        e.event_hash.clone(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -280,8 +283,7 @@ fn build_interior(mut nodes: Vec<ProllyNode>) -> ProllyNode {
         current_group.push(node);
 
         let group_len = current_group.len();
-        let at_boundary =
-            group_len >= MIN_INTERIOR_SIZE && (gear & INTERIOR_BOUNDARY_MASK) == 0;
+        let at_boundary = group_len >= MIN_INTERIOR_SIZE && (gear & INTERIOR_BOUNDARY_MASK) == 0;
         let at_max = group_len >= MAX_INTERIOR_SIZE;
 
         if at_boundary || at_max {
@@ -408,10 +410,10 @@ mod hex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::data::{CreateData, EventData};
     use crate::event::{Event, EventType};
-    use crate::event::data::{EventData, CreateData};
-    use crate::model::item_id::ItemId;
     use crate::model::item::{Kind, Urgency};
+    use crate::model::item_id::ItemId;
     use std::collections::BTreeMap;
 
     fn make_event(item_id: &str, ts: i64, hash_suffix: &str) -> Event {
@@ -480,10 +482,7 @@ mod tests {
 
     #[test]
     fn diff_identical_trees_is_empty() {
-        let events = vec![
-            make_event("a", 1, "x"),
-            make_event("b", 2, "y"),
-        ];
+        let events = vec![make_event("a", 1, "x"), make_event("b", 2, "y")];
         let t1 = ProllyTree::build(&events);
         let t2 = ProllyTree::build(&events);
         assert!(t1.diff(&t2).is_empty());
@@ -491,10 +490,7 @@ mod tests {
 
     #[test]
     fn diff_finds_new_events() {
-        let shared = vec![
-            make_event("a", 1, "x"),
-            make_event("b", 2, "y"),
-        ];
+        let shared = vec![make_event("a", 1, "x"), make_event("b", 2, "y")];
         let mut extended = shared.clone();
         extended.push(make_event("c", 3, "z"));
 
@@ -508,10 +504,7 @@ mod tests {
     #[test]
     fn diff_empty_vs_populated() {
         let empty = ProllyTree::build(&[]);
-        let populated = ProllyTree::build(&[
-            make_event("a", 1, "x"),
-            make_event("b", 2, "y"),
-        ]);
+        let populated = ProllyTree::build(&[make_event("a", 1, "x"), make_event("b", 2, "y")]);
 
         let missing = empty.diff(&populated);
         assert_eq!(missing.len(), 2);
@@ -637,7 +630,11 @@ mod tests {
 
         let missing_from_b = tree_a.diff(&tree_b);
         // Should find ~100 events from B not in A
-        assert!(missing_from_b.len() >= 90, "Expected ~100 missing, got {}", missing_from_b.len());
+        assert!(
+            missing_from_b.len() >= 90,
+            "Expected ~100 missing, got {}",
+            missing_from_b.len()
+        );
     }
 
     #[test]
@@ -654,7 +651,11 @@ mod tests {
 
         let missing = tree_sub.diff(&tree_all);
         // Events 400..500 should be missing from subset's perspective
-        assert!(missing.len() >= 90, "Expected ~100 missing, got {}", missing.len());
+        assert!(
+            missing.len() >= 90,
+            "Expected ~100 missing, got {}",
+            missing.len()
+        );
     }
 
     #[test]

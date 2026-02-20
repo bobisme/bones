@@ -123,8 +123,8 @@ fn fts5_only_search_returns_results_when_no_model() {
 fn results_are_lexical_only_when_no_model() {
     let conn = build_db_with_items();
 
-    let results = hybrid_search("authentication", &conn, None, 10, 60)
-        .expect("hybrid_search must succeed");
+    let results =
+        hybrid_search("authentication", &conn, None, 10, 60).expect("hybrid_search must succeed");
 
     assert!(!results.is_empty(), "should have at least one result");
 
@@ -136,7 +136,7 @@ fn results_are_lexical_only_when_no_model() {
         );
         assert_eq!(
             r.structural_score, 0.0,
-            "structural score must be 0.0 (not yet implemented, item {})",
+            "structural score must be 0.0 for this dataset (item {})",
             r.item_id
         );
         assert!(
@@ -153,8 +153,8 @@ fn results_are_lexical_only_when_no_model() {
 fn rank_fields_correct_in_fts5_only_mode() {
     let conn = build_db_with_items();
 
-    let results = hybrid_search("database", &conn, None, 10, 60)
-        .expect("hybrid_search must succeed");
+    let results =
+        hybrid_search("database", &conn, None, 10, 60).expect("hybrid_search must succeed");
 
     assert!(!results.is_empty());
 
@@ -266,8 +266,8 @@ fn no_panic_for_varied_queries_in_fts5_only_mode() {
 fn zero_limit_returns_empty_no_crash() {
     let conn = build_db_with_items();
 
-    let results = hybrid_search("authentication", &conn, None, 0, 60)
-        .expect("zero limit must not fail");
+    let results =
+        hybrid_search("authentication", &conn, None, 0, 60).expect("zero limit must not fail");
 
     assert!(results.is_empty(), "zero limit should return empty results");
 }
@@ -298,9 +298,8 @@ fn find_duplicates_fts5_only_returns_candidates() {
     let config = SearchConfig::default();
     let graph: DiGraph<String, ()> = DiGraph::new();
 
-    let candidates =
-        find_duplicates("authentication timeout", &conn, &graph, &config, false, 10)
-            .expect("find_duplicates must not fail in FTS5-only mode");
+    let candidates = find_duplicates("authentication timeout", &conn, &graph, &config, false, 10)
+        .expect("find_duplicates must not fail in FTS5-only mode");
 
     // Should find at least one candidate via lexical match on "authentication".
     assert!(
@@ -354,9 +353,8 @@ fn find_duplicates_falls_back_when_model_load_fails() {
     // semantic_enabled = true, but SemanticModel::load() will fail (no ort, no bundled model).
     // The implementation uses `.ok()` to convert the error to None, then passes None to
     // hybrid_search, which degrades to FTS5-only.
-    let candidates =
-        find_duplicates("authentication timeout", &conn, &graph, &config, true, 10)
-            .expect("find_duplicates must not fail when model load fails");
+    let candidates = find_duplicates("authentication timeout", &conn, &graph, &config, true, 10)
+        .expect("find_duplicates must not fail when model load fails");
 
     // Lexical match should still work.
     assert!(

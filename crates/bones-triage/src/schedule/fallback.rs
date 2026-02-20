@@ -68,9 +68,7 @@ impl ScheduleRegime {
     pub fn explain(&self) -> String {
         match self {
             ScheduleRegime::Whittle { indexability_score } => {
-                format!(
-                    "Whittle Index (indexability score: {indexability_score:.3})"
-                )
+                format!("Whittle Index (indexability score: {indexability_score:.3})")
             }
             ScheduleRegime::Fallback { reason } => {
                 format!("Fallback scheduler — {reason}")
@@ -126,7 +124,13 @@ pub fn assign_fallback(
     scores: &HashMap<String, f64>,
     history: &[Assignment],
 ) -> Vec<Assignment> {
-    assign_fallback_with_config(items, agent_count, scores, history, &FallbackConfig::default())
+    assign_fallback_with_config(
+        items,
+        agent_count,
+        scores,
+        history,
+        &FallbackConfig::default(),
+    )
 }
 
 /// Like [`assign_fallback`] but accepts explicit [`FallbackConfig`].
@@ -382,12 +386,7 @@ mod tests {
     #[test]
     fn duplicate_input_items_deduplicated() {
         let s = scores(&[("bn-a", 5.0)]);
-        let result = assign_fallback(
-            &items(&["bn-a", "bn-a", "bn-a"]),
-            2,
-            &s,
-            &[],
-        );
+        let result = assign_fallback(&items(&["bn-a", "bn-a", "bn-a"]), 2, &s, &[]);
         // Only one unique item, so only one assignment.
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].item_id, "bn-a");
@@ -416,25 +415,18 @@ mod tests {
     #[test]
     fn fairness_no_agent_starved_with_four_items_three_agents() {
         // 4 items, 3 agents → all agents get at least 1.
-        let s = scores(&[
-            ("bn-a", 4.0),
-            ("bn-b", 3.0),
-            ("bn-c", 2.0),
-            ("bn-d", 1.0),
-        ]);
-        let result = assign_fallback(
-            &items(&["bn-a", "bn-b", "bn-c", "bn-d"]),
-            3,
-            &s,
-            &[],
-        );
+        let s = scores(&[("bn-a", 4.0), ("bn-b", 3.0), ("bn-c", 2.0), ("bn-d", 1.0)]);
+        let result = assign_fallback(&items(&["bn-a", "bn-b", "bn-c", "bn-d"]), 3, &s, &[]);
 
         let mut per_agent = vec![0usize; 3];
         for a in &result {
             per_agent[a.agent_idx] += 1;
         }
         for (ag, &count) in per_agent.iter().enumerate() {
-            assert!(count >= 1, "agent {ag} should have at least 1 item (got {count})");
+            assert!(
+                count >= 1,
+                "agent {ag} should have at least 1 item (got {count})"
+            );
         }
     }
 
@@ -460,7 +452,10 @@ mod tests {
         let result = assign_fallback(&items(&["bn-a", "bn-b"]), 2, &s, &h);
 
         let bn_a = result.iter().find(|a| a.item_id == "bn-a").unwrap();
-        assert_eq!(bn_a.agent_idx, 1, "bn-a should not go to agent 0 (who skipped it)");
+        assert_eq!(
+            bn_a.agent_idx, 1,
+            "bn-a should not go to agent 0 (who skipped it)"
+        );
     }
 
     #[test]

@@ -148,8 +148,7 @@ pub fn incremental_apply(
     // loaded content *after* the cursor, we read a small window from the
     // shard directly.
     if let Some(ref hash) = last_hash {
-        let tail_ok = validate_cursor_hash_at_offset(&shard_mgr, offset, hash)
-            .unwrap_or(false);
+        let tail_ok = validate_cursor_hash_at_offset(&shard_mgr, offset, hash).unwrap_or(false);
         if !tail_ok {
             drop(conn);
             return do_full_rebuild(

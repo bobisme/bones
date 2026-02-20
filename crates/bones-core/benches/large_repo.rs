@@ -23,9 +23,9 @@ mod support;
 use bones_core::db::incremental::incremental_apply;
 use bones_core::db::query::{ItemFilter, SortOrder, list_items, try_open_projection};
 use bones_core::db::rebuild;
+use bones_core::event::data::{AssignAction, AssignData, CommentData, CreateData, MoveData};
 use bones_core::event::writer::write_event;
 use bones_core::event::{Event, EventData, EventType};
-use bones_core::event::data::{AssignAction, AssignData, CommentData, CreateData, MoveData};
 use bones_core::model::item::{Kind, Size, State, Urgency};
 use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
@@ -59,14 +59,26 @@ fn events_per_item() -> usize {
 /// Generate and append synthetic events directly, bypassing the corpus
 /// generator's `parse_line` assertion which has a known issue with some
 /// generated item IDs.
-fn write_synthetic_events(shard_mgr: &ShardManager, year: i32, month: u32, item_count: usize, epi: usize) {
+fn write_synthetic_events(
+    shard_mgr: &ShardManager,
+    year: i32,
+    month: u32,
+    item_count: usize,
+    epi: usize,
+) {
     // Generate item IDs using a simple deterministic scheme that always
     // produces valid ItemIds.
     let item_ids: Vec<ItemId> = (0..item_count)
         .map(|i| ItemId::new_unchecked(format!("bn-{i:04x}")))
         .collect();
 
-    let agents = ["agent-alpha", "agent-beta", "agent-gamma", "agent-delta", "agent-epsilon"];
+    let agents = [
+        "agent-alpha",
+        "agent-beta",
+        "agent-gamma",
+        "agent-delta",
+        "agent-epsilon",
+    ];
 
     for (i, id) in item_ids.iter().enumerate() {
         let base_ts = 1_700_000_000_000_000_i64 + i as i64 * 1000;
@@ -84,7 +96,11 @@ fn write_synthetic_events(shard_mgr: &ShardManager, year: i32, month: u32, item_
                 title: format!("Synthetic item {i:05} for large-repo bench"),
                 kind: if i % 10 == 0 { Kind::Bug } else { Kind::Task },
                 size: Some(Size::M),
-                urgency: if i % 20 == 0 { Urgency::Urgent } else { Urgency::Default },
+                urgency: if i % 20 == 0 {
+                    Urgency::Urgent
+                } else {
+                    Urgency::Default
+                },
                 labels: vec!["bench".to_string()],
                 parent: None,
                 causation: None,
@@ -94,7 +110,9 @@ fn write_synthetic_events(shard_mgr: &ShardManager, year: i32, month: u32, item_
             event_hash: String::new(),
         };
         let line = write_event(&mut create).expect("write create event");
-        shard_mgr.append_raw(year, month, &line).expect("append create");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append create");
 
         // Generate `epi - 1` mutation events per item.
         for e in 1..epi {
@@ -113,7 +131,11 @@ fn write_synthetic_events(shard_mgr: &ShardManager, year: i32, month: u32, item_
                 item_id: id.clone(),
                 data: match e % 4 {
                     0 => EventData::Move(MoveData {
-                        state: if e % 8 == 0 { State::Doing } else { State::Open },
+                        state: if e % 8 == 0 {
+                            State::Doing
+                        } else {
+                            State::Open
+                        },
                         reason: None,
                         extra: BTreeMap::new(),
                     }),
@@ -135,7 +157,9 @@ fn write_synthetic_events(shard_mgr: &ShardManager, year: i32, month: u32, item_
                 event_hash: String::new(),
             };
             let line = write_event(&mut mutation).expect("write mutation event");
-            shard_mgr.append_raw(year, month, &line).expect("append mutation");
+            shard_mgr
+                .append_raw(year, month, &line)
+                .expect("append mutation");
         }
     }
 }
@@ -158,7 +182,10 @@ fn build_projection_fixture() -> (TempDir, std::path::PathBuf, std::path::PathBu
     let item_count = bench_item_count();
     let epi = events_per_item();
 
-    let (year, month) = shard_mgr.active_shard().expect("active shard").expect("some");
+    let (year, month) = shard_mgr
+        .active_shard()
+        .expect("active shard")
+        .expect("some");
     write_synthetic_events(&shard_mgr, year, month, item_count, epi);
 
     // Build the initial projection.
@@ -247,8 +274,8 @@ fn bench_incremental_apply(c: &mut Criterion) {
                 }
 
                 // Apply incrementally.
-                let report = incremental_apply(&events_dir, &db_path, false)
-                    .expect("incremental apply");
+                let report =
+                    incremental_apply(&events_dir, &db_path, false).expect("incremental apply");
                 black_box(report.events_applied)
             });
         },
@@ -336,9 +363,7 @@ fn emit_large_repo_slo_report() {
 
     let inc_samples = sample_latencies(30, || {
         for line in &new_events {
-            shard_mgr
-                .append_raw(year, month, line)
-                .expect("append");
+            shard_mgr.append_raw(year, month, line).expect("append");
         }
         let report = incremental_apply(&events_dir, &db_path, false).expect("incremental");
         black_box(report.events_applied);

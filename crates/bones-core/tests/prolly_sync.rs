@@ -76,12 +76,16 @@ fn two_repos_sync_and_converge() {
 
     // Repo A adds unique events.
     let mut repo_a = shared.clone();
-    repo_a.push(make_update_event("item-1", 4000, "agent-a", "status", "doing"));
+    repo_a.push(make_update_event(
+        "item-1", 4000, "agent-a", "status", "doing",
+    ));
     repo_a.push(make_create_event("item-a1", 5000, "agent-a"));
 
     // Repo B adds different unique events.
     let mut repo_b = shared.clone();
-    repo_b.push(make_update_event("item-2", 4500, "agent-b", "status", "done"));
+    repo_b.push(make_update_event(
+        "item-2", 4500, "agent-b", "status", "done",
+    ));
     repo_b.push(make_create_event("item-b1", 5500, "agent-b"));
 
     // Sync.
@@ -244,20 +248,12 @@ fn sync_large_scale_convergence() {
 
     let mut a = shared.clone();
     for i in 0..100 {
-        a.push(make_create_event(
-            &format!("a{i:03}"),
-            1000 + i,
-            "agent-a",
-        ));
+        a.push(make_create_event(&format!("a{i:03}"), 1000 + i, "agent-a"));
     }
 
     let mut b = shared;
     for i in 0..100 {
-        b.push(make_create_event(
-            &format!("b{i:03}"),
-            2000 + i,
-            "agent-b",
-        ));
+        b.push(make_create_event(&format!("b{i:03}"), 2000 + i, "agent-b"));
     }
 
     let result = sync_in_memory(&a, &b).unwrap();

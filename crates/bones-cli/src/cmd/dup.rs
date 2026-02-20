@@ -373,13 +373,6 @@ mod tests {
     use rusqlite::Connection;
     use std::collections::BTreeMap;
 
-    fn test_db() -> Connection {
-        let mut conn = Connection::open_in_memory().expect("open in-memory db");
-        migrations::migrate(&mut conn).expect("migrate");
-        ensure_tracking_table(&conn).expect("tracking table");
-        conn
-    }
-
     fn make_create(
         id: &str,
         title: &str,

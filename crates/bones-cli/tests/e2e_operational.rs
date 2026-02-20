@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bn").expect("bn binary must exist");
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir);
     cmd.env("AGENT", "test-agent");
     cmd.env("BONES_LOG", "error");

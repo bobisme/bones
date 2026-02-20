@@ -443,7 +443,7 @@ fn accumulate_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{migrations, open_projection};
+    use crate::db::migrations;
     use rusqlite::{Connection, params};
 
     // -----------------------------------------------------------------------

@@ -13,11 +13,11 @@ use bones_core::db::query;
 use bones_search::fusion::hybrid_search;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -175,9 +175,7 @@ impl CreateDialog {
         self.similar = raw
             .into_iter()
             .filter_map(|r| {
-                let title = query::get_item(&conn, &r.item_id, false)
-                    .ok()??
-                    .title;
+                let title = query::get_item(&conn, &r.item_id, false).ok()??.title;
                 Some(SimilarCandidate {
                     item_id: r.item_id,
                     title,
@@ -222,7 +220,11 @@ impl CreateDialog {
         // Dialog dimensions
         let dialog_w: u16 = 70.min(area.width.saturating_sub(4));
         let has_similar = !self.similar.is_empty();
-        let dialog_h: u16 = if has_similar { 5 + self.similar.len() as u16 + 2 } else { 5 };
+        let dialog_h: u16 = if has_similar {
+            5 + self.similar.len() as u16 + 2
+        } else {
+            5
+        };
         let dialog_h = dialog_h.min(area.height.saturating_sub(4));
 
         let x = area.x + area.width.saturating_sub(dialog_w) / 2;
@@ -339,6 +341,7 @@ impl CreateDialog {
     }
 
     /// The current title being entered (for external read-back).
+    #[cfg(test)]
     pub fn title(&self) -> &str {
         &self.title
     }
@@ -349,9 +352,9 @@ mod tests {
     use super::*;
     use bones_core::db::migrations;
     use bones_core::db::project::{Projector, ensure_tracking_table};
+    use bones_core::event::Event;
     use bones_core::event::data::{CreateData, EventData};
     use bones_core::event::types::EventType;
-    use bones_core::event::Event;
     use bones_core::model::item::{Kind, Size, Urgency};
     use bones_core::model::item_id::ItemId;
     use rusqlite::Connection;
@@ -405,8 +408,12 @@ mod tests {
         let (_dir, db_path) = setup_db();
         let mut dialog = CreateDialog::new(db_path);
 
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('h'))).unwrap();
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('i'))).unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('h')))
+            .unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('i')))
+            .unwrap();
         assert_eq!(dialog.title(), "hi");
     }
 
@@ -415,9 +422,15 @@ mod tests {
         let (_dir, db_path) = setup_db();
         let mut dialog = CreateDialog::new(db_path);
 
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('a'))).unwrap();
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('b'))).unwrap();
-        dialog.handle_key(KeyEvent::from(KeyCode::Backspace)).unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('a')))
+            .unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('b')))
+            .unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Backspace))
+            .unwrap();
         assert_eq!(dialog.title(), "a");
     }
 
@@ -425,7 +438,9 @@ mod tests {
     fn dialog_esc_cancels() {
         let (_dir, db_path) = setup_db();
         let mut dialog = CreateDialog::new(db_path);
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('x'))).unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('x')))
+            .unwrap();
 
         let action = dialog.handle_key(KeyEvent::from(KeyCode::Esc)).unwrap();
         assert!(matches!(action, Some(DialogAction::Cancel)));
@@ -445,9 +460,15 @@ mod tests {
         let (_dir, db_path) = setup_db();
         let mut dialog = CreateDialog::new(db_path);
 
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('N'))).unwrap();
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('e'))).unwrap();
-        dialog.handle_key(KeyEvent::from(KeyCode::Char('w'))).unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('N')))
+            .unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('e')))
+            .unwrap();
+        dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('w')))
+            .unwrap();
 
         let action = dialog.handle_key(KeyEvent::from(KeyCode::Enter)).unwrap();
         match action {
@@ -483,7 +504,9 @@ mod tests {
         // Select the first similar item
         dialog.similar_state.select(Some(0));
 
-        let action = dialog.handle_key(KeyEvent::from(KeyCode::Char('l'))).unwrap();
+        let action = dialog
+            .handle_key(KeyEvent::from(KeyCode::Char('l')))
+            .unwrap();
         match action {
             Some(DialogAction::LinkTo(id)) => assert_eq!(id, "bn-1"),
             _ => panic!("expected LinkTo action"),

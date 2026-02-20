@@ -231,7 +231,6 @@ pub fn run_reopen(
     let payload = ReopenBatchOutput { results };
 
     render(output, &payload, |r, w| {
-        use std::io::Write;
         for result in &r.results {
             if result.ok {
                 writeln!(

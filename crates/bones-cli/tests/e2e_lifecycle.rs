@@ -6,7 +6,6 @@
 //! Each test runs `bones-cli` as a subprocess in an isolated temp directory.
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 use serde_json::Value;
 use std::path::Path;
 use tempfile::TempDir;
@@ -17,7 +16,7 @@ use tempfile::TempDir;
 
 /// Build a Command targeting the bones-cli binary, rooted in `dir`.
 fn bn_cmd(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("bn").expect("bn binary must exist");
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
     cmd.current_dir(dir);
     // Provide a default agent so mutating commands don't fail
     cmd.env("AGENT", "test-agent");

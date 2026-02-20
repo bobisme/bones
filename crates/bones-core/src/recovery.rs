@@ -18,7 +18,7 @@
 //!   exactly what happened and why.
 
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -187,7 +187,6 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
     }
 
     let lines: Vec<&str> = content.lines().collect();
-    let mut valid_count = 0;
     let mut events_preserved = 0;
     let mut first_bad_line = None;
 
@@ -195,14 +194,12 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             // Comment or blank — always valid
-            valid_count += 1;
             continue;
         }
 
         // Try parsing as a TSJSON event line
         match parser::parse_line(line) {
             Ok(_) => {
-                valid_count += 1;
                 events_preserved += 1;
             }
             Err(_) => {
@@ -599,6 +596,7 @@ pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use tempfile::TempDir;
 
     // ---- Partial write tests ----

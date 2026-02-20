@@ -42,12 +42,6 @@ pub struct DeleteArgs {
     pub force: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct DeleteOutput {
-    id: String,
-    deleted: bool,
-}
-
 fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     let mut current = start.to_path_buf();
     loop {

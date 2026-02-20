@@ -5,9 +5,13 @@ use std::process::Command;
 
 use anyhow::{Context as _, Result};
 use bones_core::event::parser::parse_line;
+#[cfg(test)]
 use bones_core::event::writer::write_event;
+#[cfg(test)]
 use bones_core::event::{Event, EventData, EventType, data::CreateData};
+#[cfg(test)]
 use bones_core::model::item::*;
+#[cfg(test)]
 use bones_core::model::item_id::ItemId;
 use std::{fs, io::Read};
 

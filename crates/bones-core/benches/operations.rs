@@ -1,7 +1,11 @@
 mod support;
 
-use bones_core::event::parse_line;
+use bones_core::crdt::item_state::WorkItemState;
+use bones_core::crdt::state::Phase;
+use bones_core::event::types::EventType;
+use bones_core::event::{ParsedLine, parse_line};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::collections::HashMap;
 use support::{
     SyntheticCorpus, TIERS, generate_corpus_for_bench, sample_latencies, summarize_latencies,
 };
@@ -16,23 +20,23 @@ fn bench_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("create", tier.name),
             &corpus,
-            |b, corpus| b.iter(|| black_box(create_stub(corpus))),
+            |b, corpus| b.iter(|| black_box(create_operation(corpus))),
         );
 
         group.bench_with_input(BenchmarkId::new("next", tier.name), &corpus, |b, corpus| {
-            b.iter(|| black_box(next_stub(corpus)))
+            b.iter(|| black_box(next_operation(corpus)))
         });
 
         group.bench_with_input(
             BenchmarkId::new("search", tier.name),
             &corpus,
-            |b, corpus| b.iter(|| black_box(search_stub(corpus, "search"))),
+            |b, corpus| b.iter(|| black_box(search_operation(corpus, "search"))),
         );
 
         group.bench_with_input(
             BenchmarkId::new("rebuild", tier.name),
             &corpus,
-            |b, corpus| b.iter(|| black_box(rebuild_stub(corpus))),
+            |b, corpus| b.iter(|| black_box(rebuild_operation(corpus))),
         );
 
         emit_latency_report(tier.name, &corpus);
@@ -41,51 +45,90 @@ fn bench_operations(c: &mut Criterion) {
     group.finish();
 }
 
-fn create_stub(corpus: &SyntheticCorpus) -> usize {
-    let mut score = corpus.lines.len();
-    if let Some(first) = corpus.lines.first() {
-        score += first.len();
-    }
-    score
-}
-
-fn next_stub(corpus: &SyntheticCorpus) -> Option<&str> {
+fn create_operation(corpus: &SyntheticCorpus) -> usize {
     corpus
         .lines
         .iter()
-        .rev()
-        .find(|line| line.contains("item.create") || line.contains("item.move"))
-        .map(String::as_str)
-}
-
-fn search_stub<'a>(corpus: &'a SyntheticCorpus, needle: &str) -> Vec<&'a str> {
-    corpus
-        .lines
-        .iter()
-        .filter_map(|line| line.contains(needle).then_some(line.as_str()))
-        .collect()
-}
-
-fn rebuild_stub(corpus: &SyntheticCorpus) -> usize {
-    corpus
-        .lines
-        .iter()
-        .filter(|line| parse_line(line).is_ok())
+        .filter_map(|line| match parse_line(line).ok()? {
+            ParsedLine::Event(event) => Some(event),
+            _ => None,
+        })
+        .filter(|event| event.event_type == EventType::Create)
         .count()
+}
+
+fn next_operation(corpus: &SyntheticCorpus) -> Option<String> {
+    replay_item_states(corpus)
+        .into_iter()
+        .filter(|(_, state)| !state.deleted.value)
+        .filter(|(_, state)| matches!(state.state.phase, Phase::Open | Phase::Doing))
+        .max_by(|(left_id, left), (right_id, right)| {
+            left.updated_at
+                .cmp(&right.updated_at)
+                .then_with(|| left_id.cmp(right_id))
+        })
+        .map(|(item_id, _)| item_id)
+}
+
+fn search_operation(corpus: &SyntheticCorpus, needle: &str) -> Vec<String> {
+    let needle = needle.to_ascii_lowercase();
+    let mut matches = replay_item_states(corpus)
+        .into_iter()
+        .filter(|(_, state)| !state.deleted.value)
+        .filter(|(item_id, state)| {
+            item_id.to_ascii_lowercase().contains(&needle)
+                || state.title.value.to_ascii_lowercase().contains(&needle)
+                || state
+                    .description
+                    .value
+                    .to_ascii_lowercase()
+                    .contains(&needle)
+                || state
+                    .labels
+                    .values()
+                    .iter()
+                    .any(|label| label.to_ascii_lowercase().contains(&needle))
+        })
+        .map(|(item_id, _)| item_id)
+        .collect::<Vec<_>>();
+    matches.sort_unstable();
+    matches
+}
+
+fn rebuild_operation(corpus: &SyntheticCorpus) -> usize {
+    replay_item_states(corpus).len()
+}
+
+fn replay_item_states(corpus: &SyntheticCorpus) -> HashMap<String, WorkItemState> {
+    let mut states: HashMap<String, WorkItemState> = HashMap::new();
+    for line in &corpus.lines {
+        let Ok(parsed) = parse_line(line) else {
+            continue;
+        };
+
+        let ParsedLine::Event(event) = parsed else {
+            continue;
+        };
+
+        let item_id = event.item_id.to_string();
+        states.entry(item_id).or_default().apply_event(&event);
+    }
+
+    states
 }
 
 fn emit_latency_report(tier_name: &str, corpus: &SyntheticCorpus) {
     let create = summarize_latencies(&sample_latencies(64, || {
-        black_box(create_stub(corpus));
+        black_box(create_operation(corpus));
     }));
     let next = summarize_latencies(&sample_latencies(64, || {
-        black_box(next_stub(corpus));
+        black_box(next_operation(corpus));
     }));
     let search = summarize_latencies(&sample_latencies(64, || {
-        black_box(search_stub(corpus, "agent"));
+        black_box(search_operation(corpus, "agent"));
     }));
     let rebuild = summarize_latencies(&sample_latencies(32, || {
-        black_box(rebuild_stub(corpus));
+        black_box(rebuild_operation(corpus));
     }));
 
     eprintln!(

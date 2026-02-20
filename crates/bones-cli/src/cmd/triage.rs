@@ -250,7 +250,6 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
-            state: "open".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
             score,
