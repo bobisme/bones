@@ -3,7 +3,9 @@
 //! By default, shows all open items (state = "open"). Filters can be
 //! combined. Supports both human-readable table and JSON output.
 
-use crate::output::{CliError, OutputMode, render, render_error, render_mode};
+use crate::output::{
+    CliError, OutputMode, pretty_kv, pretty_table, render, render_error, render_mode,
+};
 use crate::validate;
 use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};
 use bones_core::model::item::Urgency;
@@ -483,16 +485,9 @@ fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<(
         return writeln!(w, "Use `bn create --title \"...\"` to add a new item");
     }
 
-    writeln!(w, "Items: {}", items.len())?;
-    writeln!(w, "{:-<72}", "")?;
+    pretty_kv(w, "Items", items.len().to_string())?;
 
-    writeln!(
-        w,
-        "{:<22}  {:<6}  {:<10}  {:<8}  {}",
-        "ID", "KIND", "STATE", "URGENCY", "TITLE"
-    )?;
-    writeln!(w, "{}", "-".repeat(72))?;
-
+    let mut rows = Vec::with_capacity(items.len());
     for item in items {
         let labels_suffix = if item.labels.is_empty() {
             String::new()
@@ -507,12 +502,16 @@ fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<(
             item.title.clone()
         };
 
-        writeln!(
-            w,
-            "{:<22}  {:<6}  {:<10}  {:<8}  {}{}",
-            item.id, item.kind, item.state, item.urgency, title, labels_suffix
-        )?;
+        rows.push(vec![
+            item.id.clone(),
+            item.kind.clone(),
+            item.state.clone(),
+            item.urgency.clone(),
+            format!("{title}{labels_suffix}"),
+        ]);
     }
+
+    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "TITLE"], &rows)?;
 
     Ok(())
 }
@@ -523,16 +522,23 @@ fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()
         return Ok(());
     }
 
+    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS")?;
+
     for item in items {
         let labels = if item.labels.is_empty() {
             String::new()
         } else {
-            format!("  labels={}", item.labels.join(","))
+            item.labels.join(",")
         };
         writeln!(
             w,
-            "{}  {}  {}  {}  {}{}",
-            item.id, item.kind, item.state, item.urgency, item.title, labels
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            item.id,
+            item.kind,
+            item.state,
+            item.urgency,
+            item.title.replace('\t', " "),
+            labels
         )?;
     }
     Ok(())
@@ -772,6 +778,26 @@ mod tests {
         // Title should be truncated (not all 60 chars)
         assert!(!out.contains(&long_title));
         assert!(out.contains('…'));
+    }
+
+    #[test]
+    fn render_list_text_shows_header_row() {
+        let items = vec![ListItem {
+            id: "bn-abc".into(),
+            title: "Fix auth".into(),
+            kind: "task".into(),
+            state: "open".into(),
+            urgency: "urgent".into(),
+            size: None,
+            parent_id: None,
+            labels: vec!["backend".into()],
+            updated_at_us: 1000,
+        }];
+        let mut buf = Vec::new();
+        render_list_text(&items, &mut buf).expect("render text");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS"));
+        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend"));
     }
 
     // -----------------------------------------------------------------------

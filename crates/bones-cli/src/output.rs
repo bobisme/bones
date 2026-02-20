@@ -24,26 +24,128 @@
 //! ```
 
 use clap::ValueEnum;
+use crossterm::style::{Color, Stylize};
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
 
 /// Shared width for human pretty separators.
 pub const PRETTY_RULE_WIDTH: usize = 72;
 
+fn pretty_color_enabled() -> bool {
+    io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
+fn style_heading(text: &str) -> String {
+    if pretty_color_enabled() {
+        format!("{}", text.bold().with(Color::Cyan))
+    } else {
+        text.to_string()
+    }
+}
+
+fn style_header(text: &str) -> String {
+    if pretty_color_enabled() {
+        format!("{}", text.bold().with(Color::Blue))
+    } else {
+        text.to_string()
+    }
+}
+
+fn style_dim(text: &str) -> String {
+    if pretty_color_enabled() {
+        format!("{}", text.dark_grey())
+    } else {
+        text.to_string()
+    }
+}
+
 /// Write a horizontal separator used by pretty human output.
 pub fn pretty_rule(w: &mut dyn Write) -> io::Result<()> {
-    writeln!(w, "{:-<width$}", "", width = PRETTY_RULE_WIDTH)
+    writeln!(
+        w,
+        "{}",
+        style_dim(&format!("{:-<width$}", "", width = PRETTY_RULE_WIDTH))
+    )
 }
 
 /// Write a section heading followed by a separator.
 pub fn pretty_section(w: &mut dyn Write, heading: &str) -> io::Result<()> {
-    writeln!(w, "{heading}")?;
+    writeln!(w, "{}", style_heading(heading))?;
     pretty_rule(w)
 }
 
 /// Render a left-aligned key/value line in human output.
 pub fn pretty_kv(w: &mut dyn Write, key: &str, value: impl AsRef<str>) -> io::Result<()> {
-    writeln!(w, "{:<12} {}", format!("{key}:"), value.as_ref())
+    writeln!(
+        w,
+        "{:<12} {}",
+        style_header(&format!("{key}:")),
+        value.as_ref()
+    )
+}
+
+fn draw_table_border(
+    w: &mut dyn Write,
+    left: char,
+    middle: char,
+    right: char,
+    widths: &[usize],
+) -> io::Result<()> {
+    write!(w, "{left}")?;
+    for (idx, width) in widths.iter().enumerate() {
+        write!(w, "{}", "─".repeat(*width + 2))?;
+        if idx + 1 != widths.len() {
+            write!(w, "{middle}")?;
+        }
+    }
+    writeln!(w, "{right}")
+}
+
+/// Render a unicode table for pretty output.
+///
+/// - `headers` defines the column order.
+/// - Each row should contain the same number of cells as `headers` (missing
+///   cells are treated as empty strings).
+pub fn pretty_table(w: &mut dyn Write, headers: &[&str], rows: &[Vec<String>]) -> io::Result<()> {
+    if headers.is_empty() {
+        return Ok(());
+    }
+
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.chars().count()).collect();
+    for row in rows {
+        for (col, cell) in row.iter().enumerate() {
+            if let Some(width) = widths.get_mut(col) {
+                *width = (*width).max(cell.chars().count());
+            }
+        }
+    }
+
+    draw_table_border(w, '╭', '┬', '╮', &widths)?;
+
+    write!(w, "│")?;
+    for (idx, header) in headers.iter().enumerate() {
+        write!(
+            w,
+            " {} ",
+            style_header(&format!("{header:<width$}", width = widths[idx]))
+        )?;
+        write!(w, "│")?;
+    }
+    writeln!(w)?;
+
+    draw_table_border(w, '├', '┼', '┤', &widths)?;
+
+    for row in rows {
+        write!(w, "│")?;
+        for idx in 0..headers.len() {
+            let value = row.get(idx).map_or("", String::as_str);
+            write!(w, " {value:<width$} ", width = widths[idx])?;
+            write!(w, "│")?;
+        }
+        writeln!(w)?;
+    }
+
+    draw_table_border(w, '╰', '┴', '╯', &widths)
 }
 
 /// The three output modes supported by the CLI.

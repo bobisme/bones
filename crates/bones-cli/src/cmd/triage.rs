@@ -8,7 +8,9 @@ use serde::Serialize;
 use bones_core::db::query;
 
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
-use crate::output::{CliError, OutputMode, pretty_section, render_error, render_mode};
+use crate::output::{
+    CliError, OutputMode, pretty_section, pretty_table, render_error, render_mode,
+};
 
 /// Arguments for `bn triage`.
 #[derive(Args, Debug, Default)]
@@ -168,9 +170,12 @@ fn render_triage_human(
     if cycles.is_empty() {
         writeln!(w, "(none)")?;
     } else {
-        for (idx, cycle) in cycles.iter().enumerate() {
-            writeln!(w, "{:>2}. {}", idx + 1, cycle.join(" -> "))?;
-        }
+        let rows: Vec<Vec<String>> = cycles
+            .iter()
+            .enumerate()
+            .map(|(idx, cycle)| vec![(idx + 1).to_string(), cycle.join(" -> ")])
+            .collect();
+        pretty_table(w, &["#", "CYCLE"], &rows)?;
     }
     Ok(())
 }
@@ -187,16 +192,17 @@ fn render_ranked_section(
         return Ok(());
     }
 
-    writeln!(w, "{:<16}  {:>8}  TITLE", "ID", "SCORE")?;
-    for item in items {
-        writeln!(
-            w,
-            "{:<16}  {:>8}  {}",
-            item.id,
-            format_score(item.score),
-            item.title
-        )?;
-    }
+    let rows: Vec<Vec<String>> = items
+        .iter()
+        .map(|item| {
+            vec![
+                item.id.clone(),
+                format_score(item.score),
+                item.title.clone(),
+            ]
+        })
+        .collect();
+    pretty_table(w, &["ID", "SCORE", "TITLE"], &rows)?;
 
     Ok(())
 }
@@ -209,17 +215,18 @@ fn render_blocker_section(w: &mut dyn Write, blockers: &[&RankedItem]) -> std::i
         return Ok(());
     }
 
-    writeln!(w, "{:<16}  {:>6}  {:>8}  TITLE", "ID", "BLOCKS", "SCORE")?;
-    for item in blockers {
-        writeln!(
-            w,
-            "{:<16}  {:>6}  {:>8}  {}",
-            item.id,
-            item.unblocks_active,
-            format_score(item.score),
-            item.title
-        )?;
-    }
+    let rows: Vec<Vec<String>> = blockers
+        .iter()
+        .map(|item| {
+            vec![
+                item.id.clone(),
+                item.unblocks_active.to_string(),
+                format_score(item.score),
+                item.title.clone(),
+            ]
+        })
+        .collect();
+    pretty_table(w, &["ID", "BLOCKS", "SCORE", "TITLE"], &rows)?;
 
     Ok(())
 }
@@ -231,36 +238,45 @@ fn render_triage_text(
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
 ) -> std::io::Result<()> {
+    writeln!(w, "SECTION\tID\tBLOCKS\tSCORE\tTITLE")?;
     for item in top_picks {
         writeln!(
             w,
-            "{}  top_pick  score={}  {}",
+            "top_pick\t{}\t-\t{}\t{}",
             item.id,
             format_score(item.score),
-            item.title
+            item.title.replace('\t', " ")
         )?;
     }
     for item in blockers {
         writeln!(
             w,
-            "{}  blocker  blocks={}  score={}  {}",
+            "blocker\t{}\t{}\t{}\t{}",
             item.id,
             item.unblocks_active,
             format_score(item.score),
-            item.title
+            item.title.replace('\t', " ")
         )?;
     }
     for item in quick_wins {
         writeln!(
             w,
-            "{}  quick_win  score={}  {}",
+            "quick_win\t{}\t-\t{}\t{}",
             item.id,
             format_score(item.score),
-            item.title
+            item.title.replace('\t', " ")
         )?;
     }
+
+    writeln!(w)?;
+    writeln!(w, "CYCLES\tINDEX\tPATH")?;
     for (idx, cycle) in cycles.iter().enumerate() {
-        writeln!(w, "cycle-{}  {}", idx + 1, cycle.join(" -> "))?;
+        writeln!(
+            w,
+            "cycle\t{}\t{}",
+            idx + 1,
+            cycle.join(" -> ").replace('\t', " ")
+        )?;
     }
     if top_picks.is_empty() && blockers.is_empty() && quick_wins.is_empty() && cycles.is_empty() {
         writeln!(w, "advice  no-triage-items")?;
@@ -349,5 +365,26 @@ mod tests {
         assert!(rows.iter().any(|row| row.section == "blocker"));
         assert!(rows.iter().any(|row| row.section == "quick_win"));
         assert!(rows.iter().any(|row| row.section == "cycle"));
+    }
+
+    #[test]
+    fn render_triage_text_includes_table_headers() {
+        let top = vec![ranked("bn-top", "Top item", 0.9)];
+        let blockers = vec![ranked("bn-block", "Block item", 0.8)];
+        let quick = vec![ranked("bn-quick", "Quick item", 0.7)];
+        let cycles = vec![vec!["bn-top".to_string(), "bn-block".to_string()]];
+
+        let top_refs: Vec<&RankedItem> = top.iter().collect();
+        let blocker_refs: Vec<&RankedItem> = blockers.iter().collect();
+        let quick_refs: Vec<&RankedItem> = quick.iter().collect();
+
+        let mut buf = Vec::new();
+        render_triage_text(&mut buf, &top_refs, &blocker_refs, &quick_refs, &cycles)
+            .expect("render triage text");
+        let out = String::from_utf8(buf).expect("utf8");
+
+        assert!(out.contains("SECTION\tID\tBLOCKS\tSCORE\tTITLE"));
+        assert!(out.contains("CYCLES\tINDEX\tPATH"));
+        assert!(out.contains("top_pick\tbn-top\t-\t0.9000\tTop item"));
     }
 }
