@@ -1,4 +1,6 @@
-//! Shard manifest verification utilities.
+//! Verification utilities for shard manifests and redaction completeness.
+
+pub mod redact;
 
 use std::fs;
 use std::path::{Path, PathBuf};

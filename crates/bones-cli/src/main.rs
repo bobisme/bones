@@ -391,6 +391,17 @@ enum Commands {
     },
 
     #[command(
+        name = "redact-verify",
+        next_help_heading = "Security",
+        about = "Verify redaction completeness",
+        long_about = "Verify that all item.redact events have been fully applied.\n\n\
+                      Checks projection rows, FTS5 index, and comment bodies for residual\n\
+                      un-redacted content.",
+        after_help = "EXAMPLES:\n    # Verify all redactions\n    bn redact-verify\n\n    # Verify one item\n    bn redact-verify bn-abc\n\n    # Machine-readable output\n    bn redact-verify --json"
+    )]
+    RedactVerify(cmd::redact_verify::RedactVerifyArgs),
+
+    #[command(
         next_help_heading = "Project Maintenance",
         about = "Run repository diagnostics",
         long_about = "Summarize event-log health, integrity anomalies, and projection drift indicators.",
@@ -748,6 +759,9 @@ fn main() -> anyhow::Result<()> {
             } else {
                 cmd::verify::run_verify(&project_root, regenerate_missing)
             }
+        }),
+        Commands::RedactVerify(ref args) => timing::timed("cmd.redact_verify", || {
+            cmd::redact_verify::run_redact_verify(args, output, &project_root)
         }),
         Commands::Diagnose => timing::timed("cmd.diagnose", || {
             cmd::diagnose::run_diagnose(output, &project_root)

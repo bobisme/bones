@@ -27,6 +27,7 @@ pub mod move_cmd;
 pub mod next;
 pub mod plan;
 pub mod rebuild;
+pub mod redact_verify;
 pub mod reopen;
 pub mod search;
 pub mod show;
