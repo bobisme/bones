@@ -125,16 +125,16 @@ pub enum SortOrder {
 impl SortOrder {
     const fn sql_clause(self) -> &'static str {
         match self {
-            Self::CreatedDesc => "ORDER BY created_at_us DESC",
-            Self::CreatedAsc => "ORDER BY created_at_us ASC",
-            Self::UpdatedDesc => "ORDER BY updated_at_us DESC",
-            Self::UpdatedAsc => "ORDER BY updated_at_us ASC",
+            Self::CreatedDesc => "ORDER BY created_at_us DESC, item_id ASC",
+            Self::CreatedAsc => "ORDER BY created_at_us ASC, item_id ASC",
+            Self::UpdatedDesc => "ORDER BY updated_at_us DESC, item_id ASC",
+            Self::UpdatedAsc => "ORDER BY updated_at_us ASC, item_id ASC",
             Self::Priority => {
                 "ORDER BY CASE urgency \
                  WHEN 'urgent' THEN 0 \
                  WHEN 'default' THEN 1 \
                  WHEN 'punt' THEN 2 \
-                 END ASC, updated_at_us DESC"
+                 END ASC, updated_at_us DESC, item_id ASC"
             }
         }
     }
@@ -1181,6 +1181,70 @@ mod tests {
         let items2 = list_items(&conn, &filter2).unwrap();
         assert_eq!(items2.len(), 3);
         assert_eq!(items2[0].item_id, "bn-003");
+    }
+
+    #[test]
+    fn list_items_stable_tie_breaks_use_item_id() {
+        let conn = test_db();
+
+        // Same timestamps force ORDER BY tie-break behavior.
+        insert_item_full(
+            &conn,
+            "bn-010",
+            "Ten",
+            None,
+            "task",
+            "open",
+            "default",
+            None,
+            "",
+            100,
+            200,
+        );
+        insert_item_full(
+            &conn,
+            "bn-002",
+            "Two",
+            None,
+            "task",
+            "open",
+            "default",
+            None,
+            "",
+            100,
+            200,
+        );
+        insert_item_full(
+            &conn,
+            "bn-001",
+            "One",
+            None,
+            "task",
+            "open",
+            "default",
+            None,
+            "",
+            100,
+            200,
+        );
+
+        let asc = ItemFilter {
+            sort: SortOrder::CreatedAsc,
+            ..Default::default()
+        };
+        let asc_items = list_items(&conn, &asc).unwrap();
+        assert_eq!(asc_items[0].item_id, "bn-001");
+        assert_eq!(asc_items[1].item_id, "bn-002");
+        assert_eq!(asc_items[2].item_id, "bn-010");
+
+        let desc = ItemFilter {
+            sort: SortOrder::UpdatedDesc,
+            ..Default::default()
+        };
+        let desc_items = list_items(&conn, &desc).unwrap();
+        assert_eq!(desc_items[0].item_id, "bn-001");
+        assert_eq!(desc_items[1].item_id, "bn-002");
+        assert_eq!(desc_items[2].item_id, "bn-010");
     }
 
     #[test]
