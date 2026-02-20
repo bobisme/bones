@@ -2,6 +2,7 @@
 //! bones-core library.
 
 pub mod cache;
+pub mod capabilities;
 pub mod clock;
 pub mod config;
 pub mod crdt;
