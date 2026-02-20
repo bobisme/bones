@@ -1,10 +1,9 @@
 //! `bn stats` — project reporting dashboard.
 
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-use bones_core::db::query::{self};
+use bones_core::db::query;
 use clap::Args;
 use serde::Serialize;
 
@@ -42,7 +41,11 @@ pub struct ProjectStats {
 }
 
 /// Execute `bn stats`.
-pub fn run_stats(_args: &StatsArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
+pub fn run_stats(
+    _args: &StatsArgs,
+    output: OutputMode,
+    project_root: &Path,
+) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
     let conn = match query::try_open_projection(&db_path)? {
         Some(conn) => conn,
@@ -106,25 +109,23 @@ fn compute_aging(conn: &rusqlite::Connection, now_us: i64) -> anyhow::Result<Agi
     let (sum_age_us, open_count): (i64, usize) = {
         let mut stmt = conn.prepare(
             "SELECT COALESCE(SUM(?1 - created_at_us), 0), COUNT(*) \
-             FROM items\
-             WHERE is_deleted = 0\
+             FROM items \
+             WHERE is_deleted = 0 \
                AND state IN ('open', 'doing')",
         )?;
 
-        let (sum, count): (i64, i64) = stmt.query_row([now_us], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
-        (
-            sum,
-            usize::try_from(count).unwrap_or(usize::MAX),
-        )
+        let (sum, count): (i64, i64) = stmt.query_row([now_us], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        (sum, usize::try_from(count).unwrap_or(usize::MAX))
     };
 
     let avg_open_age_days = if open_count == 0 {
         0.0
     } else {
+        #[allow(clippy::cast_precision_loss)]
         let open_count_f64 = open_count as f64;
-        (sum_age_us as f64 / open_count_f64) / 86_400_000_000.0
+        #[allow(clippy::cast_precision_loss)]
+        let sum_f64 = sum_age_us as f64;
+        sum_f64 / open_count_f64 / 86_400_000_000.0
     };
 
     Ok(Aging {
@@ -133,39 +134,51 @@ fn compute_aging(conn: &rusqlite::Connection, now_us: i64) -> anyhow::Result<Agi
     })
 }
 
-fn count_items_created_between(conn: &rusqlite::Connection, start_us: i64, end_us: i64) -> anyhow::Result<usize> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM items WHERE is_deleted = 0 AND created_at_us >= ?1 AND created_at_us <= ?2",
-            [start_us, end_us],
-            |row| row.get(0),
-        )?;
+fn count_items_created_between(
+    conn: &rusqlite::Connection,
+    start_us: i64,
+    end_us: i64,
+) -> anyhow::Result<usize> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM items \
+         WHERE is_deleted = 0 \
+           AND created_at_us >= ?1 \
+           AND created_at_us <= ?2",
+        [start_us, end_us],
+        |row| row.get(0),
+    )?;
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
-fn count_items_closed_between(conn: &rusqlite::Connection, start_us: i64, end_us: i64) -> anyhow::Result<usize> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM items\
-             WHERE is_deleted = 0\
-               AND state IN ('done', 'archived')\
-               AND updated_at_us >= ?1 AND updated_at_us <= ?2",
-            [start_us, end_us],
-            |row| row.get(0),
-        )?;
+fn count_items_closed_between(
+    conn: &rusqlite::Connection,
+    start_us: i64,
+    end_us: i64,
+) -> anyhow::Result<usize> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM items \
+         WHERE is_deleted = 0 \
+           AND state IN ('done', 'archived') \
+           AND updated_at_us >= ?1 \
+           AND updated_at_us <= ?2",
+        [start_us, end_us],
+        |row| row.get(0),
+    )?;
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
-fn count_open_items_older_than(conn: &rusqlite::Connection, threshold_us: i64) -> anyhow::Result<usize> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM items\
-             WHERE is_deleted = 0\
-               AND state IN ('open', 'doing')\
-               AND created_at_us < ?1",
-            [threshold_us],
-            |row| row.get(0),
-        )?;
+fn count_open_items_older_than(
+    conn: &rusqlite::Connection,
+    threshold_us: i64,
+) -> anyhow::Result<usize> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM items \
+         WHERE is_deleted = 0 \
+           AND state IN ('open', 'doing') \
+           AND created_at_us < ?1",
+        [threshold_us],
+        |row| row.get(0),
+    )?;
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
@@ -182,7 +195,6 @@ fn shard_directory_bytes(shards_dir: &Path) -> u64 {
         if path.extension().and_then(|s| s.to_str()) != Some("events") {
             continue;
         }
-
         if let Ok(meta) = path.metadata() {
             total = total.saturating_add(meta.len());
         }
@@ -198,7 +210,7 @@ fn render_sorted_map(map: &std::collections::HashMap<String, usize>) -> Vec<(&st
 }
 
 fn render_stats_human(stats: &ProjectStats, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(w, "Project reporting")==?;
+    writeln!(w, "Project reporting")?;
 
     writeln!(w, "\nItems by state:")?;
     for (state, count) in render_sorted_map(&stats.by_state) {
@@ -215,4 +227,25 @@ fn render_stats_human(stats: &ProjectStats, w: &mut dyn Write) -> std::io::Resul
         writeln!(w, "  {urgency}: {count}")?;
     }
 
-    writeln!(w, "
+    writeln!(w, "\nVelocity (last 7 / 30 days):")?;
+    writeln!(w, "  opened:  {} / {}", stats.velocity.opened_7d, stats.velocity.opened_30d)?;
+    writeln!(w, "  closed:  {} / {}", stats.velocity.closed_7d, stats.velocity.closed_30d)?;
+
+    writeln!(w, "\nAging:")?;
+    writeln!(w, "  avg open age (days): {:.1}", stats.aging.avg_open_age_days)?;
+    writeln!(w, "  stale (>30 days):    {}", stats.aging.stale_count_30d)?;
+
+    writeln!(w, "\nEvents by type:")?;
+    for (event_type, count) in render_sorted_map(&stats.events_by_type) {
+        writeln!(w, "  {event_type}: {count}")?;
+    }
+
+    writeln!(w, "\nEvents by agent:")?;
+    for (agent, count) in render_sorted_map(&stats.events_by_agent) {
+        writeln!(w, "  {agent}: {count}")?;
+    }
+
+    writeln!(w, "\nShard storage: {} bytes", stats.shard_bytes)?;
+
+    Ok(())
+}

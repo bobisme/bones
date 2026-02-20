@@ -38,6 +38,7 @@ pub mod search;
 pub mod show;
 pub mod sim;
 pub mod similar;
+pub mod stats;
 pub mod status;
 pub mod sync;
 pub mod tag;

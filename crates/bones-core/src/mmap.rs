@@ -92,12 +92,6 @@ impl MmapCache {
             return Err(anyhow!(CacheError::UnexpectedEof));
         }
         
-        // We can use CacheHeader::decode but it decodes columns too.
-        // We have to parse manually to avoid full decode.
-        // Actually, CacheHeader::decode returns (Header, Columns). 
-        // We can't use it efficiently if we just want Header.
-        // But wait, CacheHeader definition is public.
-        
         let version = self.mmap[4];
         let column_count = self.mmap[5];
         let row_count = u64::from_le_bytes(self.mmap[8..16].try_into().unwrap());

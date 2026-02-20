@@ -493,6 +493,16 @@ enum Commands {
     Compact(cmd::compact::CompactArgs),
 
     #[command(
+        next_help_heading = "Reporting",
+        about = "Show project-level statistics and reporting dashboard",
+        long_about = "Query the projection database for aggregate counts, velocity metrics, and aging stats.\n\n\
+                      Requires a rebuilt projection (`bn rebuild`). Reports items by state, kind, urgency,\n\
+                      and events by type and agent.",
+        after_help = "EXAMPLES:\n    # Show human-readable stats\n    bn stats\n\n    # Machine-readable output\n    bn stats --json"
+    )]
+    Stats(cmd::stats::StatsArgs),
+
+    #[command(
         next_help_heading = "Project Maintenance",
         about = "Run repository diagnostics",
         long_about = "Summarize event-log health, integrity anomalies, and projection drift indicators.",
@@ -893,6 +903,9 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Compact(ref args) => timing::timed("cmd.compact", || {
             cmd::compact::run_compact(args, output, &project_root)
+        }),
+        Commands::Stats(ref args) => timing::timed("cmd.stats", || {
+            cmd::stats::run_stats(args, output, &project_root)
         }),
         Commands::Diagnose => timing::timed("cmd.diagnose", || {
             cmd::diagnose::run_diagnose(output, &project_root)
