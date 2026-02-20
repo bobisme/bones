@@ -6,7 +6,13 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "semantic-ort")]
 use ort::{session::Session, value::Tensor};
 #[cfg(feature = "semantic-ort")]
+use std::io::Write;
+#[cfg(feature = "semantic-ort")]
 use std::sync::Mutex;
+#[cfg(feature = "semantic-ort")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "semantic-ort")]
+use std::time::Duration;
 #[cfg(feature = "semantic-ort")]
 use tokenizers::Tokenizer;
 
@@ -15,6 +21,27 @@ const MODEL_FILENAME: &str = "minilm-l6-v2-int8.onnx";
 const TOKENIZER_FILENAME: &str = "minilm-l6-v2-tokenizer.json";
 #[cfg(feature = "semantic-ort")]
 const MAX_TOKENS: usize = 256;
+#[cfg(feature = "semantic-ort")]
+const MODEL_DOWNLOAD_URL_ENV: &str = "BONES_SEMANTIC_MODEL_URL";
+#[cfg(feature = "semantic-ort")]
+const TOKENIZER_DOWNLOAD_URL_ENV: &str = "BONES_SEMANTIC_TOKENIZER_URL";
+#[cfg(feature = "semantic-ort")]
+const AUTO_DOWNLOAD_ENV: &str = "BONES_SEMANTIC_AUTO_DOWNLOAD";
+#[cfg(feature = "semantic-ort")]
+const MODEL_DOWNLOAD_URL_DEFAULT: &str =
+    "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx";
+#[cfg(feature = "semantic-ort")]
+const TOKENIZER_DOWNLOAD_URL_DEFAULT: &str =
+    "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/tokenizer.json";
+#[cfg(feature = "semantic-ort")]
+const DOWNLOAD_CONNECT_TIMEOUT_SECS: u64 = 2;
+#[cfg(feature = "semantic-ort")]
+const DOWNLOAD_READ_TIMEOUT_SECS: u64 = 30;
+
+#[cfg(feature = "semantic-ort")]
+static MODEL_DOWNLOAD_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "semantic-ort")]
+static TOKENIZER_DOWNLOAD_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "bundled-model")]
 const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
@@ -48,30 +75,16 @@ impl SemanticModel {
     ///
     /// If the cache file is missing or has a mismatched SHA256, this extracts
     /// bundled model bytes into the cache directory before creating an ORT
-    /// session.
+    /// session. When no bundled bytes are available, this attempts a one-time
+    /// download of model/tokenizer assets from stable URLs.
     pub fn load() -> Result<Self> {
         let path = Self::model_cache_path()?;
-
-        if !Self::is_cached_valid(&path) {
-            if bundled_model_bytes().is_some() {
-                Self::extract_to_cache(&path)?;
-            } else if !path.exists() {
-                bail!(
-                    "semantic model not found at {}; enable `bundled-model` or place `{MODEL_FILENAME}` in the cache path",
-                    path.display()
-                );
-            }
-        }
+        Self::ensure_model_cached(&path)?;
 
         #[cfg(feature = "semantic-ort")]
         {
             let tokenizer_path = Self::tokenizer_cache_path()?;
-            if !tokenizer_path.is_file() {
-                bail!(
-                    "semantic tokenizer not found at {}. Place `{TOKENIZER_FILENAME}` next to `{MODEL_FILENAME}` in the cache path",
-                    tokenizer_path.display()
-                );
-            }
+            Self::ensure_tokenizer_cached(&tokenizer_path)?;
 
             let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
                 anyhow!(
@@ -176,6 +189,84 @@ impl SemanticModel {
                 "extracted semantic model at {} failed SHA256 verification",
                 path.display()
             );
+        }
+
+        Ok(())
+    }
+
+    fn ensure_model_cached(path: &Path) -> Result<()> {
+        if Self::is_cached_valid(path) {
+            return Ok(());
+        }
+
+        if bundled_model_bytes().is_some() {
+            Self::extract_to_cache(path)?;
+            return Ok(());
+        }
+
+        #[cfg(feature = "semantic-ort")]
+        {
+            if !auto_download_enabled() {
+                bail!(
+                    "semantic model not found at {}. Automatic download is disabled via {AUTO_DOWNLOAD_ENV}=0",
+                    path.display()
+                );
+            }
+
+            if MODEL_DOWNLOAD_ATTEMPTED.swap(true, Ordering::SeqCst) {
+                bail!(
+                    "semantic model not found at {} and auto-download was already attempted in this process",
+                    path.display()
+                );
+            }
+
+            download_to_path(&model_download_url(), path, "semantic model")
+                .with_context(|| format!("failed to fetch semantic model to {}", path.display()))?;
+
+            if !Self::is_cached_valid(path) {
+                bail!(
+                    "downloaded semantic model at {} failed validation",
+                    path.display()
+                );
+            }
+
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "semantic-ort"))]
+        {
+            bail!(
+                "semantic model not found at {}; enable `bundled-model` or place `{MODEL_FILENAME}` in the cache path",
+                path.display()
+            );
+        }
+    }
+
+    #[cfg(feature = "semantic-ort")]
+    fn ensure_tokenizer_cached(path: &Path) -> Result<()> {
+        if path.is_file() {
+            return Ok(());
+        }
+
+        if !auto_download_enabled() {
+            bail!(
+                "semantic tokenizer not found at {}. Automatic download is disabled via {AUTO_DOWNLOAD_ENV}=0",
+                path.display()
+            );
+        }
+
+        if TOKENIZER_DOWNLOAD_ATTEMPTED.swap(true, Ordering::SeqCst) {
+            bail!(
+                "semantic tokenizer not found at {} and auto-download was already attempted in this process",
+                path.display()
+            );
+        }
+
+        download_to_path(&tokenizer_download_url(), path, "semantic tokenizer")
+            .with_context(|| format!("failed to fetch semantic tokenizer to {}", path.display()))?;
+
+        if !path.is_file() {
+            bail!("semantic tokenizer download completed but file was not created");
         }
 
         Ok(())
@@ -476,6 +567,104 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+#[cfg(feature = "semantic-ort")]
+fn auto_download_enabled() -> bool {
+    std::env::var(AUTO_DOWNLOAD_ENV).ok().is_none_or(|raw| {
+        !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        )
+    })
+}
+
+#[cfg(feature = "semantic-ort")]
+fn model_download_url() -> String {
+    std::env::var(MODEL_DOWNLOAD_URL_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| MODEL_DOWNLOAD_URL_DEFAULT.to_string())
+}
+
+#[cfg(feature = "semantic-ort")]
+fn tokenizer_download_url() -> String {
+    std::env::var(TOKENIZER_DOWNLOAD_URL_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| TOKENIZER_DOWNLOAD_URL_DEFAULT.to_string())
+}
+
+#[cfg(feature = "semantic-ort")]
+fn download_to_path(url: &str, path: &Path, artifact_label: &str) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "{artifact_label} cache path '{}' has no parent directory",
+            path.display()
+        )
+    })?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create {} cache directory {}",
+            artifact_label,
+            parent.display()
+        )
+    })?;
+
+    let temp_path = parent.join(format!(
+        "{}.download",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(DOWNLOAD_CONNECT_TIMEOUT_SECS))
+        .timeout_read(Duration::from_secs(DOWNLOAD_READ_TIMEOUT_SECS))
+        .build();
+
+    let response = match agent
+        .get(url)
+        .set("User-Agent", "bones-search/semantic-downloader")
+        .call()
+    {
+        Ok(resp) => resp,
+        Err(ureq::Error::Status(code, _)) => {
+            bail!("{artifact_label} download failed: HTTP {code} from {url}")
+        }
+        Err(ureq::Error::Transport(err)) => {
+            bail!("{artifact_label} download failed from {url}: {err}")
+        }
+    };
+
+    {
+        let mut reader = response.into_reader();
+        let mut out = fs::File::create(&temp_path)
+            .with_context(|| format!("failed to create temporary file {}", temp_path.display()))?;
+        std::io::copy(&mut reader, &mut out)
+            .with_context(|| format!("failed to write {} download", artifact_label))?;
+        out.flush()
+            .with_context(|| format!("failed to flush {} download", artifact_label))?;
+    }
+
+    if path.exists() {
+        fs::remove_file(path).with_context(|| {
+            format!(
+                "failed to replace existing {} at {}",
+                artifact_label,
+                path.display()
+            )
+        })?;
+    }
+
+    fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "failed to move downloaded {} from {} to {}",
+            artifact_label,
+            temp_path.display(),
+            path.display()
+        )
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
