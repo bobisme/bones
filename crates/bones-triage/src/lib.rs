@@ -11,6 +11,7 @@ pub mod graph;
 pub mod metrics;
 pub mod schedule;
 pub mod score;
+pub mod topology;
 
 use tracing::{info, instrument};
 
