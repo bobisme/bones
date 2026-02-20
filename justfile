@@ -1,5 +1,11 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+# Run all pre-release checks (same gates as CI release pipeline)
+check:
+    cargo fmt --all -- --check
+    cargo clippy --workspace -- -D warnings
+    cargo test --workspace
+
 install:
     cargo install --path crates/bones-cli
 

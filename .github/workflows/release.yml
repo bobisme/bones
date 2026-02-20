@@ -9,9 +9,36 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write
+
 jobs:
+  # ---------- gate: tests + lint must pass before anything else ----------
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  # ---------- cross-compile release binaries ----------
   build:
     name: Build ${{ matrix.target }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,6 +60,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Install Linux ARM64 linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -51,7 +82,7 @@ jobs:
           BIN_PATH="target/${{ matrix.target }}/release/bn"
           ARCHIVE="bn-${{ matrix.target }}.tar.gz"
           tar -C "$(dirname "$BIN_PATH")" -czf "dist/${ARCHIVE}" "bn"
-          shasum -a 256 "dist/${ARCHIVE}" > "dist/${ARCHIVE}.sha256"
+          cd dist && shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -59,23 +90,90 @@ jobs:
           name: release-${{ matrix.target }}
           path: dist/*
 
-  publish:
-    name: Publish release
-    needs: build
+  # ---------- publish crates in dependency order ----------
+  crates-publish:
+    name: Publish to crates.io
+    needs: [test, build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Publish in dependency order. --no-verify skips rebuilding
+          # (already verified by the test + build jobs).
+          # Sleep between publishes to let crates.io index catch up.
+          for crate in bones-core bones-triage bones-search bones-sim bones-cli; do
+            echo "::group::Publishing ${crate}"
+            cargo publish -p "${crate}" --no-verify || {
+              echo "::warning::cargo publish -p ${crate} failed (may already be published)"
+            }
+            echo "::endgroup::"
+            sleep 30
+          done
+
+  # ---------- GitHub Release with binaries + changelog ----------
+  release:
+    name: GitHub Release
+    needs: [build, crates-publish]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changelog
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Find the previous tag
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | sed -n '2p' || true)
+          {
+            echo "body<<CHANGELOG_EOF"
+            if [ -n "$PREV_TAG" ]; then
+              echo "## Changes since ${PREV_TAG}"
+              echo ""
+              git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || \
+                echo "- Initial release"
+            else
+              echo "## Initial Release"
+              echo ""
+              git log --pretty=format:"- %s (%h)" --no-merges -50
+            fi
+            echo ""
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo '```bash'
+            echo "# From crates.io"
+            echo "cargo install bones-cli"
+            echo ""
+            echo "# Or download a binary from the assets below"
+            echo '```'
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: List release artifacts
+        run: ls -la dist/
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
