@@ -2,6 +2,7 @@ pub mod agents;
 pub mod archive;
 pub mod assign;
 pub mod close;
+pub mod comment;
 pub mod completions;
 pub mod config;
 pub mod create;

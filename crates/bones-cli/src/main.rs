@@ -247,6 +247,22 @@ enum Commands {
 
     #[command(
         next_help_heading = "Metadata",
+        about = "Add a comment to an item",
+        long_about = "Append an immutable item.comment event to a work item.",
+        after_help = "EXAMPLES:\n    # Add a comment\n    bn comment add bn-abc \"Investigating timeout path\"\n\n    # Emit machine-readable output\n    bn comment add bn-abc \"Investigating timeout path\" --json"
+    )]
+    Comment(cmd::comment::CommentArgs),
+
+    #[command(
+        next_help_heading = "Read",
+        about = "Show comment timeline for an item",
+        long_about = "List comments for a work item in chronological order.",
+        after_help = "EXAMPLES:\n    # Show comments\n    bn comments bn-abc\n\n    # Emit machine-readable output\n    bn comments bn-abc --json"
+    )]
+    Comments(cmd::comment::CommentsArgs),
+
+    #[command(
+        next_help_heading = "Metadata",
         about = "Assign an item to an agent",
         long_about = "Assign an item to an agent by emitting an item.assign event.",
         after_help = "EXAMPLES:\n    # Assign item to alice\n    bn assign bn-abc alice\n\n    # Emit machine-readable output\n    bn assign bn-abc alice --json"
@@ -651,6 +667,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Untag(ref args) => timing::timed("cmd.untag", || {
             cmd::tag::run_untag(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Comment(ref args) => timing::timed("cmd.comment", || {
+            cmd::comment::run_comment(args, cli.agent_flag(), output, &project_root)
+        }),
+        Commands::Comments(ref args) => timing::timed("cmd.comments", || {
+            cmd::comment::run_comments(args, output, &project_root)
+        }),
         Commands::Assign(ref args) => timing::timed("cmd.assign", || {
             cmd::assign::run_assign(args, cli.agent_flag(), output, &project_root)
         }),
@@ -894,6 +916,18 @@ mod tests {
     }
 
     #[test]
+    fn comment_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "comment", "add", "item-123", "hello"]);
+        assert!(matches!(cli.command, Commands::Comment(_)));
+    }
+
+    #[test]
+    fn comments_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "comments", "item-123"]);
+        assert!(matches!(cli.command, Commands::Comments(_)));
+    }
+
+    #[test]
     fn move_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "move", "item-123", "--parent", "goal-1"]);
         assert!(matches!(cli.command, Commands::Move(_)));
@@ -932,6 +966,8 @@ mod tests {
             vec!["bn", "reopen", "x"],
             vec!["bn", "tag", "x", "l"],
             vec!["bn", "untag", "x", "l"],
+            vec!["bn", "comment", "add", "x", "hello"],
+            vec!["bn", "comments", "x"],
             vec!["bn", "move", "x", "--parent", "p"],
             vec!["bn", "completions", "bash"],
             vec!["bn", "diagnose"],
@@ -1049,6 +1085,9 @@ mod tests {
 
         let cli = Cli::parse_from(["bn", "show", "item-1"]);
         assert!(cli.agent_flag().is_none());
+
+        let cli = Cli::parse_from(["bn", "comments", "item-1"]);
+        assert!(cli.agent_flag().is_none());
     }
 
     #[test]
@@ -1078,6 +1117,9 @@ mod tests {
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "tag", "x", "l"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
+
+        let cli = Cli::parse_from(["bn", "--agent", "me", "comment", "add", "x", "hi"]);
         assert_eq!(cli.agent_flag(), Some("me"));
 
         let cli = Cli::parse_from(["bn", "--agent", "me", "move", "x", "--parent", "p"]);
