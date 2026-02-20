@@ -55,7 +55,10 @@ fn init_create_list_show_first_item_flow_succeeds() {
     );
 
     let created: Value = serde_json::from_slice(&create_out.stdout).expect("valid create JSON");
-    let id = created["id"].as_str().expect("id must be present").to_string();
+    let id = created["id"]
+        .as_str()
+        .expect("id must be present")
+        .to_string();
 
     let items = list_items_json(dir.path());
     assert_eq!(items.len(), 1);
@@ -77,7 +80,10 @@ fn init_creates_expected_event_structure() {
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
-    assert!(entries.len() >= 2, "expected shard + current.events symlink");
+    assert!(
+        entries.len() >= 2,
+        "expected shard + current.events symlink"
+    );
 }
 
 #[test]
@@ -93,7 +99,10 @@ fn first_item_appends_event_to_active_shard() {
     let current = dir.path().join(".bones/events/current.events");
     let content = fs::read_to_string(&current).expect("current.events should be readable");
     let lines: Vec<_> = content.lines().collect();
-    assert!(lines.len() >= 3, "expected header + at least one event line");
+    assert!(
+        lines.len() >= 3,
+        "expected header + at least one event line"
+    );
     assert!(
         content.contains("item.create"),
         "expected item.create event in active shard"
@@ -135,7 +144,7 @@ fn create_without_agent_fails_with_actionable_message() {
         .env("BONES_LOG", "error")
         .args(["create", "--title", "Needs agent"]);
 
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("Set --agent, BONES_AGENT, or AGENT"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "Set --agent, BONES_AGENT, or AGENT",
+    ));
 }

@@ -459,10 +459,18 @@ enum Commands {
     #[command(
         next_help_heading = "Interoperability",
         about = "Import external tracker data",
-        long_about = "Import issues and metadata from supported external tracker formats.",
-        after_help = "EXAMPLES:\n    # Import from a JSON export\n    bn import --from linear --file linear.json\n\n    # Emit machine-readable output\n    bn import --from linear --file linear.json --json"
+        long_about = "Import tracker events from GitHub repos or generic JSONL event streams.",
+        after_help = "EXAMPLES:\n    # Import from GitHub issues\n    bn import --github owner/repo\n\n    # Import from a JSONL stream\n    bn import --jsonl --input events.jsonl\n\n    # Emit machine-readable output\n    bn import --github owner/repo --json"
     )]
     Import(cmd::import::ImportArgs),
+
+    #[command(
+        next_help_heading = "Interoperability",
+        about = "Export events in canonical JSONL format",
+        long_about = "Export `.bones/events` shards to JSONL records preserving shard order for replay.",
+        after_help = "EXAMPLES:\n    # Export to stdout\n    bn export\n\n    # Export to file\n    bn export --output events.jsonl"
+    )]
+    Export(cmd::export::ExportArgs),
 
     #[command(
         next_help_heading = "Sync",
@@ -793,6 +801,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Import(args) => timing::timed("cmd.import", || {
             cmd::import::run_import(&args, &project_root)
         }),
+        Commands::Export(args) => timing::timed("cmd.export", || {
+            cmd::export::run_export(&args, &project_root)
+        }),
         Commands::MigrateFromBeads(args) => timing::timed("cmd.migrate_from_beads", || {
             cmd::migrate::run_migrate(&args, &project_root)
         }),
@@ -1084,6 +1095,8 @@ mod tests {
             vec!["bn", "labels"],
             vec!["bn", "label", "add", "x", "l"],
             vec!["bn", "move", "x", "--parent", "p"],
+            vec!["bn", "export"],
+            vec!["bn", "import", "--jsonl"],
             vec!["bn", "completions", "bash"],
             vec!["bn", "diagnose"],
         ];

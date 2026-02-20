@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+use bones_core::config::load_project_config;
 use bones_core::db;
 use bones_core::db::project;
 use bones_core::event::Event;
@@ -23,7 +24,6 @@ use bones_core::model::item::Size;
 use bones_core::model::item::Urgency;
 use bones_core::model::item_id::generate_item_id;
 use bones_core::shard::ShardManager;
-use bones_core::config::load_project_config;
 use bones_search::find_duplicates;
 use bones_search::fusion::scoring::SearchConfig;
 
@@ -300,7 +300,7 @@ pub fn run_create(
         if let Some(conn) = db::query::try_open_projection(&db_path)? {
             // Load project config to get search configuration
             let project_config = load_project_config(project_root).unwrap_or_default();
-            
+
             // Build search config from project config
             let search_config = SearchConfig {
                 rrf_k: 60,
@@ -308,12 +308,12 @@ pub fn run_create(
                 possibly_related_threshold: 0.70,
                 maybe_related_threshold: 0.50,
             };
-            
+
             // Look up dependency graph for structural similarity (if needed)
             // For now, use an empty graph - structural search will be skipped
             use petgraph::graph::DiGraph;
             let empty_graph: DiGraph<String, ()> = DiGraph::new();
-            
+
             // Run duplicate detection
             match find_duplicates(&args.title, &conn, &empty_graph, &search_config, false, 10) {
                 Ok(candidates) => {
@@ -326,14 +326,21 @@ pub fn run_create(
                                 classification: format!("{:?}", candidate.risk),
                             });
                         }
-                        
+
                         // In interactive mode, warn user
                         if output == OutputMode::Human {
-                            eprintln!("⚠ Warning: {} potential duplicate(s) found", candidates.len());
+                            eprintln!(
+                                "⚠ Warning: {} potential duplicate(s) found",
+                                candidates.len()
+                            );
                             for (i, cand) in candidates.iter().enumerate().take(3) {
-                                eprintln!("  {}. {} (score: {:.2}, {})", 
-                                    i+1, cand.item_id, cand.composite_score,
-                                    format!("{:?}", cand.risk));
+                                eprintln!(
+                                    "  {}. {} (score: {:.2}, {})",
+                                    i + 1,
+                                    cand.item_id,
+                                    cand.composite_score,
+                                    format!("{:?}", cand.risk)
+                                );
                             }
                         }
                     }
@@ -742,7 +749,7 @@ mod tests {
                 label: vec![],
                 description: None,
                 blocks: vec![],
-            force: false,
+                force: false,
             };
             let result = run_create(&args, Some("agent"), OutputMode::Json, root);
             assert!(
@@ -941,7 +948,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
-            force: true,  // Force skip duplicate check
+            force: true, // Force skip duplicate check
         };
 
         let result2 = run_create(&args2, Some("agent"), OutputMode::Json, root);

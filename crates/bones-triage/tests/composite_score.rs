@@ -170,7 +170,11 @@ fn punted_item_returns_negative_infinity() {
 
     let score = composite_score(&punt, &CompositeWeights::default());
 
-    assert_eq!(score, f64::NEG_INFINITY, "punted item must return NEG_INFINITY");
+    assert_eq!(
+        score,
+        f64::NEG_INFINITY,
+        "punted item must return NEG_INFINITY"
+    );
     assert!(!score.is_finite(), "punted item score must not be finite");
 }
 
@@ -179,28 +183,37 @@ fn punted_item_returns_negative_infinity() {
 fn punted_item_excluded_from_results() {
     // Items: A and C are normal, B is punted.
     let items = [
-        ("A", MetricInputs {
-            critical_path: 0.5,
-            pagerank: 0.5,
-            betweenness: 0.5,
-            urgency: Urgency::Default,
-            decay_days: 0.0,
-        }),
-        ("B", MetricInputs {
-            // B has top graph metrics but is punted — must never appear.
-            critical_path: 0.9,
-            pagerank: 0.9,
-            betweenness: 0.9,
-            urgency: Urgency::Punt,
-            decay_days: 0.0,
-        }),
-        ("C", MetricInputs {
-            critical_path: 0.3,
-            pagerank: 0.3,
-            betweenness: 0.3,
-            urgency: Urgency::Default,
-            decay_days: 0.0,
-        }),
+        (
+            "A",
+            MetricInputs {
+                critical_path: 0.5,
+                pagerank: 0.5,
+                betweenness: 0.5,
+                urgency: Urgency::Default,
+                decay_days: 0.0,
+            },
+        ),
+        (
+            "B",
+            MetricInputs {
+                // B has top graph metrics but is punted — must never appear.
+                critical_path: 0.9,
+                pagerank: 0.9,
+                betweenness: 0.9,
+                urgency: Urgency::Punt,
+                decay_days: 0.0,
+            },
+        ),
+        (
+            "C",
+            MetricInputs {
+                critical_path: 0.3,
+                pagerank: 0.3,
+                betweenness: 0.3,
+                urgency: Urgency::Default,
+                decay_days: 0.0,
+            },
+        ),
     ];
 
     let weights = CompositeWeights::default();
@@ -220,8 +233,14 @@ fn punted_item_excluded_from_results() {
         !ranked.contains(&"B"),
         "Punted item B should not appear in results, got: {ranked:?}"
     );
-    assert!(ranked.contains(&"A"), "Normal item A should appear in results");
-    assert!(ranked.contains(&"C"), "Normal item C should appear in results");
+    assert!(
+        ranked.contains(&"A"),
+        "Normal item A should appear in results"
+    );
+    assert!(
+        ranked.contains(&"C"),
+        "Normal item C should appear in results"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -380,8 +399,14 @@ fn unchanged_graph_produces_stable_scores() {
     let weights = CompositeWeights::default();
 
     // Run scoring twice on the same unchanged inputs.
-    let scores1: Vec<f64> = inputs.iter().map(|m| composite_score(m, &weights)).collect();
-    let scores2: Vec<f64> = inputs.iter().map(|m| composite_score(m, &weights)).collect();
+    let scores1: Vec<f64> = inputs
+        .iter()
+        .map(|m| composite_score(m, &weights))
+        .collect();
+    let scores2: Vec<f64> = inputs
+        .iter()
+        .map(|m| composite_score(m, &weights))
+        .collect();
 
     assert_eq!(
         scores1, scores2,

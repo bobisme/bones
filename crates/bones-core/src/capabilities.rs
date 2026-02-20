@@ -457,7 +457,10 @@ mod tests {
         std::fs::write(cache_dir.join("events.bin"), &content).expect("write cache");
 
         let caps = detect_capabilities(&conn);
-        assert!(caps.binary_cache, "binary_cache should be true with valid events.bin");
+        assert!(
+            caps.binary_cache,
+            "binary_cache should be true with valid events.bin"
+        );
     }
 
     #[test]
@@ -471,7 +474,10 @@ mod tests {
         std::fs::write(cache_dir.join("events.bin"), b"BADMAGIC").expect("write");
 
         let caps = detect_capabilities(&conn);
-        assert!(!caps.binary_cache, "binary_cache should be false with bad magic");
+        assert!(
+            !caps.binary_cache,
+            "binary_cache should be false with bad magic"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -490,7 +496,10 @@ mod tests {
         let caps = Capabilities::default();
         let statuses = describe_capabilities(&caps);
         let names: Vec<_> = statuses.iter().map(|s| s.name).collect();
-        assert_eq!(names, &["fts5", "semantic", "vectors", "binary_cache", "triage"]);
+        assert_eq!(
+            names,
+            &["fts5", "semantic", "vectors", "binary_cache", "triage"]
+        );
     }
 
     #[test]
@@ -503,10 +512,8 @@ mod tests {
             triage: true,
         };
         let statuses = describe_capabilities(&caps);
-        let map: std::collections::HashMap<_, _> = statuses
-            .iter()
-            .map(|s| (s.name, s.available))
-            .collect();
+        let map: std::collections::HashMap<_, _> =
+            statuses.iter().map(|s| (s.name, s.available)).collect();
         assert!(map["fts5"]);
         assert!(!map["semantic"]);
         assert!(map["vectors"]);
@@ -519,7 +526,11 @@ mod tests {
         let caps = Capabilities::default();
         let statuses = describe_capabilities(&caps);
         for status in &statuses {
-            assert!(!status.fallback.is_empty(), "fallback for {} is empty", status.name);
+            assert!(
+                !status.fallback.is_empty(),
+                "fallback for {} is empty",
+                status.name
+            );
         }
     }
 

@@ -580,7 +580,10 @@ fn comment_add_json_contract() {
     assert_eq!(json["body"].as_str().unwrap(), "First comment");
     assert!(json["ts"].is_number(), "ts must be a numeric timestamp");
     assert!(
-        json["event_hash"].as_str().unwrap_or("").starts_with("blake3:"),
+        json["event_hash"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("blake3:"),
         "event_hash should start with blake3:"
     );
 }
@@ -672,7 +675,9 @@ fn comments_visible_in_show_output() {
         .success();
 
     let item = show_item_json(dir.path(), &id);
-    let comments = item["comments"].as_array().expect("show must have comments array");
+    let comments = item["comments"]
+        .as_array()
+        .expect("show must have comments array");
     assert_eq!(comments.len(), 1, "show should include 1 comment");
 
     let comment = &comments[0];
@@ -790,7 +795,14 @@ fn list_filter_by_urgency() {
 
     let _id1 = create_item(dir.path(), "Default urgency item");
     let output = bn_cmd(dir.path())
-        .args(["create", "--title", "Urgent item", "--urgency", "urgent", "--json"])
+        .args([
+            "create",
+            "--title",
+            "Urgent item",
+            "--urgency",
+            "urgent",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -852,7 +864,10 @@ fn list_pagination_limit_and_offset() {
 
     // Page 3 should have 1 item and no more
     let page3 = list_response_full(dir.path(), &["--limit", "2", "--offset", "4"]);
-    assert!(!page3["has_more"].as_bool().unwrap_or(true), "has_more should be false at last page");
+    assert!(
+        !page3["has_more"].as_bool().unwrap_or(true),
+        "has_more should be false at last page"
+    );
     let page3_items = page3["items"].as_array().unwrap();
     assert_eq!(page3_items.len(), 1, "last page should have 1 item");
 
@@ -866,7 +881,11 @@ fn list_pagination_limit_and_offset() {
     let total_count = all_ids.len();
     all_ids.sort_unstable();
     all_ids.dedup();
-    assert_eq!(all_ids.len(), total_count, "all page items should have distinct IDs");
+    assert_eq!(
+        all_ids.len(),
+        total_count,
+        "all page items should have distinct IDs"
+    );
 }
 
 #[test]
@@ -883,15 +902,10 @@ fn list_pagination_total_is_consistent() {
     let page2 = list_response_full(dir.path(), &["--limit", "3", "--offset", "3"]);
 
     assert_eq!(
-        page1["total"],
-        page2["total"],
+        page1["total"], page2["total"],
         "total should be consistent across pages"
     );
-    assert_eq!(
-        page1["total"].as_u64().unwrap(),
-        7,
-        "total should be 7"
-    );
+    assert_eq!(page1["total"].as_u64().unwrap(), 7, "total should be 7");
 }
 
 #[test]
@@ -949,7 +963,8 @@ fn list_sort_by_updated() {
     // id1 should appear first (most recently updated)
     let first_id = items[0]["id"].as_str().unwrap_or("");
     assert_eq!(
-        first_id, id1.as_str(),
+        first_id,
+        id1.as_str(),
         "most recently updated item should appear first"
     );
 
@@ -985,7 +1000,10 @@ fn list_filter_combined_state_and_label() {
     rebuild(dir.path());
 
     // Filter: open AND label=target-release
-    let filtered = list_items_filtered(dir.path(), &["--state", "open", "--label", "target-release"]);
+    let filtered = list_items_filtered(
+        dir.path(),
+        &["--state", "open", "--label", "target-release"],
+    );
 
     // Only id_open_labeled should match
     assert_eq!(
@@ -1013,8 +1031,14 @@ fn list_json_response_has_required_fields() {
     assert!(response["items"].is_array(), "response must have 'items'");
     assert!(response["total"].is_number(), "response must have 'total'");
     assert!(response["limit"].is_number(), "response must have 'limit'");
-    assert!(response["offset"].is_number(), "response must have 'offset'");
-    assert!(response["has_more"].is_boolean(), "response must have 'has_more'");
+    assert!(
+        response["offset"].is_number(),
+        "response must have 'offset'"
+    );
+    assert!(
+        response["has_more"].is_boolean(),
+        "response must have 'has_more'"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,7 +1219,10 @@ fn close_child_with_done_then_reopen_then_close_again() {
     assert!(output.status.success());
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
     let r = &json["results"].as_array().unwrap()[0];
-    assert_eq!(r["auto_completed_parent"].as_str().unwrap_or(""), goal_id.as_str());
+    assert_eq!(
+        r["auto_completed_parent"].as_str().unwrap_or(""),
+        goal_id.as_str()
+    );
 
     // Manually reopen goal (child was reopened above, goal is still done)
     bn_cmd(dir.path())

@@ -19,8 +19,8 @@
 //!
 //! The RRF fusion still works effectively with partial results from available layers.
 
+use crate::fusion::scoring::{DupCandidate, SearchConfig, build_dup_candidates, rrf_fuse};
 use anyhow::{Context, Result};
-use crate::fusion::scoring::{build_dup_candidates, rrf_fuse, DupCandidate, SearchConfig};
 use bones_core::db::fts::search_bm25;
 use petgraph::graph::DiGraph;
 use rusqlite::Connection;
@@ -65,8 +65,8 @@ pub fn find_duplicates(
     limit: usize,
 ) -> Result<Vec<DupCandidate>> {
     // 1. Lexical search using FTS5 BM25 (always performed)
-    let lexical_hits = search_bm25(db, query_title, limit as u32)
-        .context("lexical search failed")?;
+    let lexical_hits =
+        search_bm25(db, query_title, limit as u32).context("lexical search failed")?;
     let lexical_ranked: Vec<&str> = lexical_hits.iter().map(|h| h.item_id.as_str()).collect();
 
     // 2. Semantic search (optional, requires model and embeddings)

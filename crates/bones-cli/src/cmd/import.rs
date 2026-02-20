@@ -6,19 +6,30 @@ use bones_core::event::{
 use bones_core::model::item::{Kind, State, Urgency};
 use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
+use chrono::Datelike;
 use clap::Args;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value as JsonValue, json};
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
 #[derive(Args, Debug)]
 pub struct ImportArgs {
     /// Import from a GitHub repository (<owner>/<repo>).
-    #[arg(long, value_name = "OWNER/REPO")]
+    #[arg(long, value_name = "OWNER/REPO", conflicts_with = "jsonl")]
     pub github: Option<String>,
+
+    /// Import events from a JSONL input stream.
+    #[arg(long)]
+    pub jsonl: bool,
+
+    /// Optional path for JSONL import; omit to read from stdin.
+    #[arg(long, value_name = "PATH")]
+    pub input: Option<PathBuf>,
 
     /// GitHub API token (optional). Falls back to GITHUB_TOKEN env var.
     #[arg(long)]
@@ -244,8 +255,12 @@ impl GitHubClient {
 }
 
 pub fn run_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
+    if args.jsonl {
+        return run_jsonl_import(args, project_root);
+    }
+
     let Some(github) = args.github.as_deref() else {
-        anyhow::bail!("missing required flag: --github <owner>/<repo>");
+        anyhow::bail!("missing required flag: --github <owner>/<repo> or --jsonl");
     };
 
     let repo = RepoSlug::parse(github)?;
@@ -374,6 +389,140 @@ pub fn run_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonlEventRecord {
+    timestamp: i64,
+    agent: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    item_id: String,
+    data: JsonValue,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportSummary {
+    mode: &'static str,
+    input_path: Option<String>,
+    total_lines: usize,
+    imported: usize,
+    skipped_invalid: usize,
+    imported_per_type: HashMap<String, usize>,
+}
+
+fn run_jsonl_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
+    let input_reader: Box<dyn BufRead> = match &args.input {
+        Some(path) => {
+            let file = File::open(path)
+                .with_context(|| format!("failed to open JSONL input {}", path.display()))?;
+            Box::new(BufReader::new(file))
+        }
+        None => Box::new(BufReader::new(io::stdin())),
+    };
+
+    let shard_manager = ShardManager::new(project_root.join(".bones"));
+    shard_manager
+        .init()
+        .context("failed to initialize .bones shard state")?;
+
+    let mut parent_index: HashMap<String, String> = HashMap::new();
+    let mut report = ImportSummary {
+        mode: "jsonl",
+        input_path: args.input.as_ref().map(|path| path.display().to_string()),
+        total_lines: 0,
+        imported: 0,
+        skipped_invalid: 0,
+        imported_per_type: HashMap::new(),
+    };
+
+    for (line_no, line) in input_reader.lines().enumerate() {
+        let line_no = line_no + 1;
+        let raw = line.with_context(|| format!("failed to read jsonline {line_no}"))?;
+        if raw.trim().is_empty() {
+            continue;
+        }
+
+        report.total_lines += 1;
+        let record: JsonlEventRecord = match serde_json::from_str(&raw) {
+            Ok(record) => record,
+            Err(err) => {
+                report.skipped_invalid += 1;
+                eprintln!("skip line {line_no}: invalid JSON - {err}");
+                continue;
+            }
+        };
+
+        let item_id = ItemId::parse(&record.item_id)
+            .with_context(|| format!("line {line_no}: invalid item_id '{}'", record.item_id))?;
+
+        let event_type = record.event_type.parse::<EventType>().with_context(|| {
+            format!("line {line_no}: unknown event type '{}'", record.event_type)
+        })?;
+
+        let data = EventData::deserialize_for(event_type, &record.data.to_string())
+            .with_context(|| format!("line {line_no}: invalid data payload"))?;
+
+        let mut event = Event {
+            wall_ts_us: record.timestamp,
+            agent: record.agent,
+            itc: format!("itc:jsonl:{line_no}"),
+            parents: parent_index
+                .get(item_id.as_str())
+                .cloned()
+                .into_iter()
+                .collect(),
+            event_type,
+            item_id: item_id.clone(),
+            data,
+            event_hash: String::new(),
+        };
+
+        let line = write_event(&mut event).context("failed to serialize imported event")?;
+        let (year, month) = event_to_shard_timestamp(event.wall_ts_us)
+            .with_context(|| format!("line {line_no}: invalid timestamp {}", event.wall_ts_us))?;
+
+        shard_manager
+            .create_shard(year, month)
+            .context("failed to initialize shard for timestamp")?;
+        shard_manager
+            .append_raw(year, month, &line)
+            .context("failed to append JSONL import event")?;
+
+        parent_index.insert(item_id.to_string(), event.event_hash.clone());
+        *report
+            .imported_per_type
+            .entry(event_type.as_str().to_string())
+            .or_default() += 1;
+        report.imported += 1;
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "bn import --jsonl {}",
+            report.input_path.as_deref().unwrap_or("<stdin>")
+        );
+        println!("  total lines:     {}", report.total_lines);
+        println!("  imported:       {}", report.imported);
+        println!("  skipped:        {}", report.skipped_invalid);
+        if !report.imported_per_type.is_empty() {
+            println!("  types:");
+            for (event_type, count) in &report.imported_per_type {
+                println!("    {event_type}: {count}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn event_to_shard_timestamp(timestamp_us: i64) -> Result<(i32, u32)> {
+    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp_micros(timestamp_us)
+        .ok_or_else(|| anyhow::anyhow!("timestamp out of range: {timestamp_us}"))?;
+
+    Ok((datetime.year(), datetime.month()))
 }
 
 fn collect_existing_item_ids(shard_manager: &ShardManager) -> Result<HashSet<String>> {

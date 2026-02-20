@@ -266,10 +266,8 @@ impl ConvergenceOracle {
             let result: BTreeSet<u64> = shuffled.iter().copied().collect();
 
             if result != canonical {
-                let missing_events: Vec<u64> =
-                    canonical.difference(&result).copied().collect();
-                let extra_events: Vec<u64> =
-                    result.difference(&canonical).copied().collect();
+                let missing_events: Vec<u64> = canonical.difference(&result).copied().collect();
+                let extra_events: Vec<u64> = result.difference(&canonical).copied().collect();
 
                 violations.push(InvariantViolation::Commutativity {
                     permutation_index: perm_idx,
@@ -759,10 +757,7 @@ mod tests {
         let has_missing_zero = result.violations.iter().any(|v| {
             matches!(
                 v,
-                InvariantViolation::CausalConsistency {
-                    missing_seq: 0,
-                    ..
-                }
+                InvariantViolation::CausalConsistency { missing_seq: 0, .. }
             )
         });
         assert!(has_missing_zero, "must report missing seq=0");

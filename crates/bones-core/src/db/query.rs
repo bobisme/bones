@@ -731,8 +731,11 @@ pub fn update_projection_cursor(
 // ---------------------------------------------------------------------------
 
 fn count_items_grouped(conn: &Connection, column: &str) -> Result<HashMap<String, usize>> {
-    let sql = format!("SELECT {column}, COUNT(*) FROM items WHERE is_deleted = 0 GROUP BY {column}");
-    let mut stmt = conn.prepare(&sql).context("prepare aggregate count query")?;
+    let sql =
+        format!("SELECT {column}, COUNT(*) FROM items WHERE is_deleted = 0 GROUP BY {column}");
+    let mut stmt = conn
+        .prepare(&sql)
+        .context("prepare aggregate count query")?;
     let rows = stmt.query_map([], |row| {
         let key: String = row.get(0)?;
         let count: i64 = row.get(1)?;
@@ -757,7 +760,9 @@ fn count_grouped_events(conn: &Connection, group_by: &str) -> Result<HashMap<Str
         return Ok(HashMap::new());
     }
 
-    let sql = format!("SELECT {group_by}, COUNT(*) FROM projected_events WHERE {group_by} IS NOT NULL GROUP BY {group_by}");
+    let sql = format!(
+        "SELECT {group_by}, COUNT(*) FROM projected_events WHERE {group_by} IS NOT NULL GROUP BY {group_by}"
+    );
     let mut stmt = conn
         .prepare(&sql)
         .context("prepare projected event aggregate query")?;
@@ -1189,43 +1194,13 @@ mod tests {
 
         // Same timestamps force ORDER BY tie-break behavior.
         insert_item_full(
-            &conn,
-            "bn-010",
-            "Ten",
-            None,
-            "task",
-            "open",
-            "default",
-            None,
-            "",
-            100,
-            200,
+            &conn, "bn-010", "Ten", None, "task", "open", "default", None, "", 100, 200,
         );
         insert_item_full(
-            &conn,
-            "bn-002",
-            "Two",
-            None,
-            "task",
-            "open",
-            "default",
-            None,
-            "",
-            100,
-            200,
+            &conn, "bn-002", "Two", None, "task", "open", "default", None, "", 100, 200,
         );
         insert_item_full(
-            &conn,
-            "bn-001",
-            "One",
-            None,
-            "task",
-            "open",
-            "default",
-            None,
-            "",
-            100,
-            200,
+            &conn, "bn-001", "One", None, "task", "open", "default", None, "", 100, 200,
         );
 
         let asc = ItemFilter {

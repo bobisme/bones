@@ -197,7 +197,9 @@ pub fn run_similar(
         results,
     };
 
-    render(output, &similar_output, |out, w| render_similar_human(out, w))
+    render(output, &similar_output, |out, w| {
+        render_similar_human(out, w)
+    })
 }
 
 /// Render similar-item results in human-readable tabular format.

@@ -145,10 +145,8 @@ pub fn structural_similarity(
     // -----------------------------------------------------------------------
     // 2. Assignees — query item_assignees table
     // -----------------------------------------------------------------------
-    let assignees_a =
-        fetch_assignees(db, a).with_context(|| format!("fetch assignees for {a}"))?;
-    let assignees_b =
-        fetch_assignees(db, b).with_context(|| format!("fetch assignees for {b}"))?;
+    let assignees_a = fetch_assignees(db, a).with_context(|| format!("fetch assignees for {a}"))?;
+    let assignees_b = fetch_assignees(db, b).with_context(|| format!("fetch assignees for {b}"))?;
     let assignee_sim = jaccard(&assignees_a, &assignees_b);
 
     // -----------------------------------------------------------------------
@@ -483,7 +481,10 @@ mod tests {
         let score =
             structural_similarity("bn-001", "bn-002", &conn, &empty_graph()).expect("score");
         // intersection={auth}(1), union={auth,backend,frontend}(3) → 1/3
-        assert!((score.label_sim - (1.0_f32 / 3.0)).abs() < 1e-6, "{score:?}");
+        assert!(
+            (score.label_sim - (1.0_f32 / 3.0)).abs() < 1e-6,
+            "{score:?}"
+        );
     }
 
     #[test]
@@ -645,14 +646,19 @@ mod tests {
         // bn-001 → bn-mid → bn-002, distance=2 → 1/(1+2) ≈ 0.333
         let graph = graph_from_edges(&[("bn-001", "bn-mid"), ("bn-mid", "bn-002")]);
         let score = structural_similarity("bn-001", "bn-002", &conn, &graph).expect("score");
-        assert!((score.graph_proximity - (1.0_f32 / 3.0)).abs() < 1e-6, "{score:?}");
+        assert!(
+            (score.graph_proximity - (1.0_f32 / 3.0)).abs() < 1e-6,
+            "{score:?}"
+        );
     }
 
     #[test]
     fn graph_proximity_beyond_max_hops_is_zero() {
         let conn = setup_db();
         // Chain longer than MAX_HOPS (5): a→b→c→d→e→f→g (6 hops a to g)
-        let ids = ["bn-a01", "bn-a02", "bn-a03", "bn-a04", "bn-a05", "bn-a06", "bn-a07"];
+        let ids = [
+            "bn-a01", "bn-a02", "bn-a03", "bn-a04", "bn-a05", "bn-a06", "bn-a07",
+        ];
         for id in ids {
             insert_item(&conn, id);
         }
@@ -660,7 +666,10 @@ mod tests {
         let graph = graph_from_edges(&edges);
 
         let score = structural_similarity("bn-a01", "bn-a07", &conn, &graph).expect("score");
-        assert_eq!(score.graph_proximity, 0.0, "6-hop path should exceed MAX_HOPS=5");
+        assert_eq!(
+            score.graph_proximity, 0.0,
+            "6-hop path should exceed MAX_HOPS=5"
+        );
     }
 
     #[test]

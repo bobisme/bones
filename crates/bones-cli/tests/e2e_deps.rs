@@ -108,7 +108,13 @@ fn dep_add_and_graph_json_show_inverse_relationships() {
     let a_graph = graph_json(dir.path(), &a);
     let b_graph = graph_json(dir.path(), &b);
 
-    assert!(a_graph["blocks"].as_array().unwrap().iter().any(|v| v == &b));
+    assert!(
+        a_graph["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == &b)
+    );
     assert!(
         b_graph["blocked_by"]
             .as_array()

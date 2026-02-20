@@ -6,4 +6,6 @@
 
 pub mod scoring;
 
-pub use scoring::{DuplicateRisk, DupCandidate, build_dup_candidates, classify_risk, rrf_fuse, SearchConfig};
+pub use scoring::{
+    DupCandidate, DuplicateRisk, SearchConfig, build_dup_candidates, classify_risk, rrf_fuse,
+};

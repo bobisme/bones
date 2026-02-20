@@ -391,8 +391,14 @@ mod tests {
 
     #[test]
     fn duplicate_risk_eq() {
-        assert_eq!(DuplicateRisk::LikelyDuplicate, DuplicateRisk::LikelyDuplicate);
-        assert_ne!(DuplicateRisk::LikelyDuplicate, DuplicateRisk::PossiblyRelated);
+        assert_eq!(
+            DuplicateRisk::LikelyDuplicate,
+            DuplicateRisk::LikelyDuplicate
+        );
+        assert_ne!(
+            DuplicateRisk::LikelyDuplicate,
+            DuplicateRisk::PossiblyRelated
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -540,54 +546,27 @@ mod tests {
     fn classify_risk_likely_duplicate() {
         let config = SearchConfig::default();
 
-        assert_eq!(
-            classify_risk(0.90, &config),
-            DuplicateRisk::LikelyDuplicate
-        );
-        assert_eq!(
-            classify_risk(0.95, &config),
-            DuplicateRisk::LikelyDuplicate
-        );
-        assert_eq!(
-            classify_risk(1.0, &config),
-            DuplicateRisk::LikelyDuplicate
-        );
+        assert_eq!(classify_risk(0.90, &config), DuplicateRisk::LikelyDuplicate);
+        assert_eq!(classify_risk(0.95, &config), DuplicateRisk::LikelyDuplicate);
+        assert_eq!(classify_risk(1.0, &config), DuplicateRisk::LikelyDuplicate);
     }
 
     #[test]
     fn classify_risk_possibly_related() {
         let config = SearchConfig::default();
 
-        assert_eq!(
-            classify_risk(0.70, &config),
-            DuplicateRisk::PossiblyRelated
-        );
-        assert_eq!(
-            classify_risk(0.80, &config),
-            DuplicateRisk::PossiblyRelated
-        );
-        assert_eq!(
-            classify_risk(0.89, &config),
-            DuplicateRisk::PossiblyRelated
-        );
+        assert_eq!(classify_risk(0.70, &config), DuplicateRisk::PossiblyRelated);
+        assert_eq!(classify_risk(0.80, &config), DuplicateRisk::PossiblyRelated);
+        assert_eq!(classify_risk(0.89, &config), DuplicateRisk::PossiblyRelated);
     }
 
     #[test]
     fn classify_risk_maybe_related() {
         let config = SearchConfig::default();
 
-        assert_eq!(
-            classify_risk(0.50, &config),
-            DuplicateRisk::MaybeRelated
-        );
-        assert_eq!(
-            classify_risk(0.60, &config),
-            DuplicateRisk::MaybeRelated
-        );
-        assert_eq!(
-            classify_risk(0.69, &config),
-            DuplicateRisk::MaybeRelated
-        );
+        assert_eq!(classify_risk(0.50, &config), DuplicateRisk::MaybeRelated);
+        assert_eq!(classify_risk(0.60, &config), DuplicateRisk::MaybeRelated);
+        assert_eq!(classify_risk(0.69, &config), DuplicateRisk::MaybeRelated);
     }
 
     #[test]
@@ -604,28 +583,16 @@ mod tests {
         let config = SearchConfig::default();
 
         // Exactly at boundaries
-        assert_eq!(
-            classify_risk(0.90, &config),
-            DuplicateRisk::LikelyDuplicate
-        );
-        assert_eq!(
-            classify_risk(0.70, &config),
-            DuplicateRisk::PossiblyRelated
-        );
-        assert_eq!(
-            classify_risk(0.50, &config),
-            DuplicateRisk::MaybeRelated
-        );
+        assert_eq!(classify_risk(0.90, &config), DuplicateRisk::LikelyDuplicate);
+        assert_eq!(classify_risk(0.70, &config), DuplicateRisk::PossiblyRelated);
+        assert_eq!(classify_risk(0.50, &config), DuplicateRisk::MaybeRelated);
 
         // Just below boundaries
         assert_eq!(
             classify_risk(0.89999, &config),
             DuplicateRisk::PossiblyRelated
         );
-        assert_eq!(
-            classify_risk(0.69999, &config),
-            DuplicateRisk::MaybeRelated
-        );
+        assert_eq!(classify_risk(0.69999, &config), DuplicateRisk::MaybeRelated);
         assert_eq!(classify_risk(0.49999, &config), DuplicateRisk::None);
     }
 
@@ -638,18 +605,9 @@ mod tests {
             maybe_related_threshold: 0.55,
         };
 
-        assert_eq!(
-            classify_risk(0.95, &config),
-            DuplicateRisk::LikelyDuplicate
-        );
-        assert_eq!(
-            classify_risk(0.85, &config),
-            DuplicateRisk::PossiblyRelated
-        );
-        assert_eq!(
-            classify_risk(0.65, &config),
-            DuplicateRisk::MaybeRelated
-        );
+        assert_eq!(classify_risk(0.95, &config), DuplicateRisk::LikelyDuplicate);
+        assert_eq!(classify_risk(0.85, &config), DuplicateRisk::PossiblyRelated);
+        assert_eq!(classify_risk(0.65, &config), DuplicateRisk::MaybeRelated);
         assert_eq!(classify_risk(0.45, &config), DuplicateRisk::None);
     }
 
@@ -695,14 +653,20 @@ mod tests {
         let candidates = build_dup_candidates(&fused, &lex, &sem, &str, &config);
 
         // bn-001 should be in position 0 with rank 1 in lex, rank 2 in sem, rank 1 in str
-        let bn001_idx = candidates.iter().position(|c| c.item_id == "bn-001").unwrap();
+        let bn001_idx = candidates
+            .iter()
+            .position(|c| c.item_id == "bn-001")
+            .unwrap();
         let bn001 = &candidates[bn001_idx];
         assert_eq!(bn001.lexical_rank, 1);
         assert_eq!(bn001.semantic_rank, 2);
         assert_eq!(bn001.structural_rank, 1);
 
         // bn-002 should have rank 2 in lex, rank 1 in sem, absent in str
-        let bn002_idx = candidates.iter().position(|c| c.item_id == "bn-002").unwrap();
+        let bn002_idx = candidates
+            .iter()
+            .position(|c| c.item_id == "bn-002")
+            .unwrap();
         let bn002 = &candidates[bn002_idx];
         assert_eq!(bn002.lexical_rank, 2);
         assert_eq!(bn002.semantic_rank, 1);

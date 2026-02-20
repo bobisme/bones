@@ -125,7 +125,12 @@ pub fn run_dedup(
             .iter()
             .find(|h| h.item_id == item.item_id)
             .map(|h| h.rank)
-            .unwrap_or_else(|| pre_hits.iter().map(|h| h.rank).fold(f64::INFINITY, f64::min));
+            .unwrap_or_else(|| {
+                pre_hits
+                    .iter()
+                    .map(|h| h.rank)
+                    .fold(f64::INFINITY, f64::min)
+            });
 
         let mut candidate_ids: HashSet<String> = HashSet::new();
         for hit in &pre_hits {
@@ -143,7 +148,9 @@ pub fn run_dedup(
         }
 
         let limit = candidate_ids.len().max(10);
-        let Ok(candidates) = find_duplicates(&query_text, &conn, &empty_graph, &search_cfg, false, limit) else {
+        let Ok(candidates) =
+            find_duplicates(&query_text, &conn, &empty_graph, &search_cfg, false, limit)
+        else {
             continue;
         };
 
@@ -314,8 +321,14 @@ mod tests {
 
     #[test]
     fn canonical_pair_is_order_independent() {
-        assert_eq!(canonical_pair("bn-2", "bn-1"), ("bn-1".into(), "bn-2".into()));
-        assert_eq!(canonical_pair("bn-1", "bn-2"), ("bn-1".into(), "bn-2".into()));
+        assert_eq!(
+            canonical_pair("bn-2", "bn-1"),
+            ("bn-1".into(), "bn-2".into())
+        );
+        assert_eq!(
+            canonical_pair("bn-1", "bn-2"),
+            ("bn-1".into(), "bn-2".into())
+        );
     }
 
     #[test]

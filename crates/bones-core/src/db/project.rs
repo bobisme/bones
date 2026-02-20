@@ -664,8 +664,10 @@ pub fn ensure_tracking_table(conn: &Connection) -> Result<()> {
         .context("add agent column to projected_events")?;
     }
 
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_projected_events_agent ON projected_events(agent);")
-        .context("create projected_events_agent index")?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_projected_events_agent ON projected_events(agent);",
+    )
+    .context("create projected_events_agent index")?;
 
     Ok(())
 }
