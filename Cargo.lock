@@ -251,6 +251,7 @@ dependencies = [
  "bones-core",
  "dirs",
  "ort",
+ "petgraph",
  "proptest",
  "rusqlite",
  "serde",

@@ -442,6 +442,16 @@ enum Commands {
 
     #[command(
         next_help_heading = "Project Maintenance",
+        about = "Compact event log for completed items",
+        long_about = "Replace event sequences for old done/archived items with a single\n\
+                      item.snapshot event (lattice-based compaction). Compaction is\n\
+                      coordination-free: each replica can compact independently and converge.",
+        after_help = "EXAMPLES:\n    # Compact items done for 30+ days (default)\n    bn compact\n\n    # Custom age threshold\n    bn compact --min-age-days 60\n\n    # Dry run — see what would be compacted\n    bn compact --dry-run\n\n    # Machine-readable output\n    bn compact --json"
+    )]
+    Compact(cmd::compact::CompactArgs),
+
+    #[command(
+        next_help_heading = "Project Maintenance",
         about = "Run repository diagnostics",
         long_about = "Summarize event-log health, integrity anomalies, and projection drift indicators.",
         after_help = "EXAMPLES:\n    # Human-readable diagnostics\n    bn diagnose\n\n    # Machine-readable diagnostics\n    bn diagnose --json"
@@ -824,6 +834,9 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::RedactVerify(ref args) => timing::timed("cmd.redact_verify", || {
             cmd::redact_verify::run_redact_verify(args, output, &project_root)
+        }),
+        Commands::Compact(ref args) => timing::timed("cmd.compact", || {
+            cmd::compact::run_compact(args, output, &project_root)
         }),
         Commands::Diagnose => timing::timed("cmd.diagnose", || {
             cmd::diagnose::run_diagnose(output, &project_root)

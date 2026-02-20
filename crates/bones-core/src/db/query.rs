@@ -125,10 +125,10 @@ pub enum SortOrder {
 impl SortOrder {
     const fn sql_clause(self) -> &'static str {
         match self {
-            Self::CreatedDesc => "ORDER BY created_at_us DESC, item_id ASC",
-            Self::CreatedAsc => "ORDER BY created_at_us ASC, item_id ASC",
-            Self::UpdatedDesc => "ORDER BY updated_at_us DESC, item_id ASC",
-            Self::UpdatedAsc => "ORDER BY updated_at_us ASC, item_id ASC",
+            Self::CreatedDesc => "ORDER BY created_at_us DESC, i.item_id ASC",
+            Self::CreatedAsc => "ORDER BY created_at_us ASC, i.item_id ASC",
+            Self::UpdatedDesc => "ORDER BY updated_at_us DESC, i.item_id ASC",
+            Self::UpdatedAsc => "ORDER BY updated_at_us ASC, i.item_id ASC",
             Self::Priority => {
                 "ORDER BY CASE urgency \
                  WHEN 'urgent' THEN 0 \

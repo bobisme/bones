@@ -3,6 +3,7 @@ pub mod archive;
 pub mod assign;
 pub mod close;
 pub mod comment;
+pub mod compact;
 pub mod completions;
 pub mod config;
 pub mod create;

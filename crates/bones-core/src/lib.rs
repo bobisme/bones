@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod capabilities;
 pub mod clock;
+pub mod compact;
 pub mod config;
 pub mod crdt;
 pub mod dag;
