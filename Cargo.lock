@@ -204,6 +204,7 @@ dependencies = [
  "blake3",
  "bones-core",
  "bones-search",
+ "bones-sim",
  "bones-triage",
  "chrono",
  "clap",
@@ -269,6 +270,7 @@ dependencies = [
  "bones-core",
  "proptest",
  "serde",
+ "serde_json",
  "terseid",
  "tracing",
 ]

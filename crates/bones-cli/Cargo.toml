@@ -18,6 +18,7 @@ anyhow = { workspace = true }
 blake3 = { workspace = true }
 bones-core = { path = "../bones-core" }
 bones-search = { path = "../bones-search" }
+bones-sim = { path = "../bones-sim" }
 bones-triage = { path = "../bones-triage" }
 chrono = { workspace = true }
 clap = { workspace = true }

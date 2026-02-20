@@ -2,6 +2,7 @@
 //! Deterministic simulation harness for multi-agent Bones behavior.
 
 pub mod agent;
+pub mod campaign;
 pub mod clock;
 pub mod network;
 pub mod oracle;

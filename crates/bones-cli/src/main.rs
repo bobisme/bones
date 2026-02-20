@@ -441,6 +441,17 @@ enum Commands {
     RedactVerify(cmd::redact_verify::RedactVerifyArgs),
 
     #[command(
+        next_help_heading = "Simulation",
+        about = "Run deterministic simulation campaigns",
+        long_about = "Deterministic simulation campaign runner for verifying CRDT convergence\n\
+                      invariants across many seeds with fault injection.",
+        after_help = "EXAMPLES:\n    # Run 100-seed campaign\n    bn sim run --seeds 100\n\n\
+                      # Replay a failing seed\n    bn sim replay --seed 42\n\n\
+                      # Custom parameters with JSON output\n    bn sim run --seeds 200 --agents 8 --faults 0.2 --json"
+    )]
+    Sim(cmd::sim::SimArgs),
+
+    #[command(
         next_help_heading = "Project Maintenance",
         about = "Compact event log for completed items",
         long_about = "Replace event sequences for old done/archived items with a single\n\
