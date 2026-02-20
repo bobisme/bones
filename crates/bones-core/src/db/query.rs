@@ -9,6 +9,7 @@
 
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, params, params_from_iter};
+use std::collections::HashMap;
 use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
@@ -84,6 +85,21 @@ pub struct SearchHit {
     pub item_id: String,
     pub title: String,
     pub rank: f64,
+}
+
+/// Aggregate counters for project-level stats used by reporting commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectStats {
+    /// Open items by state (excluding deleted).
+    pub by_state: HashMap<String, usize>,
+    /// Open items by kind (excluding deleted).
+    pub by_kind: HashMap<String, usize>,
+    /// Open items by urgency (excluding deleted).
+    pub by_urgency: HashMap<String, usize>,
+    /// Events by type from the projected event tracker (empty when unavailable).
+    pub events_by_type: HashMap<String, usize>,
+    /// Events by agent from the projected event tracker (empty when unavailable).
+    pub events_by_agent: HashMap<String, usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +199,39 @@ pub struct ItemFilter {
     pub offset: Option<u32>,
     /// Sort order.
     pub sort: SortOrder,
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate helper query APIs
+// ---------------------------------------------------------------------------
+
+/// Count projected items grouped by `state`, excluding deleted rows.
+pub fn item_counts_by_state(conn: &Connection) -> Result<HashMap<String, usize>> {
+    count_items_grouped(conn, "state")
+}
+
+/// Count projected items grouped by `kind`, excluding deleted rows.
+pub fn item_counts_by_kind(conn: &Connection) -> Result<HashMap<String, usize>> {
+    count_items_grouped(conn, "kind")
+}
+
+/// Count projected items grouped by `urgency`, excluding deleted rows.
+pub fn item_counts_by_urgency(conn: &Connection) -> Result<HashMap<String, usize>> {
+    count_items_grouped(conn, "urgency")
+}
+
+/// Count projected events by `event_type` from `projected_events`.
+///
+/// Returns an empty map when `projected_events` is not yet available.
+pub fn event_counts_by_type(conn: &Connection) -> Result<HashMap<String, usize>> {
+    count_grouped_events(conn, "event_type")
+}
+
+/// Count projected events by `agent` from `projected_events`.
+///
+/// Returns an empty map when `projected_events` is not yet available.
+pub fn event_counts_by_agent(conn: &Connection) -> Result<HashMap<String, usize>> {
+    count_grouped_events(conn, "agent")
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +729,79 @@ pub fn update_projection_cursor(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+fn count_items_grouped(conn: &Connection, column: &str) -> Result<HashMap<String, usize>> {
+    let sql = format!("SELECT {column}, COUNT(*) FROM items WHERE is_deleted = 0 GROUP BY {column}");
+    let mut stmt = conn.prepare(&sql).context("prepare aggregate count query")?;
+    let rows = stmt.query_map([], |row| {
+        let key: String = row.get(0)?;
+        let count: i64 = row.get(1)?;
+        Ok((key, usize::try_from(count).unwrap_or(usize::MAX)))
+    })?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (key, count) = row.context("read aggregate count")?;
+        counts.insert(key, count);
+    }
+
+    Ok(counts)
+}
+
+fn count_grouped_events(conn: &Connection, group_by: &str) -> Result<HashMap<String, usize>> {
+    if !table_exists(conn, "projected_events")? {
+        return Ok(HashMap::new());
+    }
+
+    if !table_has_column(conn, "projected_events", group_by)? {
+        return Ok(HashMap::new());
+    }
+
+    let sql = format!("SELECT {group_by}, COUNT(*) FROM projected_events WHERE {group_by} IS NOT NULL GROUP BY {group_by}");
+    let mut stmt = conn
+        .prepare(&sql)
+        .context("prepare projected event aggregate query")?;
+    let rows = stmt.query_map([], |row| {
+        let key: String = row.get(0)?;
+        let count: i64 = row.get(1)?;
+        Ok((key, usize::try_from(count).unwrap_or(usize::MAX)))
+    })?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (key, count) = row.context("read projected event aggregate")?;
+        counts.insert(key, count);
+    }
+
+    Ok(counts)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .context("check table exists")?;
+    Ok(exists)
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .context("prepare table_info pragma")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for row in rows {
+        let name = row.context("read table_info column")?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
 
 fn row_to_query_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueryItem> {
     Ok(QueryItem {
@@ -1482,5 +1604,86 @@ mod tests {
 
         let result = try_open_projection(&path).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn item_counts_by_state_groups_non_deleted_rows_only() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-001', 'Open item', 'task', 'open', 'default', 0, '', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-002', 'Deleted item', 'task', 'done', 'default', 1, '', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+
+        let by_state = item_counts_by_state(&conn).unwrap();
+        assert_eq!(by_state.get("open").copied().unwrap_or(0), 1);
+        assert!(!by_state.contains_key("deleted"));
+    }
+
+    #[test]
+    fn item_counts_by_kind_and_urgency_include_expected_groups() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-001', 'Bug item', 'bug', 'open', 'urgent', 0, '', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-002', 'Task item', 'task', 'open', 'default', 0, '', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+
+        let by_kind = item_counts_by_kind(&conn).unwrap();
+        let by_urgency = item_counts_by_urgency(&conn).unwrap();
+        assert_eq!(by_kind.get("bug").copied().unwrap_or(0), 1);
+        assert_eq!(by_urgency.get("urgent").copied().unwrap_or(0), 1);
+        assert_eq!(by_urgency.get("default").copied().unwrap_or(0), 1);
+    }
+
+    #[test]
+    fn event_counts_from_projected_events_are_counted_by_type_and_agent() {
+        let conn = test_db();
+        ensure_tracking_table_for_query_tests(&conn);
+
+        conn.execute(
+            "INSERT INTO projected_events (event_hash, item_id, event_type, projected_at_us, agent) \
+             VALUES ('blake3:a', 'bn-001', 'item.create', 1, 'alice')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projected_events (event_hash, item_id, event_type, projected_at_us, agent) \
+             VALUES ('blake3:b', 'bn-002', 'item.update', 2, 'bob')",
+            [],
+        )
+        .unwrap();
+
+        let by_type = event_counts_by_type(&conn).unwrap();
+        let by_agent = event_counts_by_agent(&conn).unwrap();
+        assert_eq!(by_type.get("item.create").copied().unwrap_or(0), 1);
+        assert_eq!(by_type.get("item.update").copied().unwrap_or(0), 1);
+        assert_eq!(by_agent.get("alice").copied().unwrap_or(0), 1);
+        assert_eq!(by_agent.get("bob").copied().unwrap_or(0), 1);
+    }
+
+    fn ensure_tracking_table_for_query_tests(conn: &Connection) {
+        let sql = "CREATE TABLE IF NOT EXISTS projected_events (
+            event_hash TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            projected_at_us INTEGER NOT NULL,
+            agent TEXT NOT NULL DEFAULT ''
+        );";
+        conn.execute(sql, []).expect("create projected_events");
     }
 }

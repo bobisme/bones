@@ -168,6 +168,23 @@ impl<'conn> Projector<'conn> {
     }
 
     fn record_projected_hash(&self, event_hash: &str, event: &Event) -> Result<()> {
+        if projected_events_has_agent_column(&self.conn)? {
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO projected_events (event_hash, item_id, event_type, projected_at_us, agent) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        event_hash,
+                        event.item_id.as_str(),
+                        event.event_type.as_str(),
+                        event.wall_ts_us,
+                        event.agent.as_str(),
+                    ],
+                )
+                .context("record projected event hash")?;
+            return Ok(());
+        }
+
         self.conn
             .execute(
                 "INSERT OR IGNORE INTO projected_events (event_hash, item_id, event_type, projected_at_us) \
@@ -618,10 +635,13 @@ CREATE TABLE IF NOT EXISTS projected_events (
     event_hash TEXT PRIMARY KEY,
     item_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
-    projected_at_us INTEGER NOT NULL
+    projected_at_us INTEGER NOT NULL,
+    agent TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_projected_events_item
     ON projected_events(item_id);
+CREATE INDEX IF NOT EXISTS idx_projected_events_agent
+    ON projected_events(agent);
 ";
 
 /// Ensure the `projected_events` tracking table exists.
@@ -635,7 +655,35 @@ CREATE INDEX IF NOT EXISTS idx_projected_events_item
 pub fn ensure_tracking_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTED_EVENTS_DDL)
         .context("create projected_events tracking table")?;
+
+    if !projected_events_has_agent_column(conn)? {
+        conn.execute(
+            "ALTER TABLE projected_events ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .context("add agent column to projected_events")?;
+    }
+
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_projected_events_agent ON projected_events(agent);")
+        .context("create projected_events_agent index")?;
+
     Ok(())
+}
+
+fn projected_events_has_agent_column(conn: &Connection) -> Result<bool> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(projected_events)")
+        .context("inspect projected_events schema")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for row in rows {
+        let name = row.context("read projected_events column")?;
+        if name == "agent" {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// Drop all projection data for a full rebuild.
