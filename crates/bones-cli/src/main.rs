@@ -779,7 +779,7 @@ fn main() -> anyhow::Result<()> {
             if staged {
                 git::hooks::verify_staged_events()
             } else {
-                cmd::verify::run_verify(&project_root, regenerate_missing)
+                cmd::verify::run_verify(&project_root, regenerate_missing, output)
             }
         }),
         Commands::RedactVerify(ref args) => timing::timed("cmd.redact_verify", || {
