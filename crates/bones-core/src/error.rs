@@ -169,13 +169,17 @@ impl ErrorCode {
                 Some("Item IDs must be alphanumeric. Use `bn list` to find valid IDs.")
             }
             Self::DuplicateItem => Some("An item with this ID already exists."),
-            Self::ShardManifestMismatch => Some("Run `bn rebuild` to repair the shard manifest."),
+            Self::ShardManifestMismatch => {
+                Some("Run `bn admin rebuild` to repair the shard manifest.")
+            }
             Self::EventHashCollision => {
                 Some("Regenerate the event with a different payload/metadata.")
             }
-            Self::CorruptProjection => Some("Run `bn rebuild` to repair the SQLite projection."),
+            Self::CorruptProjection => {
+                Some("Run `bn admin rebuild` to repair the SQLite projection.")
+            }
             Self::EventParseFailed => {
-                Some("Check the event file for malformed lines. Run `bn verify` for details.")
+                Some("Check the event file for malformed lines. Run `bn admin verify` for details.")
             }
             Self::EventUnknownType => {
                 Some("This event type is not recognized. You may need a newer version of bn.")
@@ -198,20 +202,20 @@ impl ErrorCode {
             Self::NotABonesProject => {
                 Some("Run `bn init` in the project root, or cd to a bones project.")
             }
-            Self::ShardNotFound => {
-                Some("The shard file may have been deleted. Run `bn verify` to check integrity.")
-            }
-            Self::DbMissing => Some("Run `bn rebuild` to recreate the projection database."),
+            Self::ShardNotFound => Some(
+                "The shard file may have been deleted. Run `bn admin verify` to check integrity.",
+            ),
+            Self::DbMissing => Some("Run `bn admin rebuild` to recreate the projection database."),
             Self::DbSchemaVersion => {
-                Some("Run `bn rebuild` to migrate to the current schema version.")
+                Some("Run `bn admin rebuild` to migrate to the current schema version.")
             }
             Self::DbQueryFailed => Some(
-                "Run `bn rebuild` to repair the database. If the error persists, report a bug.",
+                "Run `bn admin rebuild` to repair the database. If the error persists, report a bug.",
             ),
             Self::DbRebuildFailed => Some(
                 "Check disk space and permissions. Try deleting .bones/db.sqlite and rebuilding.",
             ),
-            Self::FtsIndexMissing => Some("Run `bn rebuild` to create the FTS index."),
+            Self::FtsIndexMissing => Some("Run `bn admin rebuild` to create the FTS index."),
             Self::SemanticModelLoadFailed => {
                 Some("Verify model files and runtime dependencies are available.")
             }
@@ -321,7 +325,7 @@ pub struct JsonError {
 pub enum EventError {
     /// A line in the event file could not be parsed.
     #[error(
-        "Error: Failed to parse event at line {line_num}\nCause: {reason}\nFix: Check the event file for malformed lines. Run `bn verify` for details."
+        "Error: Failed to parse event at line {line_num}\nCause: {reason}\nFix: Check the event file for malformed lines. Run `bn admin verify` for details."
     )]
     ParseFailed {
         /// 1-based line number within the shard file.
@@ -350,7 +354,7 @@ pub enum EventError {
 
     /// The referenced shard file does not exist on disk.
     #[error(
-        "Error: Shard file not found at {path}\nCause: The shard file may have been deleted or moved\nFix: Run `bn verify` to check integrity. Run `bn rebuild` if the projection is stale."
+        "Error: Shard file not found at {path}\nCause: The shard file may have been deleted or moved\nFix: Run `bn admin verify` to check integrity. Run `bn admin rebuild` if the projection is stale."
     )]
     ShardNotFound {
         /// Path where the shard was expected.
@@ -359,7 +363,7 @@ pub enum EventError {
 
     /// A sealed shard's content does not match its manifest.
     #[error(
-        "Error: Shard manifest mismatch for {shard}\nCause: Expected hash {expected_hash}, got {actual_hash}\nFix: Run `bn rebuild` to repair. If the shard was modified externally, the data may be corrupted."
+        "Error: Shard manifest mismatch for {shard}\nCause: Expected hash {expected_hash}, got {actual_hash}\nFix: Run `bn admin rebuild` to repair. If the shard was modified externally, the data may be corrupted."
     )]
     ManifestMismatch {
         /// Path to the shard file.
@@ -428,19 +432,21 @@ impl EventError {
     pub fn suggestion(&self) -> String {
         match self {
             Self::ParseFailed { .. } => {
-                "Check the event file for malformed lines. Run `bn verify` for details.".into()
+                "Check the event file for malformed lines. Run `bn admin verify` for details."
+                    .into()
             }
             Self::UnknownType { .. } => {
                 "You may need a newer version of bn to handle this event type.".into()
             }
             Self::InvalidTimestamp { .. } => {
-                "Check the event file for corruption. Run `bn verify`.".into()
+                "Check the event file for corruption. Run `bn admin verify`.".into()
             }
             Self::ShardNotFound { .. } => {
-                "Run `bn verify` to check integrity. Run `bn rebuild` if needed.".into()
+                "Run `bn admin verify` to check integrity. Run `bn admin rebuild` if needed.".into()
             }
             Self::ManifestMismatch { .. } => {
-                "Run `bn rebuild` to repair. The shard may have been modified externally.".into()
+                "Run `bn admin rebuild` to repair. The shard may have been modified externally."
+                    .into()
             }
             Self::OversizedPayload { .. } => {
                 "Reduce the payload size or split into smaller events.".into()
@@ -467,7 +473,7 @@ impl EventError {
 pub enum ProjectionError {
     /// The projection database file does not exist.
     #[error(
-        "Error: Projection database not found at {path}\nCause: The database file is missing or was deleted\nFix: Run `bn rebuild` to recreate the projection database."
+        "Error: Projection database not found at {path}\nCause: The database file is missing or was deleted\nFix: Run `bn admin rebuild` to recreate the projection database."
     )]
     DbMissing {
         /// Expected path to the database file.
@@ -476,7 +482,7 @@ pub enum ProjectionError {
 
     /// The database schema version does not match the expected version.
     #[error(
-        "Error: Schema version mismatch (expected v{expected}, found v{found})\nCause: The database was created by a different version of bn\nFix: Run `bn rebuild` to migrate to the current schema version."
+        "Error: Schema version mismatch (expected v{expected}, found v{found})\nCause: The database was created by a different version of bn\nFix: Run `bn admin rebuild` to migrate to the current schema version."
     )]
     SchemaVersion {
         /// Expected schema version.
@@ -487,7 +493,7 @@ pub enum ProjectionError {
 
     /// A SQL query failed.
     #[error(
-        "Error: Database query failed\nCause: {reason}\nFix: Run `bn rebuild` to repair the database. If the error persists, report a bug."
+        "Error: Database query failed\nCause: {reason}\nFix: Run `bn admin rebuild` to repair the database. If the error persists, report a bug."
     )]
     QueryFailed {
         /// The SQL that failed (may be truncated for large queries).
@@ -498,7 +504,7 @@ pub enum ProjectionError {
 
     /// Rebuilding the projection from events failed.
     #[error(
-        "Error: Projection rebuild failed\nCause: {reason}\nFix: Delete .bones/db.sqlite and retry `bn rebuild`. Check disk space and permissions."
+        "Error: Projection rebuild failed\nCause: {reason}\nFix: Delete .bones/db.sqlite and retry `bn admin rebuild`. Check disk space and permissions."
     )]
     RebuildFailed {
         /// Description of the failure.
@@ -507,7 +513,7 @@ pub enum ProjectionError {
 
     /// The projection database appears corrupt.
     #[error(
-        "Error: Corrupt projection database\nCause: {reason}\nFix: Delete .bones/db.sqlite and run `bn rebuild` to recreate from events."
+        "Error: Corrupt projection database\nCause: {reason}\nFix: Delete .bones/db.sqlite and run `bn admin rebuild` to recreate from events."
     )]
     Corrupt {
         /// Description of the corruption.
@@ -516,7 +522,7 @@ pub enum ProjectionError {
 
     /// The full-text search index is missing.
     #[error(
-        "Error: FTS index is missing from the projection database\nCause: The database may have been created without FTS support\nFix: Run `bn rebuild` to create the FTS index."
+        "Error: FTS index is missing from the projection database\nCause: The database may have been created without FTS support\nFix: Run `bn admin rebuild` to create the FTS index."
     )]
     FtsIndexMissing,
 }
@@ -540,21 +546,21 @@ impl ProjectionError {
     pub fn suggestion(&self) -> String {
         match self {
             Self::DbMissing { .. } => {
-                "Run `bn rebuild` to recreate the projection database.".into()
+                "Run `bn admin rebuild` to recreate the projection database.".into()
             }
             Self::SchemaVersion { .. } => {
-                "Run `bn rebuild` to migrate to the current schema version.".into()
+                "Run `bn admin rebuild` to migrate to the current schema version.".into()
             }
             Self::QueryFailed { .. } => {
-                "Run `bn rebuild` to repair. If the error persists, report a bug.".into()
+                "Run `bn admin rebuild` to repair. If the error persists, report a bug.".into()
             }
             Self::RebuildFailed { .. } => {
-                "Delete .bones/db.sqlite and retry `bn rebuild`. Check disk space.".into()
+                "Delete .bones/db.sqlite and retry `bn admin rebuild`. Check disk space.".into()
             }
             Self::Corrupt { .. } => {
-                "Delete .bones/db.sqlite and run `bn rebuild` to recreate from events.".into()
+                "Delete .bones/db.sqlite and run `bn admin rebuild` to recreate from events.".into()
             }
-            Self::FtsIndexMissing => "Run `bn rebuild` to create the FTS index.".into(),
+            Self::FtsIndexMissing => "Run `bn admin rebuild` to create the FTS index.".into(),
         }
     }
 }
@@ -1244,7 +1250,7 @@ mod tests {
     fn projection_error_fts_missing() {
         let err = ProjectionError::FtsIndexMissing;
         assert_eq!(err.error_code(), ErrorCode::FtsIndexMissing.code());
-        assert!(err.suggestion().contains("bn rebuild"));
+        assert!(err.suggestion().contains("bn admin rebuild"));
     }
 
     #[test]

@@ -26,7 +26,7 @@ const PREFILTER_SCORE_FLOOR: f64 = 0.30;
     after_help = "EXAMPLES:\n    # Scan with default threshold\n    bn dedup\n\n\
                   # More permissive threshold\n    bn dedup --threshold 0.60\n\n\
                   # Limit groups\n    bn dedup --limit 20\n\n\
-                  # Machine-readable output\n    bn dedup --json"
+                  # Machine-readable output\n    bn triage dedup --format json"
 )]
 pub struct DedupArgs {
     /// Minimum fusion score to consider an edge as duplicate.
@@ -72,7 +72,7 @@ pub fn run_dedup(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;

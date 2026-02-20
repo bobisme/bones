@@ -12,7 +12,7 @@ the statistical properties of event data (high repetition in agent IDs, event
 types, and item IDs) for high compression ratios.
 
 The cache is **derived, not authoritative**. The TSJSON `.events` files are the
-source of truth. The cache can be rebuilt at any time with `bn rebuild
+source of truth. The cache can be rebuilt at any time with `bn admin rebuild
 --incremental`.
 
 ---

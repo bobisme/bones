@@ -1,7 +1,7 @@
-//! `bn sim` — deterministic simulation campaign commands.
+//! `bn dev sim` — deterministic simulation campaign commands.
 //!
-//! `bn sim run` — execute a campaign across many seeds.
-//! `bn sim replay` — replay a single seed with detailed trace output.
+//! `bn dev sim run` — execute a campaign across many seeds.
+//! `bn dev sim replay` — replay a single seed with detailed trace output.
 
 use std::path::Path;
 use std::process;
@@ -10,9 +10,9 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use crate::output::OutputMode;
+use crate::output::{OutputMode, pretty_kv, pretty_section};
 
-/// Top-level arguments for `bn sim`.
+/// Top-level arguments for `bn dev sim`.
 #[derive(Args, Debug)]
 pub struct SimArgs {
     #[command(subcommand)]
@@ -28,9 +28,9 @@ pub enum SimCommand {
         long_about = "Execute deterministic simulation campaigns with configurable agent counts,\n\
                       rounds, fault injection, and seed ranges. Reports pass/fail per seed\n\
                       and identifies the first failure for replay.",
-        after_help = "EXAMPLES:\n    # Run 100 seeds with defaults\n    bn sim run --seeds 100\n\n\
-                      # Custom parameters\n    bn sim run --seeds 200 --agents 8 --rounds 32 --faults 0.2\n\n\
-                      # Machine-readable output\n    bn sim run --seeds 100 --json"
+        after_help = "EXAMPLES:\n    # Run 100 seeds with defaults\n    bn dev sim run --seeds 100\n\n\
+                      # Custom parameters\n    bn dev sim run --seeds 200 --agents 8 --rounds 32 --faults 0.2\n\n\
+                      # Machine-readable output\n    bn dev sim run --seeds 100 --format json"
     )]
     Run(SimRunArgs),
 
@@ -39,14 +39,14 @@ pub enum SimCommand {
         about = "Replay a single seed with detailed trace output",
         long_about = "Replay a specific seed to get full execution trace, oracle results,\n\
                       and violation details. Use after a campaign failure to debug.",
-        after_help = "EXAMPLES:\n    # Replay seed 42\n    bn sim replay --seed 42\n\n\
-                      # Replay with custom parameters\n    bn sim replay --seed 42 --agents 8 --rounds 32\n\n\
-                      # Machine-readable output\n    bn sim replay --seed 42 --json"
+        after_help = "EXAMPLES:\n    # Replay seed 42\n    bn dev sim replay --seed 42\n\n\
+                      # Replay with custom parameters\n    bn dev sim replay --seed 42 --agents 8 --rounds 32\n\n\
+                      # Machine-readable output\n    bn dev sim replay --seed 42 --format json"
     )]
     Replay(SimReplayArgs),
 }
 
-/// Arguments for `bn sim run`.
+/// Arguments for `bn dev sim run`.
 #[derive(Args, Debug)]
 pub struct SimRunArgs {
     /// Number of seeds to run (starting from 0).
@@ -79,7 +79,7 @@ pub struct SimRunArgs {
     pub max_delay: u8,
 }
 
-/// Arguments for `bn sim replay`.
+/// Arguments for `bn dev sim replay`.
 #[derive(Args, Debug)]
 pub struct SimReplayArgs {
     /// Seed to replay.
@@ -107,7 +107,7 @@ pub struct SimReplayArgs {
     pub max_delay: u8,
 }
 
-/// JSON output for `bn sim run`.
+/// JSON output for `bn dev sim run`.
 #[derive(Debug, Serialize)]
 struct RunOutput {
     seeds_run: usize,
@@ -125,7 +125,7 @@ struct FailureOutput {
     violations: Vec<String>,
 }
 
-/// JSON output for `bn sim replay`.
+/// JSON output for `bn dev sim replay`.
 #[derive(Debug, Serialize)]
 struct ReplayOutput {
     seed: u64,
@@ -177,7 +177,7 @@ fn scale_fault(base: f64, weight_pct: u8) -> u8 {
     clamped as u8
 }
 
-/// Execute `bn sim run`.
+/// Execute `bn dev sim run`.
 pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) -> Result<()> {
     let config = build_campaign_config(
         args.seed_start,
@@ -191,65 +191,114 @@ pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) 
 
     let report = bones_sim::campaign::run_campaign(&config)?;
 
-    if output.is_json() {
-        let out = RunOutput {
-            seeds_run: report.seeds_run,
-            seeds_passed: report.seeds_passed,
-            seeds_failed: report.failures.len(),
-            first_failure: report.first_failure,
-            interesting_states_reached: report.interesting_states_reached,
-            all_passed: report.all_passed(),
-            failures: report
-                .failures
-                .iter()
-                .map(|f| FailureOutput {
-                    seed: f.seed,
-                    violations: f.violations.clone(),
-                })
-                .collect(),
-        };
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!(
-            "Campaign: {} seeds, {} agents, {} rounds, faults={:.0}%",
-            report.seeds_run,
-            args.agents,
-            args.rounds,
-            args.faults * 100.0
-        );
-        println!(
-            "Results: {}/{} passed, {} interesting states",
-            report.seeds_passed, report.seeds_run, report.interesting_states_reached
-        );
+    let out = RunOutput {
+        seeds_run: report.seeds_run,
+        seeds_passed: report.seeds_passed,
+        seeds_failed: report.failures.len(),
+        first_failure: report.first_failure,
+        interesting_states_reached: report.interesting_states_reached,
+        all_passed: report.all_passed(),
+        failures: report
+            .failures
+            .iter()
+            .map(|f| FailureOutput {
+                seed: f.seed,
+                violations: f.violations.clone(),
+            })
+            .collect(),
+    };
 
-        if report.all_passed() {
-            println!("✓ All seeds passed");
-        } else {
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        }
+        OutputMode::Text => {
             println!(
-                "✗ {} failures (first at seed {})",
-                report.failures.len(),
-                report.first_failure.unwrap_or(0)
-            );
-            // Show first few failures
-            for failure in report.failures.iter().take(5) {
-                println!(
-                    "  seed {}: {} violations",
-                    failure.seed,
-                    failure.violations.len()
-                );
-                for v in &failure.violations {
-                    println!("    - {v}");
-                }
-            }
-            if report.failures.len() > 5 {
-                println!("  ... and {} more failures", report.failures.len() - 5);
-            }
-            println!(
-                "\nReplay the first failure:\n  bn sim replay --seed {} --agents {} --rounds {}",
-                report.first_failure.unwrap_or(0),
+                "campaign seeds_run={} agents={} rounds={} faults_pct={:.0}",
+                out.seeds_run,
                 args.agents,
-                args.rounds
+                args.rounds,
+                args.faults * 100.0
             );
+            println!(
+                "results passed={} failed={} interesting_states={} all_passed={}",
+                out.seeds_passed, out.seeds_failed, out.interesting_states_reached, out.all_passed
+            );
+            if !out.all_passed {
+                for failure in out.failures.iter().take(5) {
+                    println!(
+                        "failure seed={} violations={}",
+                        failure.seed,
+                        failure.violations.len()
+                    );
+                }
+                if out.failures.len() > 5 {
+                    println!("failures_truncated count={}", out.failures.len() - 5);
+                }
+                println!(
+                    "hint replay_seed={} agents={} rounds={}",
+                    out.first_failure.unwrap_or(0),
+                    args.agents,
+                    args.rounds
+                );
+            }
+        }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            pretty_section(&mut w, "Simulation Campaign")?;
+            pretty_kv(&mut w, "Seeds", out.seeds_run.to_string())?;
+            pretty_kv(&mut w, "Agents", args.agents.to_string())?;
+            pretty_kv(&mut w, "Rounds", args.rounds.to_string())?;
+            pretty_kv(&mut w, "Fault rate", format!("{:.0}%", args.faults * 100.0))?;
+            pretty_kv(
+                &mut w,
+                "Results",
+                format!(
+                    "{} passed / {} failed ({} interesting states)",
+                    out.seeds_passed, out.seeds_failed, out.interesting_states_reached
+                ),
+            )?;
+
+            if out.all_passed {
+                pretty_kv(&mut w, "Status", "all seeds passed")?;
+            } else {
+                pretty_kv(
+                    &mut w,
+                    "Status",
+                    format!(
+                        "{} failures (first at seed {})",
+                        out.seeds_failed,
+                        out.first_failure.unwrap_or(0)
+                    ),
+                )?;
+                println!();
+                pretty_section(&mut w, "Failure Samples")?;
+                for failure in out.failures.iter().take(5) {
+                    println!(
+                        "seed {:<8} violations={} ",
+                        failure.seed,
+                        failure.violations.len()
+                    );
+                    for violation in &failure.violations {
+                        println!("  - {violation}");
+                    }
+                }
+                if out.failures.len() > 5 {
+                    println!("... and {} more failures", out.failures.len() - 5);
+                }
+                println!();
+                pretty_kv(
+                    &mut w,
+                    "Replay",
+                    format!(
+                        "bn dev sim replay --seed {} --agents {} --rounds {}",
+                        out.first_failure.unwrap_or(0),
+                        args.agents,
+                        args.rounds
+                    ),
+                )?;
+            }
         }
     }
 
@@ -261,7 +310,7 @@ pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) 
     Ok(())
 }
 
-/// Execute `bn sim replay`.
+/// Execute `bn dev sim replay`.
 pub fn run_sim_replay(
     args: &SimReplayArgs,
     output: OutputMode,
@@ -279,64 +328,91 @@ pub fn run_sim_replay(
 
     let trace = bones_sim::campaign::replay_seed(args.seed, &config)?;
 
-    if output.is_json() {
-        let out = ReplayOutput {
-            seed: args.seed,
-            trace_events: trace.result.trace.len(),
-            emitted_events: trace.all_events.len(),
-            agents: trace.result.states.len(),
-            converged: trace.result.convergence.converged,
-            oracle_passed: trace.oracle.passed,
-            violations: trace
-                .oracle
-                .violations
-                .iter()
-                .map(|v| format!("{v:?}"))
-                .collect(),
-            interesting_state_reached: trace.result.interesting_state_reached,
-            trace_fingerprint: trace.result.trace_fingerprint(),
-        };
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!("Replaying seed {}", args.seed);
-        println!(
-            "  Agents: {}, Rounds: {}, Fanout: {}",
-            args.agents, args.rounds, args.fanout
-        );
-        println!(
-            "  Trace events: {}, Emitted events: {}",
-            trace.result.trace.len(),
-            trace.all_events.len()
-        );
-        println!("  Converged: {}", trace.result.convergence.converged);
-        println!(
-            "  Interesting state reached: {}",
-            trace.result.interesting_state_reached
-        );
-        println!(
-            "  Trace fingerprint: {:016x}",
-            trace.result.trace_fingerprint()
-        );
+    let out = ReplayOutput {
+        seed: args.seed,
+        trace_events: trace.result.trace.len(),
+        emitted_events: trace.all_events.len(),
+        agents: trace.result.states.len(),
+        converged: trace.result.convergence.converged,
+        oracle_passed: trace.oracle.passed,
+        violations: trace
+            .oracle
+            .violations
+            .iter()
+            .map(|v| format!("{v:?}"))
+            .collect(),
+        interesting_state_reached: trace.result.interesting_state_reached,
+        trace_fingerprint: trace.result.trace_fingerprint(),
+    };
 
-        if trace.oracle.passed {
-            println!("  ✓ All invariants passed");
-        } else {
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        }
+        OutputMode::Text => {
             println!(
-                "  ✗ {} invariant violations:",
-                trace.oracle.violations.len()
+                "replay seed={} agents={} rounds={} fanout={}",
+                out.seed, args.agents, args.rounds, args.fanout
             );
-            for v in &trace.oracle.violations {
-                println!("    - {v:?}");
+            println!(
+                "result converged={} oracle_passed={} trace_events={} emitted_events={} interesting_state_reached={} trace_fingerprint={:016x}",
+                out.converged,
+                out.oracle_passed,
+                out.trace_events,
+                out.emitted_events,
+                out.interesting_state_reached,
+                out.trace_fingerprint
+            );
+            for violation in &out.violations {
+                println!("violation={violation}");
+            }
+            for state in &trace.result.states {
+                println!(
+                    "agent id={} known_events={}",
+                    state.id,
+                    state.known_events.len()
+                );
             }
         }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            pretty_section(&mut w, &format!("Replay Seed {}", out.seed))?;
+            pretty_kv(&mut w, "Agents", args.agents.to_string())?;
+            pretty_kv(&mut w, "Rounds", args.rounds.to_string())?;
+            pretty_kv(&mut w, "Fanout", args.fanout.to_string())?;
+            pretty_kv(&mut w, "Trace events", out.trace_events.to_string())?;
+            pretty_kv(&mut w, "Emitted", out.emitted_events.to_string())?;
+            pretty_kv(&mut w, "Converged", out.converged.to_string())?;
+            pretty_kv(
+                &mut w,
+                "Interesting",
+                out.interesting_state_reached.to_string(),
+            )?;
+            pretty_kv(
+                &mut w,
+                "Fingerprint",
+                format!("{:016x}", out.trace_fingerprint),
+            )?;
+            pretty_kv(&mut w, "Oracle", out.oracle_passed.to_string())?;
 
-        // Show agent state summary
-        for state in &trace.result.states {
-            println!(
-                "  Agent {}: {} known events",
-                state.id,
-                state.known_events.len()
-            );
+            if !out.oracle_passed {
+                println!();
+                pretty_section(&mut w, "Invariant Violations")?;
+                for violation in &out.violations {
+                    println!("- {violation}");
+                }
+            }
+
+            println!();
+            pretty_section(&mut w, "Agent States")?;
+            for state in &trace.result.states {
+                println!(
+                    "agent {:<8} known_events={}",
+                    state.id,
+                    state.known_events.len()
+                );
+            }
         }
     }
 
@@ -347,7 +423,7 @@ pub fn run_sim_replay(
     Ok(())
 }
 
-/// Dispatch `bn sim` subcommands.
+/// Dispatch `bn dev sim` subcommands.
 pub fn run_sim(args: &SimArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     match &args.command {
         SimCommand::Run(run_args) => run_sim_run(run_args, output, project_root),

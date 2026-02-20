@@ -64,9 +64,15 @@ Normalize human-readable (`--json` off) output so command responses look coheren
   - `bn move`
   - `bn archive`
   - batch result bodies for `bn do`, `bn done`, `bn reopen`, `bn update`, `bn delete`
+- Completed additional normalization pass for lower-frequency operational commands:
+  - `bn dev sim run`
+  - `bn dev sim replay`
+  - `bn sync` (`--config-only` and report body)
+  - `bn redact-verify` (summary and single-item success)
 - Improvements applied:
   - consistent section headings and separators,
   - explicit tabular column headers for ranked/list outputs,
   - clearer empty-state guidance text,
+  - clearer pretty/text separation for automation-oriented commands,
   - preserved JSON output contracts.
 - Verification run: `cargo test -p bones-cli --bin bn` passed after changes.

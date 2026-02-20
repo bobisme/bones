@@ -36,7 +36,7 @@ pub fn run_health(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;

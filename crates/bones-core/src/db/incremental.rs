@@ -81,7 +81,7 @@ pub struct ApplyReport {
 /// * `events_dir` — Path to `.bones/events/` (the shard directory)
 /// * `db_path`    — Path to `.bones/bones.db` (the SQLite projection file)
 /// * `force_full` — If `true`, skip incremental and always do a full rebuild
-///                  (`bn rebuild --full`).
+///                  (`bn admin rebuild --full`).
 ///
 /// # Errors
 ///

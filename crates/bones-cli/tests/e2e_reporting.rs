@@ -44,7 +44,7 @@ fn done_item(dir: &Path, id: &str) {
 }
 
 fn rebuild(dir: &Path) {
-    bn_cmd(dir).args(["rebuild"]).assert().success();
+    bn_cmd(dir).args(["admin", "rebuild"]).assert().success();
 }
 
 // ---------------------------------------------------------------------------
@@ -206,9 +206,9 @@ fn stats_human_output_contains_known_sections() {
     init_project(dir.path());
     create_item(dir.path(), "Human stats test");
 
-    // Force human output mode (tests run without a TTY, so default is JSON)
+    // Force pretty output mode (tests run without a TTY, so default is text)
     let output = bn_cmd(dir.path())
-        .env("BONES_OUTPUT", "human")
+        .env("FORMAT", "pretty")
         .args(["stats"])
         .output()
         .unwrap();

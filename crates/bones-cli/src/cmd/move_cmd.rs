@@ -31,7 +31,7 @@ fn open_db(project_root: &std::path::Path) -> anyhow::Result<Connection> {
     match try_open_projection(&db_path)? {
         Some(conn) => Ok(conn),
         None => anyhow::bail!(
-            "projection database not found or corrupt at {}.\n  Run `bn rebuild` to initialize it.",
+            "projection database not found or corrupt at {}.\n  Run `bn admin rebuild` to initialize it.",
             db_path.display()
         ),
     }

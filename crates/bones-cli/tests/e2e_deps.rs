@@ -18,7 +18,7 @@ fn bn_cmd(dir: &Path) -> Command {
 
 fn bn_human_cmd(dir: &Path) -> Command {
     let mut cmd = bn_cmd(dir);
-    cmd.env("BONES_OUTPUT", "human");
+    cmd.env("FORMAT", "pretty");
     cmd
 }
 

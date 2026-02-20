@@ -8,7 +8,7 @@ use serde::Serialize;
 use bones_core::db::query;
 
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, pretty_section, render_error, render_mode};
 
 /// Arguments for `bn triage`.
 #[derive(Args, Debug, Default)]
@@ -42,7 +42,7 @@ pub fn run_triage(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -100,9 +100,12 @@ pub fn run_triage(
         &score_map,
     );
 
-    render(output, &rows, |_, w| {
-        render_triage_human(w, &top_picks, &blockers, &quick_wins, &cycles)
-    })
+    render_mode(
+        output,
+        &rows,
+        |_, w| render_triage_text(w, &top_picks, &blockers, &quick_wins, &cycles),
+        |_, w| render_triage_human(w, &top_picks, &blockers, &quick_wins, &cycles),
+    )
 }
 
 fn build_rows(
@@ -154,19 +157,14 @@ fn render_triage_human(
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
 ) -> std::io::Result<()> {
-    writeln!(w, "Triage report")?;
-    writeln!(w, "{:-<72}", "")?;
+    pretty_section(w, "Triage report")?;
     render_ranked_section(w, "Top Picks", top_picks)?;
     writeln!(w)?;
-
     render_blocker_section(w, blockers)?;
     writeln!(w)?;
-
     render_ranked_section(w, "Quick Wins", quick_wins)?;
     writeln!(w)?;
-
-    writeln!(w, "Cycles")?;
-    writeln!(w, "{:-<72}", "")?;
+    pretty_section(w, "Cycles")?;
     if cycles.is_empty() {
         writeln!(w, "(none)")?;
     } else {
@@ -174,7 +172,6 @@ fn render_triage_human(
             writeln!(w, "{:>2}. {}", idx + 1, cycle.join(" -> "))?;
         }
     }
-
     Ok(())
 }
 
@@ -183,41 +180,102 @@ fn render_ranked_section(
     title: &str,
     items: &[&RankedItem],
 ) -> std::io::Result<()> {
-    writeln!(w, "{title}")?;
-    writeln!(w, "{:-<72}", "")?;
+    pretty_section(w, title)?;
 
     if items.is_empty() {
         writeln!(w, "(none)")?;
         return Ok(());
     }
 
-    writeln!(w, "{:<22}  {:>10}  TITLE", "ID", "SCORE")?;
+    writeln!(w, "{:<16}  {:>8}  TITLE", "ID", "SCORE")?;
     for item in items {
-        writeln!(w, "{:<22}  {:>10.4}  {}", item.id, item.score, item.title)?;
+        writeln!(
+            w,
+            "{:<16}  {:>8}  {}",
+            item.id,
+            format_score(item.score),
+            item.title
+        )?;
     }
 
     Ok(())
 }
 
 fn render_blocker_section(w: &mut dyn Write, blockers: &[&RankedItem]) -> std::io::Result<()> {
-    writeln!(w, "Blockers")?;
-    writeln!(w, "{:-<72}", "")?;
+    pretty_section(w, "Blockers")?;
 
     if blockers.is_empty() {
         writeln!(w, "(none)")?;
         return Ok(());
     }
 
-    writeln!(w, "{:<22}  {:>6}  {:>10}  TITLE", "ID", "BLOCKS", "SCORE")?;
+    writeln!(w, "{:<16}  {:>6}  {:>8}  TITLE", "ID", "BLOCKS", "SCORE")?;
     for item in blockers {
         writeln!(
             w,
-            "{:<22}  {:>6}  {:>10.4}  {}",
-            item.id, item.unblocks_active, item.score, item.title
+            "{:<16}  {:>6}  {:>8}  {}",
+            item.id,
+            item.unblocks_active,
+            format_score(item.score),
+            item.title
         )?;
     }
 
     Ok(())
+}
+
+fn render_triage_text(
+    w: &mut dyn Write,
+    top_picks: &[&RankedItem],
+    blockers: &[&RankedItem],
+    quick_wins: &[&RankedItem],
+    cycles: &[Vec<String>],
+) -> std::io::Result<()> {
+    for item in top_picks {
+        writeln!(
+            w,
+            "{}  top_pick  score={}  {}",
+            item.id,
+            format_score(item.score),
+            item.title
+        )?;
+    }
+    for item in blockers {
+        writeln!(
+            w,
+            "{}  blocker  blocks={}  score={}  {}",
+            item.id,
+            item.unblocks_active,
+            format_score(item.score),
+            item.title
+        )?;
+    }
+    for item in quick_wins {
+        writeln!(
+            w,
+            "{}  quick_win  score={}  {}",
+            item.id,
+            format_score(item.score),
+            item.title
+        )?;
+    }
+    for (idx, cycle) in cycles.iter().enumerate() {
+        writeln!(w, "cycle-{}  {}", idx + 1, cycle.join(" -> "))?;
+    }
+    if top_picks.is_empty() && blockers.is_empty() && quick_wins.is_empty() && cycles.is_empty() {
+        writeln!(w, "advice  no-triage-items")?;
+    }
+    Ok(())
+}
+
+fn format_score(score: f64) -> String {
+    if score == f64::MAX {
+        "URGENT".to_string()
+    } else if score == f64::NEG_INFINITY {
+        "PUNT".to_string()
+    } else {
+        format!("{score:.4}")
+    }
 }
 
 fn is_small_size(size: Option<&str>) -> bool {

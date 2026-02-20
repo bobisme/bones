@@ -328,7 +328,7 @@ pub fn run_log(args: &LogArgs, output: OutputMode, project_root: &Path) -> anyho
                 output,
                 &CliError::with_details(
                     e.to_string(),
-                    "Verify .bones/events shards and try `bn verify` if corruption is suspected",
+                    "Verify .bones/events shards and try `bn admin verify` if corruption is suspected",
                     "log_query_failed",
                 ),
             )?;
@@ -363,7 +363,7 @@ pub fn run_history(
                 output,
                 &CliError::with_details(
                     e.to_string(),
-                    "Verify .bones/events shards and try `bn verify` if corruption is suspected",
+                    "Verify .bones/events shards and try `bn admin verify` if corruption is suspected",
                     "history_query_failed",
                 ),
             )?;

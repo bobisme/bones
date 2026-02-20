@@ -4,6 +4,8 @@ use clap::{Args, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use toml::Value;
 
+use crate::output::OutputMode;
+
 #[derive(Args, Debug)]
 pub struct ConfigArgs {
     #[command(subcommand)]
@@ -29,10 +31,6 @@ struct ShowArgs {
     /// Show raw user config only
     #[arg(long)]
     user: bool,
-
-    /// Emit JSON output
-    #[arg(long)]
-    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -64,33 +62,33 @@ enum ConfigScope {
     User,
 }
 
-pub fn run_config(args: &ConfigArgs, project_root: &Path, cli_json: bool) -> Result<()> {
+pub fn run_config(args: &ConfigArgs, project_root: &Path, output: OutputMode) -> Result<()> {
     match &args.command {
-        ConfigCommand::Show(show) => run_show(show, project_root, cli_json),
-        ConfigCommand::Set(set) => run_set(set, project_root),
-        ConfigCommand::Unset(unset) => run_unset(unset, project_root),
+        ConfigCommand::Show(show) => run_show(show, project_root, output),
+        ConfigCommand::Set(set) => run_set(set, project_root, output),
+        ConfigCommand::Unset(unset) => run_unset(unset, project_root, output),
     }
 }
 
-fn run_show(args: &ShowArgs, project_root: &Path, cli_json: bool) -> Result<()> {
+fn run_show(args: &ShowArgs, project_root: &Path, output: OutputMode) -> Result<()> {
     if args.project {
         let value = load_toml_table(&project_config_path(project_root))?;
-        print_toml_or_json(&value, args.json || cli_json);
+        print_toml_or_json(&value, output);
         return Ok(());
     }
 
     if args.user {
         let value = load_toml_table(&user_config_path()?)?;
-        print_toml_or_json(&value, args.json || cli_json);
+        print_toml_or_json(&value, output);
         return Ok(());
     }
 
-    let effective = resolve_config(project_root, cli_json)?;
-    print_effective(&effective, args.json || cli_json)?;
+    let effective = resolve_config(project_root, output.is_json())?;
+    print_effective(&effective, output)?;
     Ok(())
 }
 
-fn run_set(args: &SetArgs, project_root: &Path) -> Result<()> {
+fn run_set(args: &SetArgs, project_root: &Path, output: OutputMode) -> Result<()> {
     let path = match args.scope {
         ConfigScope::Project => project_config_path(project_root),
         ConfigScope::User => user_config_path()?,
@@ -99,11 +97,11 @@ fn run_set(args: &SetArgs, project_root: &Path) -> Result<()> {
     let mut value = load_toml_table(&path)?;
     apply_set(&mut value, args.scope, &args.key, &args.value)?;
     write_toml_table(&path, &value)?;
-    println!("Set {} in {} config", args.key, scope_label(args.scope));
+    render_mutation(output, "set", scope_label(args.scope), &args.key)?;
     Ok(())
 }
 
-fn run_unset(args: &UnsetArgs, project_root: &Path) -> Result<()> {
+fn run_unset(args: &UnsetArgs, project_root: &Path, output: OutputMode) -> Result<()> {
     let path = match args.scope {
         ConfigScope::Project => project_config_path(project_root),
         ConfigScope::User => user_config_path()?,
@@ -112,7 +110,7 @@ fn run_unset(args: &UnsetArgs, project_root: &Path) -> Result<()> {
     let mut value = load_toml_table(&path)?;
     apply_unset(&mut value, args.scope, &args.key)?;
     write_toml_table(&path, &value)?;
-    println!("Unset {} in {} config", args.key, scope_label(args.scope));
+    render_mutation(output, "unset", scope_label(args.scope), &args.key)?;
     Ok(())
 }
 
@@ -231,55 +229,116 @@ fn write_toml_table(path: &Path, value: &Value) -> Result<()> {
     std::fs::write(path, serialized).with_context(|| format!("Failed to write {}", path.display()))
 }
 
-fn print_toml_or_json(value: &Value, as_json: bool) {
-    if as_json {
-        match serde_json::to_string_pretty(value) {
+fn print_toml_or_json(value: &Value, output: OutputMode) {
+    match output {
+        OutputMode::Json => match serde_json::to_string_pretty(value) {
             Ok(json) => println!("{json}"),
             Err(_) => println!("{{}}"),
+        },
+        OutputMode::Text | OutputMode::Pretty => {
+            println!("{}", toml::to_string_pretty(value).unwrap_or_default());
         }
-    } else {
-        println!("{}", toml::to_string_pretty(value).unwrap_or_default());
     }
 }
 
-fn print_effective(value: &EffectiveConfig, as_json: bool) -> Result<()> {
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(value)?);
-    } else {
-        println!("resolved_output = \"{}\"", value.resolved_output);
-        println!();
-        println!("[goals]");
-        println!("auto_complete = {}", value.project.goals.auto_complete);
-        println!();
-        println!("[search]");
-        println!("semantic = {}", value.project.search.semantic);
-        println!("model = \"{}\"", value.project.search.model);
-        println!(
-            "duplicate_threshold = {}",
-            value.project.search.duplicate_threshold
-        );
-        println!(
-            "related_threshold = {}",
-            value.project.search.related_threshold
-        );
-        println!("warn_on_create = {}", value.project.search.warn_on_create);
-        println!();
-        println!("[triage]");
-        println!(
-            "feedback_learning = {}",
-            value.project.triage.feedback_learning
-        );
-        println!();
-        println!("[done]");
-        println!("require_reason = {}", value.project.done.require_reason);
-        println!();
-        println!("[user]");
-        if let Some(output) = &value.user.output {
-            println!("output = \"{output}\"");
+fn print_effective(value: &EffectiveConfig, output: OutputMode) -> Result<()> {
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(value)?);
+        }
+        OutputMode::Text => {
+            println!("resolved_output={}", value.resolved_output);
+            println!("goals.auto_complete={}", value.project.goals.auto_complete);
+            println!("search.semantic={}", value.project.search.semantic);
+            println!("search.model={}", value.project.search.model);
+            println!(
+                "search.duplicate_threshold={}",
+                value.project.search.duplicate_threshold
+            );
+            println!(
+                "search.related_threshold={}",
+                value.project.search.related_threshold
+            );
+            println!(
+                "search.warn_on_create={}",
+                value.project.search.warn_on_create
+            );
+            println!(
+                "triage.feedback_learning={}",
+                value.project.triage.feedback_learning
+            );
+            println!("done.require_reason={}", value.project.done.require_reason);
+            if let Some(out) = &value.user.output {
+                println!("user.output={out}");
+            }
+        }
+        OutputMode::Pretty => {
+            println!("resolved_output = \"{}\"", value.resolved_output);
+            println!();
+            println!("[goals]");
+            println!("auto_complete = {}", value.project.goals.auto_complete);
+            println!();
+            println!("[search]");
+            println!("semantic = {}", value.project.search.semantic);
+            println!("model = \"{}\"", value.project.search.model);
+            println!(
+                "duplicate_threshold = {}",
+                value.project.search.duplicate_threshold
+            );
+            println!(
+                "related_threshold = {}",
+                value.project.search.related_threshold
+            );
+            println!("warn_on_create = {}", value.project.search.warn_on_create);
+            println!();
+            println!("[triage]");
+            println!(
+                "feedback_learning = {}",
+                value.project.triage.feedback_learning
+            );
+            println!();
+            println!("[done]");
+            println!("require_reason = {}", value.project.done.require_reason);
+            println!();
+            println!("[user]");
+            if let Some(out) = &value.user.output {
+                println!("output = \"{out}\"");
+            }
         }
     }
 
     Ok(())
+}
+
+fn render_mutation(output: OutputMode, action: &str, scope: &str, key: &str) -> Result<()> {
+    match output {
+        OutputMode::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "ok": true,
+                    "action": action,
+                    "scope": scope,
+                    "key": key,
+                }))?
+            );
+        }
+        OutputMode::Text => {
+            println!("ok=true action={action} scope={scope} key={key}");
+        }
+        OutputMode::Pretty => {
+            println!("{} {} in {} config", action_to_title(action), key, scope);
+        }
+    }
+    Ok(())
+}
+
+fn action_to_title(action: &str) -> &'static str {
+    match action {
+        "set" => "Set",
+        "unset" => "Unset",
+        _ => "Updated",
+    }
 }
 
 fn project_config_path(project_root: &Path) -> PathBuf {

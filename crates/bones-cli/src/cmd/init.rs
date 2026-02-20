@@ -1,4 +1,5 @@
 use crate::git;
+use crate::output::{OutputMode, pretty_kv, pretty_section};
 use anyhow::{Context as _, Result};
 use chrono::Local;
 use clap::Args;
@@ -51,7 +52,7 @@ const SHARD_HEADER: &str =
 ///
 /// Returns an error if `.bones/` already exists and `--force` is not set,
 /// or if any filesystem operation fails.
-pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
+pub fn run_init(args: &InitArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     let bones_dir = project_root.join(".bones");
 
     if bones_dir.exists() && !args.force {
@@ -109,19 +110,48 @@ pub fn run_init(args: &InitArgs, project_root: &Path) -> Result<()> {
         git::hooks::install_hooks(project_root)?;
     }
 
-    // Onboarding hints
-    println!("✓ Initialized .bones/ project structure.");
-    println!();
-    println!("  Active shard: .bones/events/{shard_name}");
-    println!("  Config:       .bones/config.toml");
-    println!();
-    println!("Next steps:");
-    println!("  Set your agent identity (required for mutations):");
-    println!("    export AGENT=your-name        # short form");
-    println!("    export BONES_AGENT=your-name  # explicit override");
-    println!();
-    println!("  Create your first item:");
-    println!("    bn create --title \"My first item\"");
+    match output {
+        OutputMode::Json => {
+            let val = serde_json::json!({
+                "status": "ok",
+                "message": "initialized .bones project structure",
+                "paths": {
+                    "active_shard": format!(".bones/events/{shard_name}"),
+                    "config": ".bones/config.toml",
+                    "gitignore": ".bones/.gitignore"
+                },
+                "next_steps": [
+                    "export AGENT=your-name",
+                    "bn create --title \"My first item\""
+                ]
+            });
+            println!("{}", serde_json::to_string_pretty(&val)?);
+        }
+        OutputMode::Text => {
+            println!(
+                "init status=ok active_shard=.bones/events/{shard_name} config=.bones/config.toml"
+            );
+            println!("hint export AGENT=your-name");
+            println!("hint bn create --title \"My first item\"");
+        }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            pretty_section(&mut w, "Initialization Complete")?;
+            pretty_kv(&mut w, "Status", "initialized .bones project structure")?;
+            pretty_kv(
+                &mut w,
+                "Active shard",
+                format!(".bones/events/{shard_name}"),
+            )?;
+            pretty_kv(&mut w, "Config", ".bones/config.toml")?;
+            println!();
+            pretty_section(&mut w, "Next Steps")?;
+            println!("- export AGENT=your-name");
+            println!("- export BONES_AGENT=your-name");
+            println!("- bn create --title \"My first item\"");
+        }
+    }
 
     Ok(())
 }
@@ -148,7 +178,7 @@ mod tests {
             force: false,
             hooks: false,
         };
-        run_init(&args, &root).expect("init should succeed");
+        run_init(&args, OutputMode::Pretty, &root).expect("init should succeed");
 
         assert!(root.join(".bones").is_dir());
         assert!(root.join(".bones/events").is_dir());
@@ -178,9 +208,9 @@ mod tests {
             force: false,
             hooks: false,
         };
-        run_init(&args, &root).expect("first init should succeed");
+        run_init(&args, OutputMode::Pretty, &root).expect("first init should succeed");
 
-        let result = run_init(&args, &root);
+        let result = run_init(&args, OutputMode::Pretty, &root);
         assert!(result.is_err(), "reinit without --force must fail");
 
         let _ = fs::remove_dir_all(&root);
@@ -194,6 +224,7 @@ mod tests {
                 force: false,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("first init should succeed");
@@ -202,6 +233,7 @@ mod tests {
                 force: true,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("reinit --force should succeed");
@@ -218,6 +250,7 @@ mod tests {
                 force: false,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("init should succeed");
@@ -256,6 +289,7 @@ mod tests {
                 force: false,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("init should succeed");
@@ -284,6 +318,7 @@ mod tests {
                 force: false,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("init should succeed");
@@ -311,6 +346,7 @@ mod tests {
                 force: false,
                 hooks: false,
             },
+            OutputMode::Pretty,
             &root,
         )
         .expect("init should succeed");

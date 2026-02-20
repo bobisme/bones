@@ -130,7 +130,7 @@ pub fn run_agents(
                 output,
                 &CliError::with_details(
                     e.to_string(),
-                    "Run 'bn init' to create a project, then 'bn rebuild' if needed",
+                    "Run 'bn init' to create a project, then 'bn admin rebuild' if needed",
                     "agents_query_failed",
                 ),
             )?;

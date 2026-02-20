@@ -32,7 +32,7 @@ Use time-based monthly sharding: `.bones/events/YYYY-MM.events`.
 Each frozen shard has a companion `.manifest` file:
 - `.bones/events/2026-01.manifest` for `.bones/events/2026-01.events`
 - Contains: event count, hash, first/last timestamp, agent list
-- Used by `bn verify` to detect corruption without parsing full shard
+- Used by `bn admin verify` to detect corruption without parsing full shard
 
 ## Alternatives Considered
 

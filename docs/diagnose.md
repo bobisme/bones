@@ -14,7 +14,7 @@ bn diagnose
 Use JSON for automation:
 
 ```bash
-bn diagnose --json
+bn diagnose --format json
 ```
 
 ## Stable JSON schema

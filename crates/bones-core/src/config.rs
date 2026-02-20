@@ -1,6 +1,7 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,9 +181,8 @@ pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveCo
     let project = load_project_config(project_root)?;
     let user = load_user_config()?;
 
-    let env_output = env::var("BONES_OUTPUT").ok();
-    let env_format = env::var("BONES_FORMAT").ok();
-    let resolved_output = resolve_output(cli_json, user.output.clone(), env_output, env_format)?;
+    let env_format = env::var("FORMAT").ok();
+    let resolved_output = resolve_output(cli_json, user.output.clone(), env_format)?;
 
     Ok(EffectiveConfig {
         project,
@@ -194,25 +194,37 @@ pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveCo
 fn resolve_output(
     cli_json: bool,
     user_output: Option<String>,
-    env_output: Option<String>,
     env_format: Option<String>,
 ) -> Result<String> {
-    if let (Some(output), Some(format)) = (&env_output, &env_format)
-        && output != format
-    {
-        bail!(
-            "Conflicting env vars: BONES_OUTPUT={output} and BONES_FORMAT={format}. Set only one or make them match."
-        );
+    fn normalize_output_mode(raw: &str) -> Option<&'static str> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            // canonical values
+            "pretty" => Some("pretty"),
+            "text" => Some("text"),
+            "json" => Some("json"),
+            // legacy compatibility
+            "human" => Some("pretty"),
+            "table" => Some("text"),
+            _ => None,
+        }
     }
 
     if cli_json {
-        Ok("json".to_string())
-    } else if let Some(output) = env_output.or(env_format) {
-        Ok(output)
-    } else if let Some(output) = user_output {
-        Ok(output)
+        return Ok("json".to_string());
+    }
+
+    if let Some(mode) = env_format.as_deref().and_then(normalize_output_mode) {
+        return Ok(mode.to_string());
+    }
+
+    if let Some(mode) = user_output.as_deref().and_then(normalize_output_mode) {
+        return Ok(mode.to_string());
+    }
+
+    if std::io::stdout().is_terminal() {
+        Ok("pretty".to_string())
     } else {
-        Ok("human".to_string())
+        Ok("text".to_string())
     }
 }
 
@@ -260,27 +272,20 @@ mod tests {
 
     #[test]
     fn cli_json_overrides_env_and_config() {
-        let output = resolve_output(
-            true,
-            Some("human".to_string()),
-            Some("table".to_string()),
-            None,
-        )
-        .expect("resolve should succeed");
+        let output = resolve_output(true, Some("pretty".to_string()), Some("text".to_string()))
+            .expect("resolve should succeed");
         assert_eq!(output, "json");
     }
 
     #[test]
-    fn conflicting_output_env_vars_error() {
-        let err = resolve_output(
-            false,
-            None,
-            Some("json".to_string()),
-            Some("table".to_string()),
-        )
-        .expect_err("must error on conflict");
-        let msg = err.to_string();
-        assert!(msg.contains("Conflicting env vars"));
+    fn legacy_aliases_are_normalized() {
+        let pretty = resolve_output(false, Some("table".to_string()), Some("human".to_string()))
+            .expect("resolve should succeed");
+        assert_eq!(pretty, "pretty");
+
+        let text = resolve_output(false, Some("human".to_string()), Some("table".to_string()))
+            .expect("resolve should succeed");
+        assert_eq!(text, "text");
     }
 
     #[test]

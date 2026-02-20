@@ -26,7 +26,7 @@ pub fn generate_post_merge_hook() -> String {
 #!/bin/sh\
 \
 if command -v bn >/dev/null 2>&1; then\n\
-  bn rebuild --incremental\n\
+  bn admin rebuild --incremental\n\
 else\n\
   echo \"Warning: bn is not installed; skipping projection refresh hook\"\n\
 fi\n",
@@ -41,7 +41,7 @@ pub fn generate_pre_commit_hook() -> String {
 #!/bin/sh\
 \
 if command -v bn >/dev/null 2>&1; then\n\
-  bn verify --staged\n\
+  bn admin verify --staged\n\
   rc=$?\n\
   if [ \"$rc\" -ne 0 ]; then\n\
     echo \"Error: staged .events files failed format validation\"\n\
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn generate_post_merge_hook_includes_fallback() {
         let hook = generate_post_merge_hook();
-        assert!(hook.contains("bn rebuild --incremental"));
+        assert!(hook.contains("bn admin rebuild --incremental"));
         assert!(hook.contains("bn is not installed; skipping projection refresh hook"));
         assert!(hook.starts_with(HOOK_MARKER));
     }
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn generate_pre_commit_hook_runs_staged_verify() {
         let hook = generate_pre_commit_hook();
-        assert!(hook.contains("bn verify --staged"));
+        assert!(hook.contains("bn admin verify --staged"));
         assert!(hook.contains("staged .events files failed format validation"));
         assert!(hook.starts_with(HOOK_MARKER));
     }

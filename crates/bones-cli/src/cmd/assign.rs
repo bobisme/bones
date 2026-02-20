@@ -1,12 +1,12 @@
-//! `bn assign` / `bn unassign` — manage assignees for work items.
+//! `bn bone assign` / `bn bone unassign` — manage assignees for work items.
 //!
-//! - `bn assign <id> <agent>` emits `item.assign` with `action=assign`
-//! - `bn unassign <id>` emits `item.assign` with `action=unassign` for the
+//! - `bn bone assign <id> <agent>` emits `item.assign` with `action=assign`
+//! - `bn bone unassign <id>` emits `item.assign` with `action=unassign` for the
 //!   currently resolved command agent.
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db;
 use bones_core::db::project;
@@ -198,11 +198,22 @@ fn run_assign_action(
         event_hash: event.event_hash,
     };
 
-    render(output, &result, |r, w| match r.action.as_str() {
-        "assign" => writeln!(w, "✓ {}: assigned {}", r.item_id, r.agent),
-        "unassign" => writeln!(w, "✓ {}: unassigned {}", r.item_id, r.agent),
-        _ => writeln!(w, "✓ {}: {} {}", r.item_id, r.action, r.agent),
-    })?;
+    render_mode(
+        output,
+        &result,
+        |r, w| {
+            writeln!(
+                w,
+                "ok=true  item={}  action={}  agent={}",
+                r.item_id, r.action, r.agent
+            )
+        },
+        |r, w| match r.action.as_str() {
+            "assign" => writeln!(w, "✓ {}: assigned {}", r.item_id, r.agent),
+            "unassign" => writeln!(w, "✓ {}: unassigned {}", r.item_id, r.agent),
+            _ => writeln!(w, "✓ {}: {} {}", r.item_id, r.action, r.agent),
+        },
+    )?;
 
     Ok(())
 }

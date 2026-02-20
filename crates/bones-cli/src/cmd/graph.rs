@@ -263,7 +263,7 @@ pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> a
     let conn = match try_open_projection(&db_path)? {
         Some(c) => c,
         None => {
-            let msg = "projection database not found; run `bn rebuild` first";
+            let msg = "projection database not found; run `bn admin rebuild` first";
             render_error(output, &CliError::new(msg))?;
             anyhow::bail!("{}", msg);
         }

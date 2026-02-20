@@ -1,9 +1,9 @@
-//! `bn dep` — manage dependency links between work items.
+//! `bn triage dep` — manage dependency links between work items.
 //!
 //! Subcommands:
-//! - `bn dep add <from> --blocks <to>` — emit `item.link` with type "blocks"
-//! - `bn dep add <from> --relates <to>` — emit `item.link` with type "related_to"
-//! - `bn dep rm <from> <to>` — emit `item.unlink` removing the dependency
+//! - `bn triage dep add <from> --blocks <to>` — emit `item.link` with type "blocks"
+//! - `bn triage dep add <from> --relates <to>` — emit `item.link` with type "related_to"
+//! - `bn triage dep rm <from> <to>` — emit `item.unlink` removing the dependency
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,7 +22,7 @@ use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
 
 use crate::agent;
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 
 // ---------------------------------------------------------------------------
@@ -39,18 +39,18 @@ pub struct DepArgs {
 pub enum DepCommand {
     #[command(
         about = "Add a dependency link between two items",
-        after_help = "EXAMPLES:\n    # A blocks B\n    bn dep add bn-abc --blocks bn-def\n\n    # A relates to B (informational)\n    bn dep add bn-abc --relates bn-def"
+        after_help = "EXAMPLES:\n    # A blocks B\n    bn triage dep add bn-abc --blocks bn-def\n\n    # A relates to B (informational)\n    bn triage dep add bn-abc --relates bn-def"
     )]
     Add(DepAddArgs),
 
     #[command(
         about = "Remove a dependency link between two items",
-        after_help = "EXAMPLES:\n    # Remove the link: bn-abc blocks bn-def\n    bn dep rm bn-abc bn-def"
+        after_help = "EXAMPLES:\n    # Remove the link: bn-abc blocks bn-def\n    bn triage dep rm bn-abc bn-def"
     )]
     Rm(DepRmArgs),
 }
 
-/// Arguments for `bn dep add`.
+/// Arguments for `bn triage dep add`.
 #[derive(Args, Debug)]
 pub struct DepAddArgs {
     /// Source item ID (the blocker / origin of the link).
@@ -65,7 +65,7 @@ pub struct DepAddArgs {
     pub relates: Option<String>,
 }
 
-/// Arguments for `bn dep rm`.
+/// Arguments for `bn triage dep rm`.
 #[derive(Args, Debug)]
 pub struct DepRmArgs {
     /// Source item ID (the blocker).
@@ -266,7 +266,7 @@ fn run_dep_add(
             }
         }
     } else {
-        let msg = "projection database not found; run `bn rebuild` first";
+        let msg = "projection database not found; run `bn admin rebuild` first";
         render_error(output, &CliError::new(msg))?;
         anyhow::bail!("{}", msg);
     }
@@ -293,14 +293,25 @@ fn run_dep_add(
         event_hash,
     };
 
-    render(output, &result, |r, w| {
-        let arrow = if r.link_type == "blocks" {
-            "blocks"
-        } else {
-            "relates to"
-        };
-        writeln!(w, "✓ {} {} {}", r.from, arrow, r.to)
-    })?;
+    render_mode(
+        output,
+        &result,
+        |r, w| {
+            writeln!(
+                w,
+                "ok=true  from={}  to={}  link_type={}",
+                r.from, r.to, r.link_type
+            )
+        },
+        |r, w| {
+            let arrow = if r.link_type == "blocks" {
+                "blocks"
+            } else {
+                "relates to"
+            };
+            writeln!(w, "✓ {} {} {}", r.from, arrow, r.to)
+        },
+    )?;
 
     Ok(())
 }
@@ -411,9 +422,12 @@ fn run_dep_rm(
         event_hash,
     };
 
-    render(output, &result, |r, w| {
-        writeln!(w, "✓ removed link: {} → {}", r.from, r.to)
-    })?;
+    render_mode(
+        output,
+        &result,
+        |r, w| writeln!(w, "ok=true  removed_link={}→{}", r.from, r.to),
+        |r, w| writeln!(w, "✓ removed link: {} → {}", r.from, r.to),
+    )?;
 
     Ok(())
 }

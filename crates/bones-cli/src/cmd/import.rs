@@ -17,6 +17,8 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::output::{OutputMode, pretty_kv, pretty_section};
+
 #[derive(Args, Debug)]
 pub struct ImportArgs {
     /// Import from a GitHub repository (<owner>/<repo>).
@@ -34,10 +36,6 @@ pub struct ImportArgs {
     /// GitHub API token (optional). Falls back to GITHUB_TOKEN env var.
     #[arg(long)]
     pub token: Option<String>,
-
-    /// Output report in JSON format.
-    #[arg(long)]
-    pub json: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -254,9 +252,9 @@ impl GitHubClient {
     }
 }
 
-pub fn run_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
+pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     if args.jsonl {
-        return run_jsonl_import(args, project_root);
+        return run_jsonl_import(args, output, project_root);
     }
 
     let Some(github) = args.github.as_deref() else {
@@ -382,10 +380,13 @@ pub fn run_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
 
     report.api_requests = client.request_count();
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print_report(&report);
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        OutputMode::Text | OutputMode::Pretty => {
+            print_report(&report, output);
+        }
     }
 
     Ok(())
@@ -411,7 +412,7 @@ struct ImportSummary {
     imported_per_type: HashMap<String, usize>,
 }
 
-fn run_jsonl_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
+fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     let input_reader: Box<dyn BufRead> = match &args.input {
         Some(path) => {
             let file = File::open(path)
@@ -497,20 +498,35 @@ fn run_jsonl_import(args: &ImportArgs, project_root: &Path) -> Result<()> {
         report.imported += 1;
     }
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!(
-            "bn import --jsonl {}",
-            report.input_path.as_deref().unwrap_or("<stdin>")
-        );
-        println!("  total lines:     {}", report.total_lines);
-        println!("  imported:       {}", report.imported);
-        println!("  skipped:        {}", report.skipped_invalid);
-        if !report.imported_per_type.is_empty() {
-            println!("  types:");
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        OutputMode::Text => {
+            println!(
+                "import_jsonl input={} total_lines={} imported={} skipped_invalid={}",
+                report.input_path.as_deref().unwrap_or("<stdin>"),
+                report.total_lines,
+                report.imported,
+                report.skipped_invalid
+            );
             for (event_type, count) in &report.imported_per_type {
-                println!("    {event_type}: {count}");
+                println!("type={event_type} count={count}");
+            }
+        }
+        OutputMode::Pretty => {
+            println!(
+                "bn data import --jsonl {}",
+                report.input_path.as_deref().unwrap_or("<stdin>")
+            );
+            println!("  total lines:     {}", report.total_lines);
+            println!("  imported:       {}", report.imported);
+            println!("  skipped:        {}", report.skipped_invalid);
+            if !report.imported_per_type.is_empty() {
+                println!("  types:");
+                for (event_type, count) in &report.imported_per_type {
+                    println!("    {event_type}: {count}");
+                }
             }
         }
     }
@@ -715,15 +731,56 @@ fn paged_url(base: &str, page: u32) -> String {
     }
 }
 
-fn print_report(report: &ImportReport) {
-    println!("bn import --github {}", report.repo);
-    println!("  fetched issues:      {}", report.fetched_issues);
-    println!("  imported milestones: {}", report.imported_milestones);
-    println!("  imported issues:     {}", report.imported_issues);
-    println!("  imported comments:   {}", report.imported_comments);
-    println!("  imported assignees:  {}", report.imported_assignments);
-    println!("  skipped existing:    {}", report.skipped_existing);
-    println!("  API requests:        {}", report.api_requests);
+fn print_report(report: &ImportReport, output: OutputMode) {
+    match output {
+        OutputMode::Text => {
+            println!(
+                "import repo={} fetched_issues={} imported_issues={} imported_milestones={} imported_comments={} imported_assignments={} skipped_existing={} api_requests={}",
+                report.repo,
+                report.fetched_issues,
+                report.imported_issues,
+                report.imported_milestones,
+                report.imported_comments,
+                report.imported_assignments,
+                report.skipped_existing,
+                report.api_requests
+            );
+        }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            let _ = pretty_section(&mut w, "Import Report");
+            let _ = pretty_kv(&mut w, "Repository", &report.repo);
+            let _ = pretty_kv(&mut w, "Fetched issues", report.fetched_issues.to_string());
+            let _ = pretty_kv(
+                &mut w,
+                "Imported milestones",
+                report.imported_milestones.to_string(),
+            );
+            let _ = pretty_kv(
+                &mut w,
+                "Imported issues",
+                report.imported_issues.to_string(),
+            );
+            let _ = pretty_kv(
+                &mut w,
+                "Imported comments",
+                report.imported_comments.to_string(),
+            );
+            let _ = pretty_kv(
+                &mut w,
+                "Imported assignees",
+                report.imported_assignments.to_string(),
+            );
+            let _ = pretty_kv(
+                &mut w,
+                "Skipped existing",
+                report.skipped_existing.to_string(),
+            );
+            let _ = pretty_kv(&mut w, "API requests", report.api_requests.to_string());
+        }
+        OutputMode::Json => {}
+    }
 }
 
 impl PlannedPayload {

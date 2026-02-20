@@ -19,6 +19,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::output::{OutputMode, pretty_kv, pretty_section};
+
 #[derive(Args, Debug)]
 pub struct MigrateArgs {
     /// Path to beads SQLite database.
@@ -28,10 +30,6 @@ pub struct MigrateArgs {
     /// Path to beads JSONL export.
     #[arg(long, value_name = "PATH", conflicts_with = "beads_db")]
     pub beads_jsonl: Option<PathBuf>,
-
-    /// Output summary in JSON.
-    #[arg(long)]
-    pub json: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -131,7 +129,7 @@ struct JsonlDependency {
     kind: Option<String>,
 }
 
-pub fn run_migrate(args: &MigrateArgs, project_root: &Path) -> Result<()> {
+pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     let source = match (&args.beads_db, &args.beads_jsonl) {
         (Some(path), None) => load_from_sqlite(path)
             .with_context(|| format!("failed to read beads sqlite: {}", path.display()))?,
@@ -358,16 +356,48 @@ pub fn run_migrate(args: &MigrateArgs, project_root: &Path) -> Result<()> {
     db::rebuild::rebuild(&events_dir, &db_path)
         .context("failed to rebuild projection after migration")?;
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("bn migrate-from-beads");
-        println!("  source:                {}", report.source);
-        println!("  issues seen:           {}", report.issues_seen);
-        println!("  issues imported:       {}", report.issues_imported);
-        println!("  comments imported:     {}", report.comments_imported);
-        println!("  dependencies imported: {}", report.dependencies_imported);
-        println!("  events written:        {}", report.projection_events);
+    match output {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        OutputMode::Text => {
+            println!(
+                "migrate source={} issues_seen={} issues_imported={} comments_imported={} dependencies_imported={} events_written={}",
+                report.source,
+                report.issues_seen,
+                report.issues_imported,
+                report.comments_imported,
+                report.dependencies_imported,
+                report.projection_events
+            );
+        }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            pretty_section(&mut w, "Migration Report")?;
+            pretty_kv(&mut w, "Source", &report.source)?;
+            pretty_kv(&mut w, "Issues seen", report.issues_seen.to_string())?;
+            pretty_kv(
+                &mut w,
+                "Issues imported",
+                report.issues_imported.to_string(),
+            )?;
+            pretty_kv(
+                &mut w,
+                "Comments imported",
+                report.comments_imported.to_string(),
+            )?;
+            pretty_kv(
+                &mut w,
+                "Dependencies",
+                report.dependencies_imported.to_string(),
+            )?;
+            pretty_kv(
+                &mut w,
+                "Events written",
+                report.projection_events.to_string(),
+            )?;
+        }
     }
 
     Ok(())

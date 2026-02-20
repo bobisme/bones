@@ -59,7 +59,7 @@ Notes:
 1. Create a command module in `crates/bones-cli/src/cmd/` (or extend existing structure).
 2. Define clap args/options and user-facing help text.
 3. Wire the subcommand into the CLI dispatch in `main.rs` / command registry.
-4. Keep output contract explicit (`human` + optional `--json`).
+4. Keep output contract explicit (`--format pretty|text|json`; hidden `--json` alias for compatibility).
 5. Add tests for happy path and user-error path.
 
 ### Command quality checklist

@@ -4,7 +4,10 @@
 //! redacted content must be absent from projection rows, FTS5 index,
 //! and comment bodies.
 
-use crate::output::{CliError, OutputMode, Renderable, render_error, render_item, render_list};
+use crate::output::{
+    CliError, OutputMode, Renderable, pretty_kv, pretty_section, render_error, render_item,
+    render_list,
+};
 use bones_core::db::query::try_open_projection;
 use bones_core::verify::redact::{
     RedactionFailure, RedactionReport, ResidualLocation, verify_item_redaction, verify_redactions,
@@ -96,17 +99,19 @@ impl Renderable for ReportSummary<'_> {
             return Ok(());
         }
 
-        writeln!(
+        pretty_section(w, "Redaction Verification")?;
+        pretty_kv(w, "Checked", r.redactions_checked.to_string())?;
+        pretty_kv(w, "Passed", r.passed.to_string())?;
+        pretty_kv(w, "Failed", r.failed.to_string())?;
+        pretty_kv(
             w,
-            "redact-verify: {} checked, {} passed, {} failed",
-            r.redactions_checked, r.passed, r.failed
+            "Status",
+            if r.is_ok() {
+                "all redactions verified"
+            } else {
+                "verification failed"
+            },
         )?;
-
-        if r.is_ok() {
-            writeln!(w, "✓ all redactions verified")?;
-        } else {
-            writeln!(w, "✗ redaction verification FAILED")?;
-        }
         Ok(())
     }
 
@@ -149,7 +154,7 @@ pub fn run_redact_verify(
                 output,
                 &CliError::with_details(
                     "projection database not found or corrupt",
-                    "Run `bn rebuild` to initialize it.",
+                    "Run `bn admin rebuild` to initialize it.",
                     "missing_projection",
                 ),
             )?;
@@ -176,8 +181,14 @@ pub fn run_redact_verify(
                         serde_json::to_writer_pretty(&mut out, &val)?;
                         writeln!(out)?;
                     }
-                    _ => {
-                        println!("✓ redact-verify {item_id}: all redactions verified");
+                    OutputMode::Text => {
+                        println!("ok=true item_id={item_id} checked=1 failed=0");
+                    }
+                    OutputMode::Pretty => {
+                        let stdout = io::stdout();
+                        let mut out = stdout.lock();
+                        pretty_section(&mut out, &format!("Redaction Check {item_id}"))?;
+                        pretty_kv(&mut out, "Status", "all redactions verified")?;
                     }
                 }
             } else {

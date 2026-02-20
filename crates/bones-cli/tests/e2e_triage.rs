@@ -26,14 +26,14 @@ fn bn_cmd(dir: &Path) -> Command {
     cmd
 }
 
-/// Build a Command that forces human-readable output.
+/// Build a Command that forces pretty human-readable output.
 ///
 /// When running under `cargo test`, stdout is piped (not a TTY), which causes
-/// the CLI to default to JSON mode.  Setting `BONES_OUTPUT=human` forces text
-/// output so we can assert on human-readable content.
+/// the CLI default to be text mode. Setting `FORMAT=pretty` forces human
+/// presentation so we can assert on section headings and layout.
 fn bn_human_cmd(dir: &Path) -> Command {
     let mut cmd = bn_cmd(dir);
-    cmd.env("BONES_OUTPUT", "human");
+    cmd.env("FORMAT", "pretty");
     cmd
 }
 
@@ -80,7 +80,7 @@ fn add_dep_blocks(dir: &Path, blocker: &str, blocked: &str) {
 
 /// Rebuild the projection so all events are visible to query commands.
 fn rebuild(dir: &Path) {
-    bn_cmd(dir).args(["rebuild"]).assert().success();
+    bn_cmd(dir).args(["admin", "rebuild"]).assert().success();
 }
 
 /// Run `bn <subcommand> --json` and return the parsed JSON `Value`.
@@ -205,8 +205,8 @@ fn next_human_output_is_non_empty() {
     let dir = TempDir::new().unwrap();
     setup_triage_graph(dir.path());
 
-    // BONES_OUTPUT=human required: in test context stdout is piped (non-TTY),
-    // so the CLI defaults to JSON mode unless overridden.
+    // FORMAT=pretty required: in test context stdout is piped (non-TTY),
+    // so the CLI defaults to text mode unless overridden.
     bn_human_cmd(dir.path())
         .args(["next"])
         .assert()

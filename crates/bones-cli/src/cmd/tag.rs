@@ -1,7 +1,7 @@
-//! `bn tag` and `bn untag` — add/remove labels from work items.
+//! `bn bone tag` and `bn bone untag` — add/remove labels from work items.
 
 use crate::agent;
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db::query::{get_labels, try_open_projection};
 use bones_core::event::data::UpdateData;
@@ -155,7 +155,7 @@ fn open_db(project_root: &std::path::Path) -> anyhow::Result<Connection> {
     match try_open_projection(&db_path)? {
         Some(conn) => Ok(conn),
         None => anyhow::bail!(
-            "projection database not found or corrupt at {}.\n  Run `bn rebuild` to initialize it.",
+            "projection database not found or corrupt at {}.\n  Run `bn admin rebuild` to initialize it.",
             db_path.display()
         ),
     }
@@ -299,42 +299,84 @@ pub fn run_tag(
     }
 
     let payload = json!({ "results": all_results });
-    render(output, &payload, |v, w| {
-        for result in v["results"].as_array().unwrap_or(&vec![]) {
-            let item = result["item_id"].as_str().unwrap_or("");
-            if result["ok"].as_bool().unwrap_or(false) {
-                let added_list: Vec<&str> = result["added"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-                let all_labels: Vec<&str> = result["labels"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-                if added_list.is_empty() {
+    render_mode(
+        output,
+        &payload,
+        |v, w| {
+            for result in v["results"].as_array().unwrap_or(&vec![]) {
+                let item = result["item_id"].as_str().unwrap_or("");
+                if result["ok"].as_bool().unwrap_or(false) {
+                    let added_list: Vec<&str> = result["added"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    let all_labels: Vec<&str> = result["labels"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
                     writeln!(
                         w,
-                        "✓ {item}: labels unchanged (all already present): {}",
-                        all_labels.join(", ")
+                        "ok=true  item={}  added={}  labels={}",
+                        item,
+                        if added_list.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            added_list.join(",")
+                        },
+                        if all_labels.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            all_labels.join(",")
+                        }
                     )?;
                 } else {
                     writeln!(
                         w,
-                        "✓ {item}: added {} → labels: {}",
-                        added_list.join(", "),
-                        all_labels.join(", ")
+                        "ok=false  item={}  error={}",
+                        item,
+                        result["error"].as_str().unwrap_or("unknown error")
                     )?;
                 }
-            } else {
-                writeln!(
-                    w,
-                    "✗ {item}: {}",
-                    result["error"].as_str().unwrap_or("unknown error")
-                )?;
             }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+        |v, w| {
+            for result in v["results"].as_array().unwrap_or(&vec![]) {
+                let item = result["item_id"].as_str().unwrap_or("");
+                if result["ok"].as_bool().unwrap_or(false) {
+                    let added_list: Vec<&str> = result["added"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    let all_labels: Vec<&str> = result["labels"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    if added_list.is_empty() {
+                        writeln!(
+                            w,
+                            "✓ {item}: labels unchanged (all already present): {}",
+                            all_labels.join(", ")
+                        )?;
+                    } else {
+                        writeln!(
+                            w,
+                            "✓ {item}: added {} → labels: {}",
+                            added_list.join(", "),
+                            all_labels.join(", ")
+                        )?;
+                    }
+                } else {
+                    writeln!(
+                        w,
+                        "✗ {item}: {}",
+                        result["error"].as_str().unwrap_or("unknown error")
+                    )?;
+                }
+            }
+            Ok(())
+        },
+    )?;
 
     if failures.is_empty() {
         Ok(())
@@ -434,50 +476,92 @@ pub fn run_untag(
     }
 
     let payload = json!({ "results": all_results });
-    render(output, &payload, |v, w| {
-        for result in v["results"].as_array().unwrap_or(&vec![]) {
-            let item = result["item_id"].as_str().unwrap_or("");
-            if result["ok"].as_bool().unwrap_or(false) {
-                let removed_list: Vec<&str> = result["removed"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-                let all_labels: Vec<&str> = result["labels"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-                    .unwrap_or_default();
-                if removed_list.is_empty() {
+    render_mode(
+        output,
+        &payload,
+        |v, w| {
+            for result in v["results"].as_array().unwrap_or(&vec![]) {
+                let item = result["item_id"].as_str().unwrap_or("");
+                if result["ok"].as_bool().unwrap_or(false) {
+                    let removed_list: Vec<&str> = result["removed"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    let all_labels: Vec<&str> = result["labels"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
                     writeln!(
                         w,
-                        "✓ {item}: labels unchanged (none present): {}",
+                        "ok=true  item={}  removed={}  labels={}",
+                        item,
+                        if removed_list.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            removed_list.join(",")
+                        },
                         if all_labels.is_empty() {
                             "(none)".to_string()
                         } else {
-                            all_labels.join(", ")
+                            all_labels.join(",")
                         }
                     )?;
                 } else {
                     writeln!(
                         w,
-                        "✓ {item}: removed {} → labels: {}",
-                        removed_list.join(", "),
-                        if all_labels.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            all_labels.join(", ")
-                        }
+                        "ok=false  item={}  error={}",
+                        item,
+                        result["error"].as_str().unwrap_or("unknown error")
                     )?;
                 }
-            } else {
-                writeln!(
-                    w,
-                    "✗ {item}: {}",
-                    result["error"].as_str().unwrap_or("unknown error")
-                )?;
             }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+        |v, w| {
+            for result in v["results"].as_array().unwrap_or(&vec![]) {
+                let item = result["item_id"].as_str().unwrap_or("");
+                if result["ok"].as_bool().unwrap_or(false) {
+                    let removed_list: Vec<&str> = result["removed"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    let all_labels: Vec<&str> = result["labels"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    if removed_list.is_empty() {
+                        writeln!(
+                            w,
+                            "✓ {item}: labels unchanged (none present): {}",
+                            if all_labels.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                all_labels.join(", ")
+                            }
+                        )?;
+                    } else {
+                        writeln!(
+                            w,
+                            "✓ {item}: removed {} → labels: {}",
+                            removed_list.join(", "),
+                            if all_labels.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                all_labels.join(", ")
+                            }
+                        )?;
+                    }
+                } else {
+                    writeln!(
+                        w,
+                        "✗ {item}: {}",
+                        result["error"].as_str().unwrap_or("unknown error")
+                    )?;
+                }
+            }
+            Ok(())
+        },
+    )?;
 
     if failures.is_empty() {
         Ok(())

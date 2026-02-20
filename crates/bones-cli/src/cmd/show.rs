@@ -3,7 +3,9 @@
 //! Supports partial ID resolution: "a7x" → "bn-a7x", and prefix matching
 //! when an exact match is not found.
 
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{
+    CliError, OutputMode, pretty_kv, pretty_rule, pretty_section, render_error, render_mode,
+};
 use crate::validate;
 use bones_core::db::query;
 use clap::Args;
@@ -78,7 +80,7 @@ pub fn run_show(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -166,39 +168,44 @@ pub fn run_show(
         updated_at_us: item.updated_at_us,
     };
 
-    render(output, &show_item, |item, w| render_show_human(item, w))
+    render_mode(
+        output,
+        &show_item,
+        |item, w| render_show_text(item, w),
+        |item, w| render_show_human(item, w),
+    )
 }
 
 /// Render full item details in human-readable format.
 fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(w, "Item {} — {}", item.id, item.title)?;
-    writeln!(w, "{:-<88}", "")?;
-    writeln!(w, "Kind:    {}", item.kind)?;
-    writeln!(w, "State:   {}", item.state)?;
-    writeln!(w, "Urgency: {}", item.urgency)?;
+    pretty_section(w, &format!("Item {}", item.id))?;
+    writeln!(w, "{}", item.title)?;
+    pretty_rule(w)?;
+    pretty_kv(w, "kind", &item.kind)?;
+    pretty_kv(w, "state", &item.state)?;
+    pretty_kv(w, "urgency", &item.urgency)?;
     if let Some(ref size) = item.size {
-        writeln!(w, "Size:    {size}")?;
+        pretty_kv(w, "size", size)?;
     }
     if let Some(ref parent) = item.parent_id {
-        writeln!(w, "Parent:  {parent}")?;
+        pretty_kv(w, "parent", parent)?;
     }
     if !item.labels.is_empty() {
-        writeln!(w, "Labels:  {}", item.labels.join(", "))?;
+        pretty_kv(w, "labels", item.labels.join(", "))?;
     }
     if !item.assignees.is_empty() {
-        writeln!(w, "Assigned: {}", item.assignees.join(", "))?;
+        pretty_kv(w, "assigned", item.assignees.join(", "))?;
     }
     if !item.depends_on.is_empty() {
-        writeln!(w, "Depends on: {}", item.depends_on.join(", "))?;
+        pretty_kv(w, "depends_on", item.depends_on.join(", "))?;
     }
     if !item.dependents.is_empty() {
-        writeln!(w, "Dependents: {}", item.dependents.join(", "))?;
+        pretty_kv(w, "dependents", item.dependents.join(", "))?;
     }
 
     if let Some(ref desc) = item.description {
         writeln!(w)?;
-        writeln!(w, "Description")?;
-        writeln!(w, "{:-<88}", "")?;
+        pretty_section(w, "Description")?;
         for line in desc.lines() {
             writeln!(w, "{line}")?;
         }
@@ -206,14 +213,50 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
 
     if !item.comments.is_empty() {
         writeln!(w)?;
-        writeln!(w, "Comments ({})", item.comments.len())?;
-        writeln!(w, "{:-<88}", "")?;
+        pretty_section(w, &format!("Comments ({})", item.comments.len()))?;
         for (i, comment) in item.comments.iter().enumerate() {
             if i > 0 {
                 writeln!(w)?;
             }
             writeln!(w, "[{}] {}", comment.author, comment.body)?;
         }
+    }
+    Ok(())
+}
+
+fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
+    writeln!(
+        w,
+        "{}  {}  {}  {}",
+        item.id, item.kind, item.state, item.title
+    )?;
+    if let Some(ref size) = item.size {
+        writeln!(w, "{}  size  {}", item.id, size)?;
+    }
+    if let Some(ref parent) = item.parent_id {
+        writeln!(w, "{}  parent  {}", item.id, parent)?;
+    }
+    if !item.labels.is_empty() {
+        writeln!(w, "{}  labels  {}", item.id, item.labels.join(","))?;
+    }
+    if !item.assignees.is_empty() {
+        writeln!(w, "{}  assignees  {}", item.id, item.assignees.join(","))?;
+    }
+    if !item.depends_on.is_empty() {
+        writeln!(w, "{}  depends_on  {}", item.id, item.depends_on.join(","))?;
+    }
+    if !item.dependents.is_empty() {
+        writeln!(w, "{}  dependents  {}", item.id, item.dependents.join(","))?;
+    }
+    if let Some(ref desc) = item.description {
+        writeln!(w, "{}  description  {}", item.id, desc.replace('\n', " "))?;
+    }
+    for comment in &item.comments {
+        writeln!(
+            w,
+            "{}  comment  [{}] {}",
+            item.id, comment.author, comment.body
+        )?;
     }
     Ok(())
 }

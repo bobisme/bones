@@ -25,7 +25,7 @@ const DEFAULT_LIMIT: usize = 10;
                   Results exclude the source item and show per-layer score breakdown.",
     after_help = "EXAMPLES:\n    # Find items similar to bn-abc\n    bn similar bn-abc\n\n\
                   # Limit to top 5 results\n    bn similar bn-abc --limit 5\n\n\
-                  # Machine-readable output\n    bn similar bn-abc --json"
+                  # Machine-readable output\n    bn triage similar bn-abc --format json"
 )]
 pub struct SimilarArgs {
     /// Item ID to find similar items for. Supports partial IDs.
@@ -102,7 +102,7 @@ pub fn run_similar(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;

@@ -1,14 +1,14 @@
-//! Shared output layer for text/JSON/table parity across all CLI commands.
+//! Shared output layer for pretty/text/JSON parity across all CLI commands.
 //!
 //! Every command handler receives an [`OutputMode`] and formats its output
-//! accordingly: human-readable text, stable JSON, or TSV table.
+//! accordingly: pretty output for humans, compact text for agents, or stable JSON.
 //!
 //! # Output mode resolution
 //!
 //! Precedence (highest wins):
-//! 1. `--json` CLI flag → [`OutputMode::Json`]
-//! 2. `BONES_OUTPUT` env var → `"human"` | `"json"` | `"table"`
-//! 3. Default: [`OutputMode::Human`] if stdout is a TTY; [`OutputMode::Json`] if piped.
+//! 1. `--format` / hidden `--json` flag
+//! 2. `FORMAT` env var → `"pretty"` | `"text"` | `"json"`
+//! 3. Default: [`OutputMode::Pretty`] if stdout is a TTY; [`OutputMode::Text`] if piped.
 //!
 //! # Rendering approaches
 //!
@@ -23,80 +23,118 @@
 //! render_list(&items, mode)
 //! ```
 
+use clap::ValueEnum;
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
 
+/// Shared width for human pretty separators.
+pub const PRETTY_RULE_WIDTH: usize = 72;
+
+/// Write a horizontal separator used by pretty human output.
+pub fn pretty_rule(w: &mut dyn Write) -> io::Result<()> {
+    writeln!(w, "{:-<width$}", "", width = PRETTY_RULE_WIDTH)
+}
+
+/// Write a section heading followed by a separator.
+pub fn pretty_section(w: &mut dyn Write, heading: &str) -> io::Result<()> {
+    writeln!(w, "{heading}")?;
+    pretty_rule(w)
+}
+
+/// Render a left-aligned key/value line in human output.
+pub fn pretty_kv(w: &mut dyn Write, key: &str, value: impl AsRef<str>) -> io::Result<()> {
+    writeln!(w, "{:<12} {}", format!("{key}:"), value.as_ref())
+}
+
 /// The three output modes supported by the CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OutputMode {
-    /// Colored, human-friendly text with truncation for wide fields.
-    Human,
+    /// Human-optimized output (tables, sections, visual framing).
+    Pretty,
+    /// Token-efficient plain text for agents and pipes.
+    Text,
     /// Machine-readable JSON (one object per result, or a JSON array).
     Json,
-    /// Tab-separated table with header row, suitable for piping to awk/sort.
-    Table,
 }
 
 impl OutputMode {
+    #[allow(non_upper_case_globals)]
+    pub const Human: Self = Self::Pretty;
+    #[allow(dead_code, non_upper_case_globals)]
+    pub const Table: Self = Self::Text;
+
     /// Returns `true` if JSON output was requested.
     pub fn is_json(self) -> bool {
         matches!(self, Self::Json)
     }
 
-    /// Returns `true` if table output was requested.
-    #[cfg(test)]
-    pub fn is_table(self) -> bool {
-        matches!(self, Self::Table)
+    /// Returns `true` if pretty output was requested.
+    #[allow(dead_code)]
+    pub fn is_pretty(self) -> bool {
+        matches!(self, Self::Pretty)
+    }
+
+    /// Returns `true` if text output was requested.
+    #[allow(dead_code)]
+    pub fn is_text(self) -> bool {
+        matches!(self, Self::Text)
     }
 }
 
 /// Core resolution logic, separated from I/O for testability.
 ///
-/// `json_flag` — true if `--json` was passed on the CLI.
-/// `bones_output_env` — the value of `BONES_OUTPUT` if set.
+/// `format_flag` — explicit `--format` value if provided.
+/// `json_flag` — hidden `--json` alias.
+/// `format_env` — the value of `FORMAT` if set.
 /// `is_tty` — true if stdout is a TTY.
 fn resolve_output_mode_inner(
+    format_flag: Option<OutputMode>,
     json_flag: bool,
-    bones_output_env: Option<&str>,
+    format_env: Option<&str>,
     is_tty: bool,
 ) -> OutputMode {
+    if let Some(mode) = format_flag {
+        return mode;
+    }
+
     if json_flag {
         return OutputMode::Json;
     }
 
-    if let Some(val) = bones_output_env {
+    if let Some(val) = format_env {
         match val.to_lowercase().as_str() {
             "json" => return OutputMode::Json,
-            "table" => return OutputMode::Table,
-            "human" => return OutputMode::Human,
+            "text" => return OutputMode::Text,
+            "pretty" => return OutputMode::Pretty,
             _ => {} // unknown value — fall through to TTY detection
         }
     }
 
-    // Default: human if TTY, JSON if piped.
+    // Default: pretty if TTY, text if piped.
     if is_tty {
-        OutputMode::Human
+        OutputMode::Pretty
     } else {
-        OutputMode::Json
+        OutputMode::Text
     }
 }
 
 /// Resolve the output mode from CLI flags, environment, and TTY defaults.
 ///
 /// Precedence:
-/// 1. `json_flag` → [`OutputMode::Json`]
-/// 2. `BONES_OUTPUT` env var → `"human"` | `"json"` | `"table"`
-/// 3. Default: [`OutputMode::Human`] if stdout is a TTY; [`OutputMode::Json`] if piped.
-pub fn resolve_output_mode(json_flag: bool) -> OutputMode {
-    let env_val = std::env::var("BONES_OUTPUT").ok();
+/// 1. `format_flag` / hidden `--json`
+/// 2. `FORMAT` env var → `pretty|text|json`
+/// 3. Default: pretty if TTY, text if piped.
+pub fn resolve_output_mode(format_flag: Option<OutputMode>, json_flag: bool) -> OutputMode {
+    let env_val = std::env::var("FORMAT").ok();
     let is_tty = io::stdout().is_terminal();
-    resolve_output_mode_inner(json_flag, env_val.as_deref(), is_tty)
+    resolve_output_mode_inner(format_flag, json_flag, env_val.as_deref(), is_tty)
 }
 
 /// Trait implemented by any CLI result type that can be rendered in all modes.
 ///
-/// Implementors provide three rendering methods (one per mode) plus a list of
-/// column headers for table mode. The [`render_item`] and [`render_list`]
+/// Implementors provide rendering methods used by pretty/text/json dispatch.
+/// `render_table` is reused for text mode rows in agent-friendly output.
+/// The [`render_item`] and [`render_list`]
 /// free functions dispatch to the appropriate method based on [`OutputMode`].
 pub trait Renderable {
     /// Render for human consumption: text with labels, truncated for readability.
@@ -107,14 +145,14 @@ pub trait Renderable {
     /// Implementors should serialize a self-contained JSON object.
     fn render_json(&self, w: &mut dyn Write) -> io::Result<()>;
 
-    /// Render as a single TSV table row (no header; see [`table_headers`]).
+    /// Render as a single text row (no header; see [`table_headers`]).
     ///
     /// Fields must appear in the same column order as [`table_headers`].
     ///
     /// [`table_headers`]: Renderable::table_headers
     fn render_table(&self, w: &mut dyn Write) -> io::Result<()>;
 
-    /// Column headers for table mode, in the same order as [`render_table`] fields.
+    /// Column headers for text mode, in the same order as [`render_table`] fields.
     ///
     /// Default: returns an empty slice (no header printed).
     ///
@@ -132,27 +170,60 @@ pub fn render_item<R: Renderable>(item: &R, mode: OutputMode) -> io::Result<()> 
     let stdout = io::stdout();
     let mut out = stdout.lock();
     match mode {
-        OutputMode::Human => item.render_human(&mut out),
+        OutputMode::Pretty => item.render_human(&mut out),
+        OutputMode::Text => item.render_table(&mut out),
         OutputMode::Json => {
             item.render_json(&mut out)?;
             writeln!(out)
         }
-        OutputMode::Table => item.render_table(&mut out),
     }
+}
+
+/// Render a serializable value with explicit pretty/text renderers.
+pub fn render_mode<T: Serialize>(
+    mode: OutputMode,
+    value: &T,
+    text_fn: impl FnOnce(&T, &mut dyn Write) -> io::Result<()>,
+    pretty_fn: impl FnOnce(&T, &mut dyn Write) -> io::Result<()>,
+) -> anyhow::Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    match mode {
+        OutputMode::Json => {
+            serde_json::to_writer_pretty(&mut out, value)?;
+            writeln!(out)?;
+        }
+        OutputMode::Text => text_fn(value, &mut out)?,
+        OutputMode::Pretty => pretty_fn(value, &mut out)?,
+    }
+    Ok(())
 }
 
 /// Render a list of [`Renderable`] items to stdout.
 ///
 /// - In JSON mode, wraps items in a JSON array.
-/// - In Table mode, prints the header row (from [`Renderable::table_headers`]) first.
-/// - In Human mode, renders items sequentially.
+/// - In pretty/text mode, renders items sequentially.
 pub fn render_list<R: Renderable>(items: &[R], mode: OutputMode) -> io::Result<()> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     match mode {
-        OutputMode::Human => {
+        OutputMode::Pretty => {
             for item in items {
                 item.render_human(&mut out)?;
+            }
+        }
+        OutputMode::Text => {
+            // Text defaults to TSV-like rows for token efficiency.
+            let headers = if items.is_empty() {
+                &[] as &[&str]
+            } else {
+                R::table_headers()
+            };
+            if !headers.is_empty() {
+                writeln!(out, "{}", headers.join("  "))?;
+            }
+            for item in items {
+                item.render_table(&mut out)?;
             }
         }
         OutputMode::Json => {
@@ -175,22 +246,6 @@ pub fn render_list<R: Renderable>(items: &[R], mode: OutputMode) -> io::Result<(
                 out.write_all(&buf)?;
             }
             writeln!(out, "\n]")?;
-        }
-        OutputMode::Table => {
-            // Print header row (tab-separated).
-            let headers = if items.is_empty() {
-                &[] as &[&str]
-            } else {
-                // We can't call an associated fn via a value, so call on first item's type.
-                // Use a local helper to get the headers without a value.
-                R::table_headers()
-            };
-            if !headers.is_empty() {
-                writeln!(out, "{}", headers.join("\t"))?;
-            }
-            for item in items {
-                item.render_table(&mut out)?;
-            }
         }
     }
     Ok(())
@@ -239,10 +294,9 @@ impl CliError {
 
 /// Render a serializable value to stdout in the requested format.
 ///
-/// In JSON mode, the value is serialized with `serde_json`. In human mode,
+/// In JSON mode, the value is serialized with `serde_json`. In pretty/text mode,
 /// the provided `human_fn` closure is called to produce text output.
-/// In table mode, falls back to human rendering (use [`render_item`] for
-/// full table support on types implementing [`Renderable`]).
+/// For distinct text/pretty rendering, use [`render_mode`].
 pub fn render<T: Serialize>(
     mode: OutputMode,
     value: &T,
@@ -255,9 +309,7 @@ pub fn render<T: Serialize>(
             serde_json::to_writer_pretty(&mut out, value)?;
             writeln!(out)?;
         }
-        OutputMode::Human | OutputMode::Table => {
-            // Table mode falls back to human in the legacy render API.
-            // Commands that want real table output should implement Renderable.
+        OutputMode::Pretty | OutputMode::Text => {
             human_fn(value, &mut out)?;
         }
     }
@@ -276,7 +328,7 @@ pub fn render_error(mode: OutputMode, error: &CliError) -> anyhow::Result<()> {
             serde_json::to_writer_pretty(&mut out, &wrapper)?;
             writeln!(out)?;
         }
-        OutputMode::Human | OutputMode::Table => {
+        OutputMode::Pretty | OutputMode::Text => {
             writeln!(out, "error: {}", error.message)?;
             if let Some(ref suggestion) = error.suggestion {
                 writeln!(out, "  suggestion: {suggestion}")?;
@@ -328,7 +380,7 @@ pub fn render_success(mode: OutputMode, message: &str) -> anyhow::Result<()> {
             serde_json::to_writer_pretty(&mut out, &wrapper)?;
             writeln!(out)?;
         }
-        OutputMode::Human | OutputMode::Table => {
+        OutputMode::Pretty | OutputMode::Text => {
             writeln!(out, "✓ {message}")?;
         }
     }
@@ -349,10 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn output_mode_is_table() {
-        assert!(OutputMode::Table.is_table());
-        assert!(!OutputMode::Human.is_table());
-        assert!(!OutputMode::Json.is_table());
+    fn output_mode_pretty_and_text() {
+        assert!(OutputMode::Pretty.is_pretty());
+        assert!(OutputMode::Text.is_text());
+        assert!(!OutputMode::Json.is_text());
     }
 
     // ── resolve_output_mode ─────────────────────────────────────────────────
@@ -360,56 +412,62 @@ mod tests {
     // ── resolve_output_mode_inner (testable pure function) ──────────────────
 
     #[test]
+    fn resolve_format_flag_wins_over_json_and_env() {
+        let mode = resolve_output_mode_inner(Some(OutputMode::Text), true, Some("pretty"), true);
+        assert_eq!(mode, OutputMode::Text);
+    }
+
+    #[test]
     fn resolve_json_flag_wins_over_env() {
-        // --json flag wins even when BONES_OUTPUT=human.
-        let mode = resolve_output_mode_inner(true, Some("human"), true);
+        // hidden --json alias wins when format flag is absent.
+        let mode = resolve_output_mode_inner(None, true, Some("pretty"), true);
         assert_eq!(mode, OutputMode::Json);
     }
 
     #[test]
-    fn resolve_bones_output_env_json() {
-        let mode = resolve_output_mode_inner(false, Some("json"), false);
+    fn resolve_format_env_json() {
+        let mode = resolve_output_mode_inner(None, false, Some("json"), false);
         assert_eq!(mode, OutputMode::Json);
     }
 
     #[test]
-    fn resolve_bones_output_env_human() {
-        // Explicit env=human forces Human even in non-TTY.
-        let mode = resolve_output_mode_inner(false, Some("human"), false);
-        assert_eq!(mode, OutputMode::Human);
+    fn resolve_format_env_pretty() {
+        // Explicit env=pretty forces Pretty even in non-TTY.
+        let mode = resolve_output_mode_inner(None, false, Some("pretty"), false);
+        assert_eq!(mode, OutputMode::Pretty);
     }
 
     #[test]
-    fn resolve_bones_output_env_table() {
-        let mode = resolve_output_mode_inner(false, Some("table"), false);
-        assert_eq!(mode, OutputMode::Table);
+    fn resolve_format_env_text() {
+        let mode = resolve_output_mode_inner(None, false, Some("text"), false);
+        assert_eq!(mode, OutputMode::Text);
     }
 
     #[test]
-    fn resolve_bones_output_env_case_insensitive() {
-        let mode = resolve_output_mode_inner(false, Some("TABLE"), false);
-        assert_eq!(mode, OutputMode::Table);
+    fn resolve_format_env_case_insensitive() {
+        let mode = resolve_output_mode_inner(None, false, Some("TEXT"), false);
+        assert_eq!(mode, OutputMode::Text);
     }
 
     #[test]
-    fn resolve_bones_output_env_unknown_falls_through_to_tty() {
+    fn resolve_format_env_unknown_falls_through_to_tty() {
         // Unknown value falls through to TTY detection.
-        let mode_tty = resolve_output_mode_inner(false, Some("fancy"), true);
-        assert_eq!(mode_tty, OutputMode::Human);
-        let mode_pipe = resolve_output_mode_inner(false, Some("fancy"), false);
-        assert_eq!(mode_pipe, OutputMode::Json);
+        let mode_tty = resolve_output_mode_inner(None, false, Some("fancy"), true);
+        assert_eq!(mode_tty, OutputMode::Pretty);
+        let mode_pipe = resolve_output_mode_inner(None, false, Some("fancy"), false);
+        assert_eq!(mode_pipe, OutputMode::Text);
     }
 
     #[test]
-    fn resolve_default_tty_is_human() {
-        let mode = resolve_output_mode_inner(false, None, true);
-        assert_eq!(mode, OutputMode::Human);
+    fn resolve_default_tty_is_pretty() {
+        let mode = resolve_output_mode_inner(None, false, None, true);
+        assert_eq!(mode, OutputMode::Pretty);
     }
 
     #[test]
-    fn resolve_default_no_tty_is_json() {
-        let mode = resolve_output_mode_inner(false, None, false);
-        assert_eq!(mode, OutputMode::Json);
+    fn resolve_default_no_tty_is_text() {
+        let mode = resolve_output_mode_inner(None, false, None, false);
+        assert_eq!(mode, OutputMode::Text);
     }
 
     // ── Renderable trait and render_item / render_list ───────────────────────
@@ -434,7 +492,7 @@ mod tests {
         }
 
         fn render_table(&self, w: &mut dyn Write) -> io::Result<()> {
-            writeln!(w, "{}\t{}", self.name, self.count)
+            writeln!(w, "{}  {}", self.name, self.count)
         }
 
         fn table_headers() -> &'static [&'static str] {
@@ -443,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn render_item_human() {
+    fn render_item_pretty() {
         // render_item writes to stdout; we just check it doesn't panic.
         let item = SimpleItem {
             name: "foo".into(),
@@ -472,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn render_item_table() {
+    fn render_item_text() {
         let item = SimpleItem {
             name: "baz".into(),
             count: 0,
@@ -480,7 +538,7 @@ mod tests {
         let mut buf = Vec::new();
         item.render_table(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("baz\t0"));
+        assert!(s.contains("baz  0"));
     }
 
     #[test]

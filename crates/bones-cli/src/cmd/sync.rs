@@ -7,7 +7,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::output::OutputMode;
+use crate::output::{OutputMode, pretty_kv, pretty_section};
 
 /// Result of a `bn sync` run.
 #[derive(Debug, Default, Serialize)]
@@ -16,7 +16,7 @@ pub struct SyncReport {
     pub pulled: bool,
     /// Number of event lines merged (from git pull output; heuristic).
     pub events_merged: usize,
-    /// Whether `bn rebuild --incremental` succeeded.
+    /// Whether `bn admin rebuild --incremental` succeeded.
     pub rebuilt: bool,
     /// Whether `git push` succeeded.
     pub pushed: bool,
@@ -37,7 +37,7 @@ pub struct SyncArgs {
 
 // ─── public API ─────────────────────────────────────────────────────────────
 
-/// Orchestrate `git pull` → `bn rebuild --incremental` → `git push`.
+/// Orchestrate `git pull` → `bn admin rebuild --incremental` → `git push`.
 ///
 /// Each step is attempted in order. If `git pull` fails the workflow still
 /// continues so callers can see the full picture.
@@ -55,13 +55,13 @@ pub fn sync_workflow(repo_dir: &Path, no_push: bool) -> Result<SyncReport> {
         }
     }
 
-    // Step 2: bn rebuild --incremental
+    // Step 2: bn admin rebuild --incremental
     match run_rebuild(repo_dir) {
         Ok(()) => {
             report.rebuilt = true;
         }
         Err(e) => {
-            report.errors.push(format!("bn rebuild: {e}"));
+            report.errors.push(format!("bn admin rebuild: {e}"));
         }
     }
 
@@ -178,10 +178,27 @@ pub fn run_sync(args: &SyncArgs, output: OutputMode, project_root: &Path) -> Res
                 }))?
             );
         } else {
-            println!("✓ Updated .gitattributes (merge driver entry)");
-            println!("✓ Updated .gitignore (derived file entries)");
+            match output {
+                OutputMode::Text => {
+                    println!("config_updated gitattributes=true gitignore=true");
+                }
+                OutputMode::Pretty => {
+                    let stdout = std::io::stdout();
+                    let mut w = stdout.lock();
+                    pretty_section(&mut w, "Sync Configuration")?;
+                    pretty_kv(&mut w, "Status", "git configuration updated")?;
+                    pretty_kv(&mut w, "Updated", ".gitattributes, .gitignore")?;
+                }
+                OutputMode::Json => {}
+            }
         }
         return Ok(());
+    }
+
+    if !is_git_work_tree(project_root) {
+        anyhow::bail!(
+            "sync requires a git work tree; run `git init` then `bn init --force` (or use `bn sync --config-only`)"
+        );
     }
 
     let report = sync_workflow(project_root, args.no_push)?;
@@ -189,7 +206,7 @@ pub fn run_sync(args: &SyncArgs, output: OutputMode, project_root: &Path) -> Res
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        print_report(&report);
+        print_report(&report, output);
     }
 
     if !report.errors.is_empty() {
@@ -231,20 +248,39 @@ fn run_rebuild(repo_dir: &Path) -> Result<()> {
     // Prefer the installed `bn` binary; fall back to `cargo run` for dev
     // environments where the binary is not on PATH.
     let status = Command::new("bn")
-        .args(["rebuild", "--incremental"])
+        .args(["admin", "rebuild", "--incremental"])
         .current_dir(repo_dir)
+        .env("BONES_LOG", "error")
         .status();
 
     match status {
         Ok(s) if s.success() => return Ok(()),
         Ok(s) => {
-            anyhow::bail!("bn rebuild exited with code {}", s.code().unwrap_or(-1));
+            anyhow::bail!(
+                "bn admin rebuild exited with code {}",
+                s.code().unwrap_or(-1)
+            );
         }
         Err(_) => {
             // `bn` not on PATH — treat as non-fatal and warn caller
             anyhow::bail!("`bn` binary not found; skipping projection rebuild");
         }
     }
+}
+
+fn is_git_work_tree(repo_dir: &Path) -> bool {
+    let output = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(repo_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let Ok(output) = output else {
+        return false;
+    };
+
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
 }
 
 fn run_git_push(repo_dir: &Path) -> Result<()> {
@@ -264,24 +300,45 @@ fn run_git_push(repo_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn print_report(report: &SyncReport) {
-    let check = |ok: bool| if ok { "✓" } else { "✗" };
-
-    println!("bn sync");
-    println!(
-        "  {} git pull  ({} event file(s) merged)",
-        check(report.pulled),
-        report.events_merged
-    );
-    println!("  {} bn rebuild --incremental", check(report.rebuilt));
-    println!("  {} git push", check(report.pushed));
-
-    if !report.errors.is_empty() {
-        println!();
-        println!("Errors:");
-        for e in &report.errors {
-            println!("  • {e}");
+fn print_report(report: &SyncReport, output: OutputMode) {
+    match output {
+        OutputMode::Text => {
+            println!(
+                "sync pulled={} events_merged={} rebuilt={} pushed={} errors={}",
+                report.pulled,
+                report.events_merged,
+                report.rebuilt,
+                report.pushed,
+                report.errors.len()
+            );
+            for err in &report.errors {
+                println!("error={err}");
+            }
         }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            let _ = pretty_section(&mut w, "Sync Report");
+            let _ = pretty_kv(
+                &mut w,
+                "Pull",
+                format!(
+                    "{} ({} event file(s) merged)",
+                    report.pulled, report.events_merged
+                ),
+            );
+            let _ = pretty_kv(&mut w, "Rebuild", report.rebuilt.to_string());
+            let _ = pretty_kv(&mut w, "Push", report.pushed.to_string());
+
+            if !report.errors.is_empty() {
+                println!();
+                let _ = pretty_section(&mut w, "Errors");
+                for e in &report.errors {
+                    println!("- {e}");
+                }
+            }
+        }
+        OutputMode::Json => {}
     }
 }
 
@@ -466,5 +523,23 @@ mod tests {
         assert!(!r.pushed);
         assert_eq!(r.events_merged, 0);
         assert!(r.errors.is_empty());
+    }
+
+    #[test]
+    fn git_work_tree_detection() {
+        let root = tmp("git-detect");
+        assert!(!is_git_work_tree(&root));
+
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(&root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git init should run");
+        assert!(status.success());
+        assert!(is_git_work_tree(&root));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

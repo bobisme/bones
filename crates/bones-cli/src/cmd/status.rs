@@ -12,7 +12,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::agent;
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 
 /// Arguments for `bn status`.
 #[derive(Args, Debug, Default)]
@@ -61,7 +61,7 @@ pub fn run_status(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -138,7 +138,12 @@ pub fn run_status(
         },
     };
 
-    render(output, &payload, |report, w| render_status_human(report, w))
+    render_mode(
+        output,
+        &payload,
+        |report, w| render_status_text(report, w),
+        |report, w| render_status_human(report, w),
+    )
 }
 
 /// Count items that are blocked by at least one open/doing dependency.
@@ -207,6 +212,32 @@ fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Res
     )?;
 
     Ok(())
+}
+
+fn render_status_text(report: &StatusOutput, w: &mut dyn Write) -> std::io::Result<()> {
+    if let Some(ref agent) = report.agent {
+        writeln!(w, "agent  {}", agent)?;
+    } else {
+        writeln!(w, "agent  (none)")?;
+    }
+
+    for item in &report.assigned {
+        writeln!(
+            w,
+            "{}  assigned  {}  {}  {}",
+            item.id, item.state, item.urgency, item.title
+        )?;
+    }
+
+    writeln!(
+        w,
+        "project  open={}  doing={}  done={}  archived={}  blocked={}",
+        report.project.open,
+        report.project.doing,
+        report.project.done,
+        report.project.archived,
+        report.project.blocked
+    )
 }
 
 #[cfg(test)]

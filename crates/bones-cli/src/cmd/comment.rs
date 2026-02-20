@@ -1,8 +1,8 @@
-//! `bn comment` and `bn comments` — append and inspect item comment timelines.
+//! `bn bone comment` and `bn bone comments` — append and inspect item comment timelines.
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db::project;
 use bones_core::db::query;
@@ -30,7 +30,7 @@ pub struct CommentArgs {
 pub enum CommentCommand {
     #[command(
         about = "Add a comment to a work item",
-        after_help = "EXAMPLES:\n    # Add a progress note\n    bn comment add bn-abc \"Investigating timeout path\"\n\n    # Add with explicit agent\n    bn --agent alice comment add bn-abc \"Root cause found\""
+        after_help = "EXAMPLES:\n    # Add a progress note\n    bn bone comment add bn-abc \"Investigating timeout path\"\n\n    # Add with explicit agent\n    bn --agent alice bone comment add bn-abc \"Root cause found\""
     )]
     Add(CommentAddArgs),
 }
@@ -210,7 +210,7 @@ fn run_comment_add(
                 output,
                 &CliError::with_details(
                     &msg,
-                    "Run `bn rebuild` to initialize the projection",
+                    "Run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -273,9 +273,12 @@ fn run_comment_add(
         event_hash: event.event_hash,
     };
 
-    render(output, &result, |r, w| {
-        writeln!(w, "✓ {}: comment added", r.item_id)
-    })
+    render_mode(
+        output,
+        &result,
+        |r, w| writeln!(w, "ok=true  item={}  action=comment_add", r.item_id),
+        |r, w| writeln!(w, "✓ {}: comment added", r.item_id),
+    )
 }
 
 pub fn run_comments(
@@ -313,7 +316,7 @@ pub fn run_comments(
                 output,
                 &CliError::with_details(
                     &msg,
-                    "Run `bn rebuild` to initialize the projection",
+                    "Run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -340,24 +343,46 @@ pub fn run_comments(
         args.offset,
     )?);
 
-    render(output, &comments, |rows, w| {
-        if rows.is_empty() {
-            writeln!(w, "(no comments for {})", resolved_id)?;
-            return Ok(());
-        }
+    render_mode(
+        output,
+        &comments,
+        |rows, w| {
+            if rows.is_empty() {
+                writeln!(w, "item={}  comments=0", resolved_id)?;
+                return Ok(());
+            }
 
-        writeln!(w, "Comments for {}:", resolved_id)?;
-        for row in rows {
-            writeln!(
-                w,
-                "- [{}] {}: {}",
-                micros_to_rfc3339(row.ts),
-                row.agent,
-                row.body
-            )?;
-        }
-        Ok(())
-    })
+            for row in rows {
+                writeln!(
+                    w,
+                    "item={}  ts={}  agent={}  body={}",
+                    resolved_id,
+                    micros_to_rfc3339(row.ts),
+                    row.agent,
+                    row.body
+                )?;
+            }
+            Ok(())
+        },
+        |rows, w| {
+            if rows.is_empty() {
+                writeln!(w, "(no comments for {})", resolved_id)?;
+                return Ok(());
+            }
+
+            writeln!(w, "Comments for {}:", resolved_id)?;
+            for row in rows {
+                writeln!(
+                    w,
+                    "- [{}] {}: {}",
+                    micros_to_rfc3339(row.ts),
+                    row.agent,
+                    row.body
+                )?;
+            }
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]

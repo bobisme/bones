@@ -28,7 +28,7 @@ use std::io::Write;
                   `.bones/config.toml` (search.duplicate_threshold, search.related_threshold).",
     after_help = "EXAMPLES:\n    # Find duplicates of an item\n    bn dup bn-abc\n\n\
                   # Use a custom threshold\n    bn dup bn-abc --threshold 0.75\n\n\
-                  # Machine-readable output\n    bn dup bn-abc --json"
+                  # Machine-readable output\n    bn triage dup bn-abc --format json"
 )]
 pub struct DupArgs {
     /// Item ID to check for duplicates. Supports partial IDs.
@@ -118,7 +118,7 @@ pub fn run_dup(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;

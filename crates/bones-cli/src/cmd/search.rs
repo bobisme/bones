@@ -5,7 +5,7 @@
 //!
 //! Supports FTS5 query syntax: stemming, prefix search (`auth*`), boolean ops.
 
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render_error, render_mode};
 use bones_core::db::fts;
 use bones_core::db::query;
 use clap::Args;
@@ -22,7 +22,7 @@ use std::io::Write;
     after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n\
                   # Prefix search\n    bn search 'auth*'\n\n\
                   # Limit results\n    bn search timeout -n 5\n\n\
-                  # Machine-readable output\n    bn search authentication --json"
+                  # Machine-readable output\n    bn search authentication --format json"
 )]
 pub struct SearchArgs {
     /// Search query. FTS5 syntax supported (stemming, prefix `auth*`, AND/OR/NOT).
@@ -92,7 +92,7 @@ pub fn run_search(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -131,7 +131,12 @@ pub fn run_search(
         results,
     };
 
-    render(output, &search_output, |out, w| render_search_human(out, w))
+    render_mode(
+        output,
+        &search_output,
+        |out, w| render_search_text(out, w),
+        |out, w| render_search_human(out, w),
+    )
 }
 
 /// Render search results in human-readable format.
@@ -158,6 +163,22 @@ fn render_search_human(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result
         )?;
     }
 
+    Ok(())
+}
+
+fn render_search_text(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result<()> {
+    if out.results.is_empty() {
+        writeln!(w, "advice  no-results  query={}", out.query)?;
+        return Ok(());
+    }
+
+    for result in &out.results {
+        writeln!(
+            w,
+            "{}  {}  score={:.3}  {}",
+            result.id, result.state, result.score, result.title
+        )?;
+    }
     Ok(())
 }
 

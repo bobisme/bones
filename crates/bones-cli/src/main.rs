@@ -34,8 +34,12 @@ struct Cli {
     #[arg(long, global = true)]
     timing: bool,
 
-    /// Emit JSON output instead of human-readable text.
-    #[arg(long, global = true)]
+    /// Output format: pretty, text, or json.
+    #[arg(long, global = true, value_enum)]
+    format: Option<OutputMode>,
+
+    /// Hidden alias for `--format json`.
+    #[arg(long, global = true, hide = true)]
     json: bool,
 
     /// Override agent identity (skips env resolution).
@@ -54,9 +58,9 @@ impl Cli {
     /// Derive the output mode from flags, environment, and TTY defaults.
     ///
     /// Delegates to [`resolve_output_mode`] which applies the full precedence chain:
-    /// `--json` flag > `BONES_OUTPUT` env var > TTY-aware default.
+    /// `--format/--format json` > `FORMAT` env var > TTY-aware default.
     fn output_mode(&self) -> OutputMode {
-        resolve_output_mode(self.json)
+        resolve_output_mode(self.format, self.json)
     }
 
     /// Get the agent flag as an Option<&str> for resolution.
@@ -71,7 +75,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Initialize a bones project",
         long_about = "Initialize a bones project in the current directory.",
-        after_help = "EXAMPLES:\n    # Initialize a project in the current directory\n    bn init\n\n    # Emit machine-readable output\n    bn init --json"
+        after_help = "EXAMPLES:\n    # Initialize a project in the current directory\n    bn init\n\n    # Emit machine-readable output\n    bn init --format json"
     )]
     Init(cmd::init::InitArgs),
 
@@ -79,7 +83,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Create a new work item",
         long_about = "Create a new work item and append an item.create event.",
-        after_help = "EXAMPLES:\n    # Create a task\n    bn create --title \"Fix login timeout\"\n\n    # Create a goal\n    bn create --title \"Launch v2\" --kind goal\n\n    # Emit machine-readable output\n    bn create --title \"Fix login timeout\" --json"
+        after_help = "EXAMPLES:\n    # Create a task\n    bn create --title \"Fix login timeout\"\n\n    # Create a goal\n    bn create --title \"Launch v2\" --kind goal\n\n    # Emit machine-readable output\n    bn create --title \"Fix login timeout\" --format json"
     )]
     Create(cmd::create::CreateArgs),
 
@@ -87,7 +91,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "List work items",
         long_about = "List work items with optional filters and sort order.",
-        after_help = "EXAMPLES:\n    # List open items (default)\n    bn list\n\n    # Filter by state and label\n    bn list --state doing --label backend\n\n    # Emit machine-readable output\n    bn list --json"
+        after_help = "EXAMPLES:\n    # List open items (default)\n    bn list\n\n    # Filter by state and label\n    bn list --state doing --label backend\n\n    # Emit machine-readable output\n    bn list --format json"
     )]
     List(cmd::list::ListArgs),
 
@@ -95,7 +99,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Show one work item",
         long_about = "Show full details for a single work item by ID.",
-        after_help = "EXAMPLES:\n    # Show an item\n    bn show bn-abc\n\n    # Use a short prefix when unique\n    bn show abc\n\n    # Emit machine-readable output\n    bn show bn-abc --json"
+        after_help = "EXAMPLES:\n    # Show an item\n    bn show bn-abc\n\n    # Use a short prefix when unique\n    bn show abc\n\n    # Emit machine-readable output\n    bn show bn-abc --format json"
     )]
     Show(cmd::show::ShowArgs),
 
@@ -104,7 +108,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Show chronological event timeline for one item",
         long_about = "Read append-only event shards and show timeline entries for a single item ID.",
-        after_help = "EXAMPLES:\n    # Show timeline for one item\n    bn log bn-abc\n\n    # Filter to recent events\n    bn log bn-abc --since 2026-02-01T00:00:00Z\n\n    # Machine-readable output\n    bn log bn-abc --json"
+        after_help = "EXAMPLES:\n    # Show timeline for one item\n    bn bone log bn-abc\n\n    # Filter to recent events\n    bn bone log bn-abc --since 2026-02-01T00:00:00Z\n\n    # Machine-readable output\n    bn bone log bn-abc --format json"
     )]
     Log(cmd::log::LogArgs),
 
@@ -113,7 +117,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Show recent global event history",
         long_about = "Read append-only event shards and show recent events across all items.",
-        after_help = "EXAMPLES:\n    # Show recent global activity\n    bn history\n\n    # Filter by agent and limit\n    bn history --agent alice -n 20\n\n    # Machine-readable output\n    bn history --json"
+        after_help = "EXAMPLES:\n    # Show recent global activity\n    bn bone history\n\n    # Filter by agent and limit\n    bn bone history --agent alice -n 20\n\n    # Machine-readable output\n    bn bone history --format json"
     )]
     History(cmd::log::HistoryArgs),
 
@@ -122,7 +126,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Attribute a field's last write",
         long_about = "Find the most recent event that modified a field on an item.",
-        after_help = "EXAMPLES:\n    # Show who last changed the title\n    bn blame bn-abc title\n\n    # Machine-readable output\n    bn blame bn-abc title --json"
+        after_help = "EXAMPLES:\n    # Show who last changed the title\n    bn bone blame bn-abc title\n\n    # Machine-readable output\n    bn bone blame bn-abc title --format json"
     )]
     Blame(cmd::log::BlameArgs),
 
@@ -131,7 +135,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "List known agents",
         long_about = "List all known agents with current assignment counts and last-activity timestamps.",
-        after_help = "EXAMPLES:\n    # List known agents\n    bn agents\n\n    # Machine-readable output\n    bn agents --json"
+        after_help = "EXAMPLES:\n    # List known agents\n    bn bone agents\n\n    # Machine-readable output\n    bn bone agents --format json"
     )]
     Agents(cmd::agents::AgentsArgs),
 
@@ -140,7 +144,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "List items assigned to the current agent",
         long_about = "Shortcut for `bn list --assignee <resolved-agent>` using the standard agent identity resolution chain.",
-        after_help = "EXAMPLES:\n    # List my open items\n    bn mine\n\n    # Include done items\n    bn mine --state done\n\n    # Machine-readable output\n    bn mine --json"
+        after_help = "EXAMPLES:\n    # List my open items\n    bn bone mine\n\n    # Include done items\n    bn bone mine --state done\n\n    # Machine-readable output\n    bn bone mine --format json"
     )]
     Mine(cmd::mine::MineArgs),
 
@@ -150,7 +154,7 @@ enum Commands {
         long_about = "Search work items using SQLite FTS5 lexical full-text search with BM25 ranking.\n\n\
                       Column weights: title 3×, description 2×, labels 1×.\n\n\
                       Supports FTS5 syntax: stemming ('run' matches 'running'), prefix ('auth*'), boolean (AND/OR/NOT).",
-        after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n    # Prefix search\n    bn search 'auth*'\n\n    # Limit results\n    bn search timeout -n 5\n\n    # Machine-readable output\n    bn search authentication --json"
+        after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n    # Prefix search\n    bn search 'auth*'\n\n    # Limit results\n    bn search timeout -n 5\n\n    # Machine-readable output\n    bn search authentication --format json"
     )]
     Search(cmd::search::SearchArgs),
 
@@ -161,7 +165,7 @@ enum Commands {
         long_about = "Find work items that may be duplicates of the given item.\n\n\
                       Uses FTS5 lexical search with BM25 ranking. Similarity scores are \
                       normalized and classified using thresholds from .bones/config.toml.",
-        after_help = "EXAMPLES:\n    # Find duplicates of an item\n    bn dup bn-abc\n\n    # Use a custom threshold\n    bn dup bn-abc --threshold 0.75\n\n    # Machine-readable output\n    bn dup bn-abc --json"
+        after_help = "EXAMPLES:\n    # Find duplicates of an item\n    bn dup bn-abc\n\n    # Use a custom threshold\n    bn dup bn-abc --threshold 0.75\n\n    # Machine-readable output\n    bn dup bn-abc --format json"
     )]
     Dup(cmd::dup::DupArgs),
 
@@ -172,7 +176,7 @@ enum Commands {
         long_about = "Scan all open items to find likely duplicate clusters.\n\n\
                       Uses FTS5 BM25 as a first-pass filter, then fusion scoring to\
                       confirm likely duplicate links.",
-        after_help = "EXAMPLES:\n    # Scan with default threshold\n    bn dedup\n\n    # More permissive threshold\n    bn dedup --threshold 0.60\n\n    # Limit groups\n    bn dedup --limit 20\n\n    # Machine-readable output\n    bn dedup --json"
+        after_help = "EXAMPLES:\n    # Scan with default threshold\n    bn dedup\n\n    # More permissive threshold\n    bn dedup --threshold 0.60\n\n    # Limit groups\n    bn dedup --limit 20\n\n    # Machine-readable output\n    bn dedup --format json"
     )]
     Dedup(cmd::dedup::DedupArgs),
 
@@ -186,7 +190,7 @@ enum Commands {
                       Results exclude the source item and show per-layer score breakdown.",
         after_help = "EXAMPLES:\n    # Find items similar to bn-abc\n    bn similar bn-abc\n\n\
                       # Limit to top 5 results\n    bn similar bn-abc --limit 5\n\n\
-                      # Machine-readable output\n    bn similar bn-abc --json"
+                      # Machine-readable output\n    bn similar bn-abc --format json"
     )]
     Similar(cmd::similar::SimilarArgs),
 
@@ -194,7 +198,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Mark item as doing",
         long_about = "Transition a work item to the doing state.",
-        after_help = "EXAMPLES:\n    # Start work on an item\n    bn do bn-abc\n\n    # Emit machine-readable output\n    bn do bn-abc --json"
+        after_help = "EXAMPLES:\n    # Start work on an item\n    bn do bn-abc\n\n    # Emit machine-readable output\n    bn do bn-abc --format json"
     )]
     Do(cmd::do_cmd::DoArgs),
 
@@ -202,7 +206,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Mark item as done",
         long_about = "Transition a work item to the done state.",
-        after_help = "EXAMPLES:\n    # Complete an item\n    bn done bn-abc\n\n    # Emit machine-readable output\n    bn done bn-abc --json"
+        after_help = "EXAMPLES:\n    # Complete an item\n    bn done bn-abc\n\n    # Emit machine-readable output\n    bn done bn-abc --format json"
     )]
     Done(cmd::done::DoneArgs),
 
@@ -211,7 +215,7 @@ enum Commands {
         next_help_heading = "Feedback",
         about = "Record that you worked on this item (positive feedback)",
         long_about = "Record positive feedback: you acted on the triage recommendation and worked on this item.\n\nAppends a feedback entry to .bones/feedback.jsonl and updates the Thompson Sampling posterior for your agent profile.",
-        after_help = "EXAMPLES:\n    # Record that you worked on bn-abc\n    bn did bn-abc\n\n    # With explicit agent identity\n    bn --agent alice did bn-abc\n\n    # Emit machine-readable output\n    bn did bn-abc --json"
+        after_help = "EXAMPLES:\n    # Record that you worked on bn-abc\n    bn bone did bn-abc\n\n    # With explicit agent identity\n    bn --agent alice did bn-abc\n\n    # Emit machine-readable output\n    bn bone did bn-abc --format json"
     )]
     Did(cmd::feedback::DidArgs),
 
@@ -220,7 +224,7 @@ enum Commands {
         next_help_heading = "Feedback",
         about = "Record that you skipped this item (negative feedback)",
         long_about = "Record negative feedback: the triage recommendation was not followed and you skipped this item.\n\nAppends a feedback entry to .bones/feedback.jsonl and updates the Thompson Sampling posterior for your agent profile.",
-        after_help = "EXAMPLES:\n    # Record that you skipped bn-abc\n    bn skip bn-abc\n\n    # With explicit agent identity\n    bn --agent alice skip bn-abc\n\n    # Emit machine-readable output\n    bn skip bn-abc --json"
+        after_help = "EXAMPLES:\n    # Record that you skipped bn-abc\n    bn bone skip bn-abc\n\n    # With explicit agent identity\n    bn --agent alice skip bn-abc\n\n    # Emit machine-readable output\n    bn bone skip bn-abc --format json"
     )]
     Skip(cmd::feedback::SkipArgs),
 
@@ -229,7 +233,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Archive done items",
         long_about = "Archive a done work item, or bulk-archive stale done items.",
-        after_help = "EXAMPLES:\n    # Archive one done item\n    bn archive bn-abc\n\n    # Bulk-archive done items older than 30 days\n    bn archive --auto\n\n    # Use a custom staleness window\n    bn archive --auto --days 14\n\n    # Emit machine-readable output\n    bn archive bn-abc --json"
+        after_help = "EXAMPLES:\n    # Archive one done item\n    bn bone archive bn-abc\n\n    # Bulk-archive done items older than 30 days\n    bn bone archive --auto\n\n    # Use a custom staleness window\n    bn bone archive --auto --days 14\n\n    # Emit machine-readable output\n    bn bone archive bn-abc --format json"
     )]
     Archive(cmd::archive::ArchiveArgs),
 
@@ -237,7 +241,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Update fields on a work item",
         long_about = "Update one or more fields on an existing work item. Each field change emits a separate item.update event.",
-        after_help = "EXAMPLES:\n    # Update title\n    bn update bn-abc --title \"New title\"\n\n    # Update multiple fields\n    bn update bn-abc --title \"Fix\" --urgency urgent\n\n    # Emit machine-readable output\n    bn update bn-abc --title \"Fix\" --json"
+        after_help = "EXAMPLES:\n    # Update title\n    bn update bn-abc --title \"New title\"\n\n    # Update multiple fields\n    bn update bn-abc --title \"Fix\" --urgency urgent\n\n    # Emit machine-readable output\n    bn update bn-abc --title \"Fix\" --format json"
     )]
     Update(cmd::update::UpdateArgs),
 
@@ -246,7 +250,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Close a work item (alias for done)",
         long_about = "Transition a work item to the done state. Equivalent to 'bn done'.",
-        after_help = "EXAMPLES:\n    # Close an item\n    bn close bn-abc\n\n    # Close with reason\n    bn close bn-abc --reason \"Shipped in v2\"\n\n    # Emit machine-readable output\n    bn close bn-abc --json"
+        after_help = "EXAMPLES:\n    # Close an item\n    bn close bn-abc\n\n    # Close with reason\n    bn close bn-abc --reason \"Shipped in v2\"\n\n    # Emit machine-readable output\n    bn close bn-abc --format json"
     )]
     Close(cmd::close::CloseArgs),
 
@@ -255,7 +259,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Soft-delete a work item",
         long_about = "Soft-delete a work item by appending an item.delete tombstone event.",
-        after_help = "EXAMPLES:\n    # Delete an item (TTY asks for confirmation)\n    bn delete bn-abc\n\n    # Delete with reason and skip confirmation\n    bn delete bn-abc --reason \"Duplicate\" --force\n\n    # Emit machine-readable output\n    bn delete bn-abc --json"
+        after_help = "EXAMPLES:\n    # Delete an item (TTY asks for confirmation)\n    bn bone delete bn-abc\n\n    # Delete with reason and skip confirmation\n    bn bone delete bn-abc --reason \"Duplicate\" --force\n\n    # Emit machine-readable output\n    bn bone delete bn-abc --format json"
     )]
     Delete(cmd::delete::DeleteArgs),
 
@@ -264,7 +268,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Reopen a closed or archived item",
         long_about = "Transition a done or archived work item back to the open state.",
-        after_help = "EXAMPLES:\n    # Reopen an item\n    bn reopen bn-abc\n\n    # Emit machine-readable output\n    bn reopen bn-abc --json"
+        after_help = "EXAMPLES:\n    # Reopen an item\n    bn bone reopen bn-abc\n\n    # Emit machine-readable output\n    bn bone reopen bn-abc --format json"
     )]
     Reopen(cmd::reopen::ReopenArgs),
 
@@ -279,7 +283,7 @@ enum Commands {
                       - item.comment (G-Set: comments are permanent)\n\
                       - item.compact, item.snapshot (compaction)\n\
                       - item.redact (intentionally permanent)",
-        after_help = "EXAMPLES:\n    # Undo the last event on an item\n    bn undo bn-abc\n\n    # Undo the last 3 events\n    bn undo bn-abc --last 3\n\n    # Undo a specific event by hash\n    bn undo --event blake3:abcdef...\n\n    # Preview without emitting\n    bn undo bn-abc --dry-run\n\n    # Emit machine-readable output\n    bn undo bn-abc --json"
+        after_help = "EXAMPLES:\n    # Undo the last event on an item\n    bn bone undo bn-abc\n\n    # Undo the last 3 events\n    bn bone undo bn-abc --last 3\n\n    # Undo a specific event by hash\n    bn bone undo --event blake3:abcdef...\n\n    # Preview without emitting\n    bn bone undo bn-abc --dry-run\n\n    # Emit machine-readable output\n    bn bone undo bn-abc --format json"
     )]
     Undo(cmd::undo::UndoArgs),
 
@@ -288,7 +292,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "Add labels to an item",
         long_about = "Attach one or more labels to an existing work item.",
-        after_help = "EXAMPLES:\n    # Add labels\n    bn tag bn-abc bug urgent\n\n    # Emit machine-readable output\n    bn tag bn-abc bug --json"
+        after_help = "EXAMPLES:\n    # Add labels\n    bn bone tag bn-abc bug urgent\n\n    # Emit machine-readable output\n    bn bone tag bn-abc bug --format json"
     )]
     Tag(cmd::tag::TagArgs),
 
@@ -297,7 +301,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "Remove labels from an item",
         long_about = "Remove one or more labels from an existing work item.",
-        after_help = "EXAMPLES:\n    # Remove a label\n    bn untag bn-abc urgent\n\n    # Emit machine-readable output\n    bn untag bn-abc urgent --json"
+        after_help = "EXAMPLES:\n    # Remove a label\n    bn bone untag bn-abc urgent\n\n    # Emit machine-readable output\n    bn bone untag bn-abc urgent --format json"
     )]
     Untag(cmd::tag::UntagArgs),
 
@@ -306,7 +310,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "Add a comment to an item",
         long_about = "Append an immutable item.comment event to a work item.",
-        after_help = "EXAMPLES:\n    # Add a comment\n    bn comment add bn-abc \"Investigating timeout path\"\n\n    # Emit machine-readable output\n    bn comment add bn-abc \"Investigating timeout path\" --json"
+        after_help = "EXAMPLES:\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating timeout path\"\n\n    # Emit machine-readable output\n    bn bone comment add bn-abc \"Investigating timeout path\" --format json"
     )]
     Comment(cmd::comment::CommentArgs),
 
@@ -315,7 +319,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Show comment timeline for an item",
         long_about = "List comments for a work item in chronological order.",
-        after_help = "EXAMPLES:\n    # Show comments\n    bn comments bn-abc\n\n    # Emit machine-readable output\n    bn comments bn-abc --json"
+        after_help = "EXAMPLES:\n    # Show comments\n    bn bone comments bn-abc\n\n    # Emit machine-readable output\n    bn bone comments bn-abc --format json"
     )]
     Comments(cmd::comment::CommentsArgs),
 
@@ -324,7 +328,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "List all labels with usage counts",
         long_about = "List global label inventory from the projection database.",
-        after_help = "EXAMPLES:\n    # List labels\n    bn labels\n\n    # Group by namespace\n    bn labels --namespace\n\n    # Emit machine-readable output\n    bn labels --json"
+        after_help = "EXAMPLES:\n    # List labels\n    bn bone labels\n\n    # Group by namespace\n    bn bone labels --namespace\n\n    # Emit machine-readable output\n    bn bone labels --format json"
     )]
     Labels(cmd::labels::LabelsArgs),
 
@@ -332,8 +336,8 @@ enum Commands {
     #[command(
         next_help_heading = "Metadata",
         about = "Canonical single-label operations",
-        long_about = "Manage one label at a time. `bn label add/rm` are canonical aliases for `bn tag`/`bn untag`.",
-        after_help = "EXAMPLES:\n    # Add one label\n    bn label add bn-abc area:backend\n\n    # Remove one label\n    bn label rm bn-abc area:backend"
+        long_about = "Manage one label at a time. `bn bone label add/rm` are canonical aliases for `bn tag`/`bn untag`.",
+        after_help = "EXAMPLES:\n    # Add one label\n    bn bone label add bn-abc area:backend\n\n    # Remove one label\n    bn bone label rm bn-abc area:backend"
     )]
     Label(cmd::labels::LabelArgs),
 
@@ -342,7 +346,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "Assign an item to an agent",
         long_about = "Assign an item to an agent by emitting an item.assign event.",
-        after_help = "EXAMPLES:\n    # Assign item to alice\n    bn assign bn-abc alice\n\n    # Emit machine-readable output\n    bn assign bn-abc alice --json"
+        after_help = "EXAMPLES:\n    # Assign item to alice\n    bn bone assign bn-abc alice\n\n    # Emit machine-readable output\n    bn bone assign bn-abc alice --format json"
     )]
     Assign(cmd::assign::AssignArgs),
 
@@ -351,7 +355,7 @@ enum Commands {
         next_help_heading = "Metadata",
         about = "Unassign the current agent from an item",
         long_about = "Remove the current resolved agent from the item's assignee OR-Set.",
-        after_help = "EXAMPLES:\n    # Unassign yourself from an item\n    bn --agent alice unassign bn-abc\n\n    # Emit machine-readable output\n    bn --agent alice unassign bn-abc --json"
+        after_help = "EXAMPLES:\n    # Unassign yourself from an item\n    bn --agent alice bone unassign bn-abc\n\n    # Emit machine-readable output\n    bn --agent alice bone unassign bn-abc --format json"
     )]
     Unassign(cmd::assign::UnassignArgs),
 
@@ -360,7 +364,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Move item under a parent",
         long_about = "Change a work item's parent to reorganize hierarchy.",
-        after_help = "EXAMPLES:\n    # Move under a goal\n    bn move bn-task --parent bn-goal\n\n    # Emit machine-readable output\n    bn move bn-task --parent bn-goal --json"
+        after_help = "EXAMPLES:\n    # Move under a goal\n    bn bone move bn-task --parent bn-goal\n\n    # Emit machine-readable output\n    bn bone move bn-task --parent bn-goal --format json"
     )]
     Move(cmd::move_cmd::MoveArgs),
 
@@ -368,8 +372,8 @@ enum Commands {
     #[command(
         next_help_heading = "Dependencies",
         about = "Manage dependency links",
-        long_about = "Add or remove dependency links between work items.\n\nUse 'bn dep add <from> --blocks <to>' to establish a blocking dependency.\nUse 'bn dep add <from> --relates <to>' for informational links.\nUse 'bn dep rm <from> <to>' to remove a link.",
-        after_help = "EXAMPLES:\n    # Mark A as a blocker of B\n    bn dep add bn-abc --blocks bn-def\n\n    # Remove the dependency\n    bn dep rm bn-abc bn-def\n\n    # Emit machine-readable output\n    bn dep add bn-abc --blocks bn-def --json"
+        long_about = "Add or remove dependency links between work items.\n\nUse 'bn triage dep add <from> --blocks <to>' to establish a blocking dependency.\nUse 'bn triage dep add <from> --relates <to>' for informational links.\nUse 'bn triage dep rm <from> <to>' to remove a link.",
+        after_help = "EXAMPLES:\n    # Mark A as a blocker of B\n    bn triage dep add bn-abc --blocks bn-def\n\n    # Remove the dependency\n    bn triage dep rm bn-abc bn-def\n\n    # Emit machine-readable output\n    bn triage dep add bn-abc --blocks bn-def --format json"
     )]
     Dep(cmd::dep::DepArgs),
 
@@ -378,7 +382,7 @@ enum Commands {
         next_help_heading = "Dependencies",
         about = "Visualize the dependency graph",
         long_about = "Show the dependency graph for an item or the whole project.\n\nWith an item ID: show upstream (blocked-by) and downstream (blocks) dependencies.\nWithout an ID: show project-level statistics and structural analysis.",
-        after_help = "EXAMPLES:\n    # Show full graph for an item\n    bn graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn graph bn-abc --down\n\n    # Project summary\n    bn graph\n\n    # Emit machine-readable output\n    bn graph bn-abc --json"
+        after_help = "EXAMPLES:\n    # Show full graph for an item\n    bn triage graph bn-abc\n\n    # Only show what bn-abc blocks\n    bn triage graph bn-abc --down\n\n    # Project summary\n    bn triage graph\n\n    # Emit machine-readable output\n    bn triage graph bn-abc --format json"
     )]
     Graph(cmd::graph::GraphArgs),
 
@@ -386,7 +390,7 @@ enum Commands {
         next_help_heading = "Triage",
         about = "Show the highest-priority unblocked item",
         long_about = "Compute composite priority scores and return the best unblocked candidate.\n\nUse '--agent N' to request N parallel assignments (multi-agent mode).",
-        after_help = "EXAMPLES:\n    # Single best next item\n    bn next\n\n    # Multi-agent assignment (N slots)\n    bn next --agent 3\n\n    # Emit machine-readable output\n    bn next --json"
+        after_help = "EXAMPLES:\n    # Single best next item\n    bn next\n\n    # Multi-agent assignment (N slots)\n    bn next --agent 3\n\n    # Emit machine-readable output\n    bn next --format json"
     )]
     Next(cmd::next::NextArgs),
 
@@ -402,7 +406,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Quick agent/human orientation",
         long_about = "Show agent identity, assigned items, and project-level counts.\n\nDesigned as a fast \"where am I?\" command after crash/restart.",
-        after_help = "EXAMPLES:\n    # Human-readable status\n    bn status\n\n    # With explicit agent\n    bn --agent alice status\n\n    # Machine-readable output\n    bn status --json"
+        after_help = "EXAMPLES:\n    # Human-readable status\n    bn status\n\n    # With explicit agent\n    bn --agent alice status\n\n    # Machine-readable output\n    bn status --format json"
     )]
     Status(cmd::status::StatusArgs),
 
@@ -411,7 +415,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "Show goal completion progress",
         long_about = "Show a focused goal-progress view with child tree and progress bars.\n\nDistinct from `bn show` — this is focused on completion status of a goal and its children.",
-        after_help = "EXAMPLES:\n    # Show progress for a goal\n    bn progress bn-p1\n\n    # Machine-readable output\n    bn progress bn-p1 --json"
+        after_help = "EXAMPLES:\n    # Show progress for a goal\n    bn triage progress bn-p1\n\n    # Machine-readable output\n    bn triage progress bn-p1 --format json"
     )]
     Progress(cmd::progress::ProgressArgs),
 
@@ -420,7 +424,7 @@ enum Commands {
         next_help_heading = "Triage",
         about = "Compute parallel execution layers",
         long_about = "Compute topological dependency layers where each layer can be worked in parallel.",
-        after_help = "EXAMPLES:\n    # Project-wide plan\n    bn plan\n\n    # Scope to one goal's children\n    bn plan bn-goal\n\n    # Emit machine-readable output\n    bn plan --json"
+        after_help = "EXAMPLES:\n    # Project-wide plan\n    bn triage plan\n\n    # Scope to one goal's children\n    bn triage plan bn-goal\n\n    # Emit machine-readable output\n    bn triage plan --format json"
     )]
     Plan(cmd::plan::PlanArgs),
 
@@ -429,7 +433,7 @@ enum Commands {
         next_help_heading = "Triage",
         about = "Show project health metrics",
         long_about = "Summarize dependency graph health metrics: density, SCC count, critical path length, and blocker count.",
-        after_help = "EXAMPLES:\n    # Human-readable dashboard\n    bn health\n\n    # Emit machine-readable output\n    bn health --json"
+        after_help = "EXAMPLES:\n    # Human-readable dashboard\n    bn triage health\n\n    # Emit machine-readable output\n    bn triage health --format json"
     )]
     Health(cmd::health::HealthArgs),
 
@@ -438,7 +442,7 @@ enum Commands {
         next_help_heading = "Triage",
         about = "List dependency cycles",
         long_about = "List strongly connected components that represent dependency cycles.",
-        after_help = "EXAMPLES:\n    # Human-readable cycle groups\n    bn cycles\n\n    # Emit machine-readable output\n    bn cycles --json"
+        after_help = "EXAMPLES:\n    # Human-readable cycle groups\n    bn triage cycles\n\n    # Emit machine-readable output\n    bn triage cycles --format json"
     )]
     Cycles(cmd::cycles::CyclesArgs),
 
@@ -447,7 +451,7 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Generate shell completion scripts",
         long_about = "Generate shell completion scripts for supported shells.",
-        after_help = "EXAMPLES:\n    # Generate bash completions\n    bn completions bash\n\n    # Generate zsh completions\n    bn completions zsh"
+        after_help = "EXAMPLES:\n    # Generate bash completions\n    bn admin completions bash\n\n    # Generate zsh completions\n    bn admin completions zsh"
     )]
     Completions(cmd::completions::CompletionsArgs),
 
@@ -466,7 +470,7 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Verify event and manifest integrity",
         long_about = "Verify shard manifests and event integrity checks for this project.",
-        after_help = "EXAMPLES:\n    # Verify all shard files\n    bn verify\n\n    # Verify only staged files\n    bn verify --staged\n\n    # Emit machine-readable output\n    bn verify --json"
+        after_help = "EXAMPLES:\n    # Verify all shard files\n    bn admin verify\n\n    # Verify only staged files\n    bn admin verify --staged\n\n    # Emit machine-readable output\n    bn admin verify --format json"
     )]
     Verify {
         /// Validate only staged files.
@@ -486,7 +490,7 @@ enum Commands {
         long_about = "Verify that all item.redact events have been fully applied.\n\n\
                       Checks projection rows, FTS5 index, and comment bodies for residual\n\
                       un-redacted content.",
-        after_help = "EXAMPLES:\n    # Verify all redactions\n    bn redact-verify\n\n    # Verify one item\n    bn redact-verify bn-abc\n\n    # Machine-readable output\n    bn redact-verify --json"
+        after_help = "EXAMPLES:\n    # Verify all redactions\n    bn admin redact-verify\n\n    # Verify one item\n    bn admin redact-verify bn-abc\n\n    # Machine-readable output\n    bn admin redact-verify --format json"
     )]
     RedactVerify(cmd::redact_verify::RedactVerifyArgs),
 
@@ -513,9 +517,9 @@ enum Commands {
         about = "Run deterministic simulation campaigns",
         long_about = "Deterministic simulation campaign runner for verifying CRDT convergence\n\
                       invariants across many seeds with fault injection.",
-        after_help = "EXAMPLES:\n    # Run 100-seed campaign\n    bn sim run --seeds 100\n\n\
-                      # Replay a failing seed\n    bn sim replay --seed 42\n\n\
-                      # Custom parameters with JSON output\n    bn sim run --seeds 200 --agents 8 --faults 0.2 --json"
+        after_help = "EXAMPLES:\n    # Run 100-seed campaign\n    bn dev sim run --seeds 100\n\n\
+                      # Replay a failing seed\n    bn dev sim replay --seed 42\n\n\
+                      # Custom parameters with JSON output\n    bn dev sim run --seeds 200 --agents 8 --faults 0.2 --format json"
     )]
     Sim(cmd::sim::SimArgs),
 
@@ -526,7 +530,7 @@ enum Commands {
         long_about = "Replace event sequences for old done/archived items with a single\n\
                       item.snapshot event (lattice-based compaction). Compaction is\n\
                       coordination-free: each replica can compact independently and converge.",
-        after_help = "EXAMPLES:\n    # Compact items done for 30+ days (default)\n    bn compact\n\n    # Custom age threshold\n    bn compact --min-age-days 60\n\n    # Dry run — see what would be compacted\n    bn compact --dry-run\n\n    # Machine-readable output\n    bn compact --json"
+        after_help = "EXAMPLES:\n    # Compact items done for 30+ days (default)\n    bn admin compact\n\n    # Custom age threshold\n    bn admin compact --min-age-days 60\n\n    # Dry run — see what would be compacted\n    bn admin compact --dry-run\n\n    # Machine-readable output\n    bn admin compact --format json"
     )]
     Compact(cmd::compact::CompactArgs),
 
@@ -535,9 +539,9 @@ enum Commands {
         next_help_heading = "Reporting",
         about = "Show project-level statistics and reporting dashboard",
         long_about = "Query the projection database for aggregate counts, velocity metrics, and aging stats.\n\n\
-                      Requires a rebuilt projection (`bn rebuild`). Reports items by state, kind, urgency,\n\
+                      Requires a rebuilt projection (`bn admin rebuild`). Reports items by state, kind, urgency,\n\
                       and events by type and agent.",
-        after_help = "EXAMPLES:\n    # Show human-readable stats\n    bn stats\n\n    # Machine-readable output\n    bn stats --json"
+        after_help = "EXAMPLES:\n    # Show human-readable stats\n    bn triage stats\n\n    # Machine-readable output\n    bn triage stats --format json"
     )]
     Stats(cmd::stats::StatsArgs),
 
@@ -546,7 +550,7 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Run repository diagnostics",
         long_about = "Summarize event-log health, integrity anomalies, and projection drift indicators.",
-        after_help = "EXAMPLES:\n    # Human-readable diagnostics\n    bn diagnose\n\n    # Machine-readable diagnostics\n    bn diagnose --json"
+        after_help = "EXAMPLES:\n    # Human-readable diagnostics\n    bn admin diagnose\n\n    # Machine-readable diagnostics\n    bn admin diagnose --format json"
     )]
     Diagnose,
 
@@ -555,15 +559,15 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Inspect and update configuration",
         long_about = "Show resolved config values, inspect raw scope files, and update supported keys in project or user scope.",
-        after_help = "EXAMPLES:\n    # Show resolved config\n    bn config show\n\n    # Show raw project config\n    bn config show --project\n\n    # Set project threshold\n    bn config set search.duplicate_threshold 0.85\n\n    # Set user output preference\n    bn config set --scope user user.output json"
+        after_help = "EXAMPLES:\n    # Show resolved config\n    bn admin config show\n\n    # Show raw project config\n    bn admin config show --project\n\n    # Set project threshold\n    bn admin config set search.duplicate_threshold 0.85\n\n    # Set user output preference\n    bn admin config set --scope user user.output json"
     )]
     Config(cmd::config::ConfigArgs),
 
     #[command(
         next_help_heading = "Sync",
         about = "Synchronize local and remote state",
-        long_about = "Run the git-oriented sync workflow for a bones project.\n\nThis command:\n1) ensures git config entries for bones files are present\n2) runs `git pull --rebase`\n3) runs `bn rebuild --incremental`\n4) runs `git push` (unless `--no-push`)\n\nThis is a repository workflow wrapper, not a direct CRDT transport protocol command.",
-        after_help = "QUICK REFERENCE:\n    bn sync                 # config + pull + rebuild + push\n    bn sync --no-push       # stop before push\n    bn sync --config-only   # only update .gitattributes/.gitignore\n\nEXAMPLES:\n    # Full sync workflow\n    bn sync\n\n    # Local-only sync (no push)\n    bn sync --no-push\n\n    # Machine-readable output\n    bn sync --json"
+        long_about = "Run the git-oriented sync workflow for a bones project.\n\nThis command:\n1) ensures git config entries for bones files are present\n2) runs `git pull --rebase`\n3) runs `bn admin rebuild --incremental`\n4) runs `git push` (unless `--no-push`)\n\nThis is a repository workflow wrapper, not a direct CRDT transport protocol command.",
+        after_help = "QUICK REFERENCE:\n    bn sync                 # config + pull + rebuild + push\n    bn sync --no-push       # stop before push\n    bn sync --config-only   # only update .gitattributes/.gitignore\n\nEXAMPLES:\n    # Full sync workflow\n    bn sync\n\n    # Local-only sync (no push)\n    bn sync --no-push\n\n    # Machine-readable output\n    bn sync --format json"
     )]
     Sync(cmd::sync::SyncArgs),
 
@@ -624,7 +628,7 @@ enum Commands {
         next_help_heading = "Interoperability",
         about = "Import external tracker data",
         long_about = "Import tracker events from GitHub repos or generic JSONL event streams.",
-        after_help = "EXAMPLES:\n    # Import from GitHub issues\n    bn import --github owner/repo\n\n    # Import from a JSONL stream\n    bn import --jsonl --input events.jsonl\n\n    # Emit machine-readable output\n    bn import --github owner/repo --json"
+        after_help = "EXAMPLES:\n    # Import from GitHub issues\n    bn data import --github owner/repo\n\n    # Import from a JSONL stream\n    bn data import --jsonl --input events.jsonl\n\n    # Emit machine-readable output\n    bn data import --github owner/repo --format json"
     )]
     Import(cmd::import::ImportArgs),
 
@@ -633,7 +637,7 @@ enum Commands {
         next_help_heading = "Interoperability",
         about = "Export events in canonical JSONL format",
         long_about = "Export `.bones/events` shards to JSONL records preserving shard order for replay.",
-        after_help = "EXAMPLES:\n    # Export to stdout\n    bn export\n\n    # Export to file\n    bn export --output events.jsonl"
+        after_help = "EXAMPLES:\n    # Export to stdout\n    bn data export\n\n    # Export to file\n    bn data export --output events.jsonl"
     )]
     Export(cmd::export::ExportArgs),
 
@@ -642,7 +646,7 @@ enum Commands {
         next_help_heading = "Sync",
         about = "Migrate from a beads project",
         long_about = "Migrate an existing beads project database into bones events.",
-        after_help = "EXAMPLES:\n    # Migrate from a beads SQLite database\n    bn migrate-from-beads --source beads.db\n\n    # Emit machine-readable output\n    bn migrate-from-beads --source beads.db --json"
+        after_help = "EXAMPLES:\n    # Migrate from a beads SQLite database\n    bn data migrate-from-beads --source beads.db\n\n    # Emit machine-readable output\n    bn data migrate-from-beads --source beads.db --format json"
     )]
     MigrateFromBeads(cmd::migrate::MigrateArgs),
 
@@ -660,7 +664,7 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Rebuild the projection",
         long_about = "Rebuild the local projection database from append-only event shards.",
-        after_help = "EXAMPLES:\n    # Full rebuild\n    bn rebuild\n\n    # Incremental rebuild\n    bn rebuild --incremental\n\n    # Emit machine-readable output\n    bn rebuild --json"
+        after_help = "EXAMPLES:\n    # Full rebuild\n    bn admin rebuild\n\n    # Incremental rebuild\n    bn admin rebuild --incremental\n\n    # Emit machine-readable output\n    bn admin rebuild --format json"
     )]
     Rebuild {
         /// Rebuild incrementally from the last projection cursor.
@@ -1002,9 +1006,9 @@ fn main() -> anyhow::Result<()> {
     let output = cli.output_mode();
 
     let command_result = match cli.command {
-        Commands::Init(args) => {
-            timing::timed("cmd.init", || cmd::init::run_init(&args, &project_root))
-        }
+        Commands::Init(args) => timing::timed("cmd.init", || {
+            cmd::init::run_init(&args, output, &project_root)
+        }),
         Commands::Create(ref args) => timing::timed("cmd.create", || {
             cmd::create::run_create(args, cli.agent_flag(), output, &project_root)
         }),
@@ -1242,19 +1246,21 @@ fn main() -> anyhow::Result<()> {
             }
             AdminCommand::Compact(args) => cmd::compact::run_compact(args, output, &project_root),
             AdminCommand::Diagnose => cmd::diagnose::run_diagnose(output, &project_root),
-            AdminCommand::Config(args) => cmd::config::run_config(args, &project_root, cli.json),
+            AdminCommand::Config(args) => cmd::config::run_config(args, &project_root, output),
             AdminCommand::MigrateFormat(args) => {
-                cmd::migrate_format::run_migrate_format(args, &project_root)
+                cmd::migrate_format::run_migrate_format(args, output, &project_root)
             }
             AdminCommand::Rebuild { incremental } => {
-                cmd::rebuild::run_rebuild(&project_root, *incremental)
+                cmd::rebuild::run_rebuild(&project_root, *incremental, output)
             }
         }),
 
         Commands::Data { ref command } => timing::timed("cmd.data", || match command {
-            DataCommand::Import(args) => cmd::import::run_import(args, &project_root),
+            DataCommand::Import(args) => cmd::import::run_import(args, output, &project_root),
             DataCommand::Export(args) => cmd::export::run_export(args, &project_root),
-            DataCommand::MigrateFromBeads(args) => cmd::migrate::run_migrate(args, &project_root),
+            DataCommand::MigrateFromBeads(args) => {
+                cmd::migrate::run_migrate(args, output, &project_root)
+            }
         }),
 
         Commands::Dev { ref command } => timing::timed("cmd.dev", || match command {
@@ -1290,16 +1296,16 @@ fn main() -> anyhow::Result<()> {
             }
         }),
         Commands::Import(args) => timing::timed("cmd.import", || {
-            cmd::import::run_import(&args, &project_root)
+            cmd::import::run_import(&args, output, &project_root)
         }),
         Commands::Export(args) => timing::timed("cmd.export", || {
             cmd::export::run_export(&args, &project_root)
         }),
         Commands::MigrateFromBeads(args) => timing::timed("cmd.migrate_from_beads", || {
-            cmd::migrate::run_migrate(&args, &project_root)
+            cmd::migrate::run_migrate(&args, output, &project_root)
         }),
         Commands::MigrateFormat(args) => timing::timed("cmd.migrate_format", || {
-            cmd::migrate_format::run_migrate_format(&args, &project_root)
+            cmd::migrate_format::run_migrate_format(&args, output, &project_root)
         }),
         Commands::Hooks {
             command: HookCommand::Install,
@@ -1329,10 +1335,10 @@ fn main() -> anyhow::Result<()> {
             cmd::diagnose::run_diagnose(output, &project_root)
         }),
         Commands::Config(ref args) => timing::timed("cmd.config", || {
-            cmd::config::run_config(args, &project_root, cli.json)
+            cmd::config::run_config(args, &project_root, output)
         }),
         Commands::Rebuild { incremental } => timing::timed("cmd.rebuild", || {
-            cmd::rebuild::run_rebuild(&project_root, incremental)
+            cmd::rebuild::run_rebuild(&project_root, incremental, output)
         }),
         Commands::MergeTool {
             setup,
@@ -1416,6 +1422,21 @@ mod tests {
     }
 
     #[test]
+    fn format_flag_sets_output_mode() {
+        let cli = Cli::parse_from(["bn", "--format", "text", "list"]);
+        assert_eq!(cli.format, Some(OutputMode::Text));
+        assert!(cli.output_mode().is_text());
+    }
+
+    #[test]
+    fn format_json_sets_output_mode() {
+        let cli = Cli::parse_from(["bn", "--format", "json", "list"]);
+        assert_eq!(cli.format, Some(OutputMode::Json));
+        assert!(!cli.json);
+        assert!(cli.output_mode().is_json());
+    }
+
+    #[test]
     fn json_flag_after_subcommand() {
         let cli = Cli::parse_from(["bn", "list", "--json"]);
         assert!(cli.json);
@@ -1423,11 +1444,45 @@ mod tests {
     }
 
     #[test]
-    fn default_output_is_human() {
+    fn default_output_uses_auto_detection() {
         let cli = Cli::parse_from(["bn", "list"]);
         assert!(!cli.json);
-        // In test (non-TTY), resolve_output_mode defaults to JSON.
-        // The key assertion is that --json flag is not set.
+        // In test (non-TTY), resolve_output_mode defaults to Text.
+        assert!(cli.output_mode().is_text());
+    }
+
+    #[test]
+    fn format_flag_supported_on_admin_and_data_commands() {
+        let cli = Cli::parse_from(["bn", "init", "--format", "json"]);
+        assert!(cli.output_mode().is_json());
+
+        let cli = Cli::parse_from(["bn", "admin", "rebuild", "--format", "json"]);
+        assert!(cli.output_mode().is_json());
+
+        let cli = Cli::parse_from([
+            "bn",
+            "data",
+            "import",
+            "--github",
+            "owner/repo",
+            "--format",
+            "json",
+        ]);
+        assert!(cli.output_mode().is_json());
+
+        let cli = Cli::parse_from([
+            "bn",
+            "data",
+            "migrate-from-beads",
+            "--beads-jsonl",
+            "beads.jsonl",
+            "--format",
+            "json",
+        ]);
+        assert!(cli.output_mode().is_json());
+
+        let cli = Cli::parse_from(["bn", "admin", "config", "show", "--format", "json"]);
+        assert!(cli.output_mode().is_json());
     }
 
     #[test]

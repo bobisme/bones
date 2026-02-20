@@ -6,6 +6,8 @@ use clap::Args;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::output::{OutputMode, pretty_kv, pretty_section};
+
 #[derive(Args, Debug)]
 pub struct MigrateFormatArgs {
     /// Overwrite existing .events.bak files.
@@ -13,14 +15,31 @@ pub struct MigrateFormatArgs {
     pub force_backup: bool,
 }
 
-pub fn run_migrate_format(args: &MigrateFormatArgs, project_root: &Path) -> Result<()> {
+pub fn run_migrate_format(
+    args: &MigrateFormatArgs,
+    output: OutputMode,
+    project_root: &Path,
+) -> Result<()> {
     let shard_manager = ShardManager::new(project_root.join(".bones"));
     let shards = shard_manager
         .list_shards()
         .context("failed to list event shards")?;
 
     if shards.is_empty() {
-        println!("No event shards found.");
+        match output {
+            OutputMode::Json => {
+                println!(
+                    "{}",
+                    serde_json::json!({"rewritten": 0, "version": CURRENT_VERSION})
+                );
+            }
+            OutputMode::Text => {
+                println!("migrate_format rewritten=0 version={CURRENT_VERSION}");
+            }
+            OutputMode::Pretty => {
+                println!("No event shards found.");
+            }
+        }
         return Ok(());
     }
 
@@ -91,10 +110,30 @@ pub fn run_migrate_format(args: &MigrateFormatArgs, project_root: &Path) -> Resu
         rewritten += 1;
     }
 
-    println!(
-        "Migrated {} shard(s) to event format v{}.",
-        rewritten, CURRENT_VERSION
-    );
+    match output {
+        OutputMode::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "rewritten": rewritten,
+                    "version": CURRENT_VERSION,
+                }))?
+            );
+        }
+        OutputMode::Text => {
+            println!(
+                "migrate_format rewritten={} version={}",
+                rewritten, CURRENT_VERSION
+            );
+        }
+        OutputMode::Pretty => {
+            let stdout = std::io::stdout();
+            let mut w = stdout.lock();
+            pretty_section(&mut w, "Format Migration")?;
+            pretty_kv(&mut w, "Rewritten shards", rewritten.to_string())?;
+            pretty_kv(&mut w, "Target version", CURRENT_VERSION.to_string())?;
+        }
+    }
 
     Ok(())
 }

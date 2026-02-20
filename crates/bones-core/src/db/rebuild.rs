@@ -1,6 +1,6 @@
 //! Full projection rebuild from the event log.
 //!
-//! `bn rebuild` drops and recreates the entire SQLite DB from the canonical
+//! `bn admin rebuild` drops and recreates the entire SQLite DB from the canonical
 //! event log, proving the projection is disposable and reproducible.
 
 use std::path::Path;

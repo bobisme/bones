@@ -153,7 +153,10 @@ fn verify_succeeds_with_missing_projection_db() {
         fs::remove_file(&db).unwrap();
     }
 
-    bn_cmd(dir.path()).args(["verify"]).assert().success();
+    bn_cmd(dir.path())
+        .args(["admin", "verify"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -171,5 +174,7 @@ fn history_fails_on_corrupted_shard_with_actionable_error() {
         .args(["history"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("bn verify").or(predicate::str::contains("corruption")));
+        .stderr(
+            predicate::str::contains("bn admin verify").or(predicate::str::contains("corruption")),
+        );
 }

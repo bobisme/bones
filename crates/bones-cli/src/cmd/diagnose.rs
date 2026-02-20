@@ -528,14 +528,14 @@ fn remediation_hints(integrity: &IntegrityReport, projection: &ProjectionReport)
         || integrity.hash_anomalies.invalid_parent_hash_lines > 0
     {
         hints.push(
-            "Run `bn verify` to pinpoint malformed or tampered event-log lines before syncing."
+            "Run `bn admin verify` to pinpoint malformed or tampered event-log lines before syncing."
                 .to_string(),
         );
     }
 
     if !projection.drift_indicators.is_empty() || projection.status != "ok" {
         hints.push(
-            "Run `bn rebuild` to regenerate the projection database from append-only events."
+            "Run `bn admin rebuild` to regenerate the projection database from append-only events."
                 .to_string(),
         );
     }

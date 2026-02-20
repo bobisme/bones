@@ -7,7 +7,7 @@ use serde::Serialize;
 use bones_core::db::query;
 
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 
 /// Arguments for `bn next`.
 #[derive(Args, Debug, Default)]
@@ -66,7 +66,7 @@ pub fn run_next(
                 output,
                 &CliError::with_details(
                     "projection database not found",
-                    "run `bn rebuild` to initialize the projection",
+                    "run `bn admin rebuild` to initialize the projection",
                     "projection_missing",
                 ),
             )?;
@@ -95,9 +95,12 @@ pub fn run_next(
 
         let (min_score, max_score) = score_bounds(&snapshot.unblocked_ranked);
 
-        return render(output, &next, |item, w| {
-            render_next_card(item, w, min_score, max_score)
-        });
+        return render_mode(
+            output,
+            &next,
+            |item, w| render_next_text(item, w),
+            |item, w| render_next_card(item, w, min_score, max_score),
+        );
     }
 
     let assignments: Vec<NextAssignment> = snapshot
@@ -115,7 +118,12 @@ pub fn run_next(
         .collect();
 
     let payload = NextAssignments { assignments };
-    render(output, &payload, render_assignments_human)
+    render_mode(
+        output,
+        &payload,
+        |assignments, w| render_assignments_text(assignments, w),
+        |assignments, w| render_assignments_human(assignments, w),
+    )
 }
 
 fn parse_agent_slots(agent_flag: Option<&str>) -> Result<usize, CliError> {
@@ -209,6 +217,35 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
             assignment.agent_slot, assignment.id, assignment.score, assignment.title
         )?;
         writeln!(w, "      why: {}", assignment.explanation)?;
+    }
+
+    Ok(())
+}
+
+fn render_next_text(item: &NextPick, w: &mut dyn Write) -> std::io::Result<()> {
+    writeln!(
+        w,
+        "{}  next  score={:.4}  {}  why={}",
+        item.id, item.score, item.title, item.explanation
+    )
+}
+
+fn render_assignments_text(payload: &NextAssignments, w: &mut dyn Write) -> std::io::Result<()> {
+    if payload.assignments.is_empty() {
+        writeln!(w, "advice  no-assignments")?;
+        return Ok(());
+    }
+
+    for assignment in &payload.assignments {
+        writeln!(
+            w,
+            "slot={}  {}  score={:.4}  {}  why={}",
+            assignment.agent_slot,
+            assignment.id,
+            assignment.score,
+            assignment.title,
+            assignment.explanation
+        )?;
     }
 
     Ok(())

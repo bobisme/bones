@@ -3,7 +3,7 @@
 //! By default, shows all open items (state = "open"). Filters can be
 //! combined. Supports both human-readable table and JSON output.
 
-use crate::output::{CliError, OutputMode, render, render_error};
+use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 use crate::validate;
 use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};
 use bones_core::model::item::Urgency;
@@ -160,9 +160,17 @@ pub fn run_list(
             }
 
             let items: Vec<ListItem> = Vec::new();
-            return render(output, &items, |_, w| {
-                writeln!(w, "(projection not found — run `bn rebuild` to initialize)")
-            });
+            return render_mode(
+                output,
+                &items,
+                |_, w| writeln!(w, "advice  projection-missing  run `bn admin rebuild`"),
+                |_, w| {
+                    writeln!(
+                        w,
+                        "(projection not found — run `bn admin rebuild` to initialize)"
+                    )
+                },
+            );
         }
     };
 
@@ -279,12 +287,15 @@ pub fn run_list(
     let response = build_list_response(&conn, args, sort, since_us, until_us)?;
 
     if output.is_json() {
-        render(output, &response, |_, _| Ok(()))
-    } else {
-        render(output, &response.items, |items, w| {
-            render_list_human(items, w)
-        })
+        return render(output, &response, |_, _| Ok(()));
     }
+
+    render_mode(
+        output,
+        &response.items,
+        |items, w| render_list_text(items, w),
+        |items, w| render_list_human(items, w),
+    )
 }
 
 fn build_list_response(
@@ -503,6 +514,27 @@ fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<(
         )?;
     }
 
+    Ok(())
+}
+
+fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()> {
+    if items.is_empty() {
+        writeln!(w, "advice  no-items  bn create --title \"...\"")?;
+        return Ok(());
+    }
+
+    for item in items {
+        let labels = if item.labels.is_empty() {
+            String::new()
+        } else {
+            format!("  labels={}", item.labels.join(","))
+        };
+        writeln!(
+            w,
+            "{}  {}  {}  {}  {}{}",
+            item.id, item.kind, item.state, item.urgency, item.title, labels
+        )?;
+    }
     Ok(())
 }
 
