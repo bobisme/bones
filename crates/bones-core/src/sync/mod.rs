@@ -4,3 +4,4 @@
 //! files produced by concurrent agents or git branches.
 
 pub mod merge;
+pub mod prolly;
