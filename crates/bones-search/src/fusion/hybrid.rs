@@ -15,7 +15,7 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
-use tracing::warn;
+use tracing::{debug, warn};
 
 const MAX_STRUCTURAL_SEEDS: usize = 16;
 const MAX_STRUCTURAL_CANDIDATES: usize = 128;
@@ -74,19 +74,25 @@ fn hybrid_search_inner(
     let lexical_ranked: Vec<&str> = lexical_ranked_owned.iter().map(String::as_str).collect();
 
     let semantic_ranked_owned = if let Some(model) = model {
-        match model
-            .embed(query)
-            .and_then(|embedding| knn_search(db, &embedding, limit))
-        {
-            Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
-            Err(e) => {
-                warn!("semantic layer unavailable, falling back to lexical-only fusion: {e}");
-                Vec::new()
+        if !semantic_layer_ready(db) {
+            debug!("semantic layer skipped: sqlite-vec runtime or vec tables unavailable");
+            Vec::new()
+        } else {
+            match model
+                .embed(query)
+                .and_then(|embedding| knn_search(db, &embedding, limit))
+            {
+                Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
+                Err(e) => {
+                    warn!("semantic layer unavailable, falling back to lexical-only fusion: {e}");
+                    Vec::new()
+                }
             }
         }
     } else {
         Vec::new()
     };
+
     let semantic_ranked: Vec<&str> = semantic_ranked_owned.iter().map(String::as_str).collect();
 
     let owned_graph = if structural_graph.is_none() && !lexical_ranked_owned.is_empty() {
@@ -241,6 +247,35 @@ fn derive_structural_ranked(
         .take(limit)
         .map(|(item_id, _)| item_id)
         .collect()
+}
+
+fn semantic_layer_ready(db: &Connection) -> bool {
+    let vectors_loaded = db
+        .query_row("SELECT vec_version()", [], |row| row.get::<_, String>(0))
+        .is_ok();
+    if !vectors_loaded {
+        return false;
+    }
+
+    let has_vec_items = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vec_items'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .unwrap_or(false);
+    if !has_vec_items {
+        return false;
+    }
+
+    db.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vec_item_map'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+    .unwrap_or(false)
 }
 
 fn build_dependency_graph(db: &Connection) -> Result<DiGraph<String, ()>> {
@@ -496,5 +531,11 @@ mod tests {
             results.iter().any(|r| r.structural_score > 0.0),
             "expected at least one non-zero structural score"
         );
+    }
+
+    #[test]
+    fn semantic_layer_ready_is_false_without_vec_runtime() {
+        let conn = setup_db();
+        assert!(!semantic_layer_ready(&conn));
     }
 }
