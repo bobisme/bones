@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -94,10 +94,18 @@ impl Default for DoneConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoConfig {
+    pub name: String,
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserConfig {
     #[serde(default)]
     pub output: Option<String>,
+    #[serde(default)]
+    pub repos: Vec<RepoConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +143,27 @@ pub fn load_user_config() -> Result<UserConfig> {
 
     toml::from_str::<UserConfig>(&content)
         .with_context(|| format!("Failed to parse {}", path.display()))
+}
+
+pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
+    config.repos.iter().map(|repo_config| {
+        let path = &repo_config.path;
+        let bones_dir = path.join(".bones");
+        
+        let available = path.exists() && bones_dir.exists();
+        
+        if !available {
+            if !path.exists() {
+                eprintln!("Warning: Repository '{}' configured at {} does not exist", 
+                         repo_config.name, path.display());
+            } else {
+                eprintln!("Warning: Repository '{}' at {} does not contain .bones/ directory", 
+                         repo_config.name, path.display());
+            }
+        }
+        
+        (repo_config.name.clone(), path.clone(), available)
+    }).collect()
 }
 
 pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveConfig> {
@@ -242,5 +271,137 @@ mod tests {
         .expect_err("must error on conflict");
         let msg = err.to_string();
         assert!(msg.contains("Conflicting env vars"));
+    }
+
+    #[test]
+    fn user_config_parses_repos_list() {
+        let temp_dir = make_temp_dir("user-config-repos");
+        let config_dir = temp_dir.join("config/bones");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+        let config_content = r#"
+output = "json"
+
+[[repos]]
+name = "backend"
+path = "/home/alice/src/backend"
+
+[[repos]]
+name = "frontend"
+path = "/home/alice/src/frontend"
+"#;
+
+        let config_file = config_dir.join("config.toml");
+        std::fs::write(&config_file, config_content).expect("write config");
+
+        let content = std::fs::read_to_string(&config_file).expect("read back");
+        let cfg: UserConfig = toml::from_str(&content).expect("parse");
+
+        assert_eq!(cfg.output, Some("json".to_string()));
+        assert_eq!(cfg.repos.len(), 2);
+        assert_eq!(cfg.repos[0].name, "backend");
+        assert_eq!(cfg.repos[0].path, PathBuf::from("/home/alice/src/backend"));
+        assert_eq!(cfg.repos[1].name, "frontend");
+        assert_eq!(cfg.repos[1].path, PathBuf::from("/home/alice/src/frontend"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn discover_repos_validates_bones_directory() {
+        let temp_dir = make_temp_dir("discover-valid");
+        
+        // Create first repo with .bones/
+        let repo1_path = temp_dir.join("repo1");
+        std::fs::create_dir_all(repo1_path.join(".bones")).expect("create repo1/.bones");
+        
+        // Create second repo with .bones/
+        let repo2_path = temp_dir.join("repo2");
+        std::fs::create_dir_all(repo2_path.join(".bones")).expect("create repo2/.bones");
+
+        let config = UserConfig {
+            output: None,
+            repos: vec![
+                RepoConfig {
+                    name: "repo1".to_string(),
+                    path: repo1_path.clone(),
+                },
+                RepoConfig {
+                    name: "repo2".to_string(),
+                    path: repo2_path.clone(),
+                },
+            ],
+        };
+
+        let discovered = discover_repos(&config);
+        
+        assert_eq!(discovered.len(), 2);
+        assert_eq!(discovered[0], ("repo1".to_string(), repo1_path, true));
+        assert_eq!(discovered[1], ("repo2".to_string(), repo2_path, true));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn discover_repos_handles_missing_directories() {
+        let temp_dir = make_temp_dir("discover-missing");
+        let nonexistent = temp_dir.join("nonexistent");
+
+        let config = UserConfig {
+            output: None,
+            repos: vec![
+                RepoConfig {
+                    name: "missing".to_string(),
+                    path: nonexistent.clone(),
+                },
+            ],
+        };
+
+        let discovered = discover_repos(&config);
+        
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0, "missing");
+        assert_eq!(discovered[0].1, nonexistent);
+        assert!(!discovered[0].2); // available = false
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn discover_repos_handles_missing_bones_directory() {
+        let temp_dir = make_temp_dir("discover-no-bones");
+        let repo_path = temp_dir.join("repo");
+        std::fs::create_dir(&repo_path).expect("create repo dir");
+        // Note: not creating .bones/ subdirectory
+
+        let config = UserConfig {
+            output: None,
+            repos: vec![
+                RepoConfig {
+                    name: "incomplete".to_string(),
+                    path: repo_path.clone(),
+                },
+            ],
+        };
+
+        let discovered = discover_repos(&config);
+        
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0, "incomplete");
+        assert_eq!(discovered[0].1, repo_path);
+        assert!(!discovered[0].2); // available = false
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn discover_repos_empty_config() {
+        let config = UserConfig {
+            output: None,
+            repos: vec![],
+        };
+
+        let discovered = discover_repos(&config);
+        assert_eq!(discovered.len(), 0);
     }
 }
