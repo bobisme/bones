@@ -7,6 +7,7 @@
 //! - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
 pub mod semantic;
+pub mod structural;
 
 use tracing::{info, instrument};
 

@@ -16,6 +16,7 @@ bones-core = { path = "../bones-core" }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 ort = { version = "2.0.0-rc.10", optional = true }
+petgraph = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
