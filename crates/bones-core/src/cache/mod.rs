@@ -30,6 +30,8 @@
 
 pub mod codec;
 pub mod columns;
+pub mod manager;
+pub mod reader;
 pub mod writer;
 
 pub use codec::{
@@ -37,6 +39,8 @@ pub use codec::{
     ValueCodec,
 };
 pub use columns::{COLUMN_COUNT, CacheColumns, ColumnRow};
+pub use manager::{CacheManager, LoadResult, LoadSource};
+pub use reader::{CacheReader, CacheReaderError};
 pub use writer::{CacheStats, CacheWriter, rebuild_cache};
 
 use crate::event::Event;
