@@ -23,6 +23,9 @@ use bones_core::model::item::Size;
 use bones_core::model::item::Urgency;
 use bones_core::model::item_id::generate_item_id;
 use bones_core::shard::ShardManager;
+use bones_core::config::load_project_config;
+use bones_search::find_duplicates;
+use bones_search::fusion::scoring::SearchConfig;
 
 #[derive(Args, Debug)]
 pub struct CreateArgs {
@@ -57,6 +60,10 @@ pub struct CreateArgs {
     /// Items this new item blocks (can be repeated).
     #[arg(long)]
     pub blocks: Vec<String>,
+
+    /// Skip duplicate check entirely.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// JSON output for a created item.
@@ -77,6 +84,16 @@ struct CreateOutput {
     description: Option<String>,
     agent: String,
     event_hash: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    duplicates: Vec<DuplicateMatch>,
+}
+
+/// A duplicate candidate match in JSON output.
+#[derive(Debug, Serialize)]
+struct DuplicateMatch {
+    item_id: String,
+    score: f32,
+    classification: String,
 }
 
 /// Find the `.bones` directory by walking up from `start`.
@@ -277,7 +294,59 @@ pub fn run_create(
         }
     }
 
-    // 11. Generate item ID
+    // 11. Check for duplicate items (unless --force is set)
+    let mut duplicate_matches: Vec<DuplicateMatch> = Vec::new();
+    if !args.force && db_path.exists() {
+        if let Some(conn) = db::query::try_open_projection(&db_path)? {
+            // Load project config to get search configuration
+            let project_config = load_project_config(project_root).unwrap_or_default();
+            
+            // Build search config from project config
+            let search_config = SearchConfig {
+                rrf_k: 60,
+                likely_duplicate_threshold: project_config.search.duplicate_threshold as f32,
+                possibly_related_threshold: 0.70,
+                maybe_related_threshold: 0.50,
+            };
+            
+            // Look up dependency graph for structural similarity (if needed)
+            // For now, use an empty graph - structural search will be skipped
+            use petgraph::graph::DiGraph;
+            let empty_graph: DiGraph<String, ()> = DiGraph::new();
+            
+            // Run duplicate detection
+            match find_duplicates(&args.title, &conn, &empty_graph, &search_config, false, 10) {
+                Ok(candidates) => {
+                    if !candidates.is_empty() {
+                        // Convert to DuplicateMatch for output
+                        for candidate in &candidates {
+                            duplicate_matches.push(DuplicateMatch {
+                                item_id: candidate.item_id.clone(),
+                                score: candidate.composite_score,
+                                classification: format!("{:?}", candidate.risk),
+                            });
+                        }
+                        
+                        // In interactive mode, warn user
+                        if output == OutputMode::Human {
+                            eprintln!("⚠ Warning: {} potential duplicate(s) found", candidates.len());
+                            for (i, cand) in candidates.iter().enumerate().take(3) {
+                                eprintln!("  {}. {} (score: {:.2}, {})", 
+                                    i+1, cand.item_id, cand.composite_score,
+                                    format!("{:?}", cand.risk));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Log error but don't block creation
+                    tracing::warn!("duplicate check failed: {}", e);
+                }
+            }
+        }
+    }
+
+    // 12. Generate item ID
     let item_id = generate_item_id(&args.title, item_count, |candidate| {
         if !db_path.exists() {
             return false;
@@ -288,12 +357,12 @@ pub fn run_create(
         }
     });
 
-    // 12. Get monotonic timestamp
+    // 13. Get monotonic timestamp
     let ts = shard_mgr
         .next_timestamp()
         .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    // 13. Build create event
+    // 14. Build create event
     let create_data = CreateData {
         title: args.title.clone(),
         kind,
@@ -317,16 +386,16 @@ pub fn run_create(
         event_hash: String::new(), // Will be computed by write_event
     };
 
-    // 14. Compute hash and serialize
+    // 15. Compute hash and serialize
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
 
-    // 15. Append to shard
+    // 16. Append to shard
     shard_mgr
         .append(&line, false, Duration::from_secs(5))
         .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
 
-    // 16. Project into SQLite (best-effort — projection can be rebuilt)
+    // 17. Project into SQLite (best-effort — projection can be rebuilt)
     if let Ok(conn) = db::open_projection(&db_path) {
         let _ = project::ensure_tracking_table(&conn);
         let projector = project::Projector::new(&conn);
@@ -335,7 +404,7 @@ pub fn run_create(
         }
     }
 
-    // 17. Output
+    // 18. Output
     let result = CreateOutput {
         id: item_id.as_str().to_string(),
         title: args.title.clone(),
@@ -348,6 +417,7 @@ pub fn run_create(
         description,
         agent,
         event_hash: event.event_hash.clone(),
+        duplicates: duplicate_matches,
     };
 
     render(output, &result, |r, w| {
@@ -492,6 +562,7 @@ mod tests {
             label: vec!["test".to_string()],
             description: Some("A test description".to_string()),
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("test-agent"), OutputMode::Json, root);
@@ -532,6 +603,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         // Just verify it doesn't error
@@ -564,6 +636,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Human, dir.path());
@@ -589,6 +662,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Human, root);
@@ -614,6 +688,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Human, root);
@@ -639,6 +714,7 @@ mod tests {
             label: vec![],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Human, root);
@@ -666,6 +742,7 @@ mod tests {
                 label: vec![],
                 description: None,
                 blocks: vec![],
+            force: false,
             };
             let result = run_create(&args, Some("agent"), OutputMode::Json, root);
             assert!(
@@ -708,6 +785,7 @@ mod tests {
             label: vec![],
             description: Some("Detailed description here".to_string()),
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Json, root);
@@ -746,6 +824,7 @@ mod tests {
             label: vec!["backend".to_string(), "auth".to_string()],
             description: None,
             blocks: vec![],
+            force: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Json, root);
@@ -760,5 +839,120 @@ mod tests {
         let data_json = fields[6];
         assert!(data_json.contains("backend"));
         assert!(data_json.contains("auth"));
+    }
+
+    #[test]
+    fn create_force_flag_parsing() {
+        let w = TestCli::parse_from(["test", "--title", "Hello", "--force"]);
+        assert_eq!(w.args.title, "Hello");
+        assert!(w.args.force);
+    }
+
+    #[test]
+    fn create_force_flag_default_false() {
+        let w = TestCli::parse_from(["test", "--title", "Hello"]);
+        assert!(!w.args.force);
+    }
+
+    #[test]
+    fn create_with_duplicate_detection() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        // Create first item
+        let args1 = CreateArgs {
+            title: "Fix authentication timeout bug".to_string(),
+            kind: "bug".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec!["backend".to_string()],
+            description: None,
+            blocks: vec![],
+            force: false,
+        };
+
+        let result1 = run_create(&args1, Some("agent"), OutputMode::Json, root);
+        assert!(result1.is_ok(), "first create failed: {:?}", result1.err());
+
+        // Create second item with similar title (should detect first as duplicate)
+        let args2 = CreateArgs {
+            title: "Fix auth timeout issue".to_string(),
+            kind: "bug".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            description: None,
+            blocks: vec![],
+            force: false,
+        };
+
+        let result2 = run_create(&args2, Some("agent"), OutputMode::Json, root);
+        assert!(result2.is_ok(), "second create failed: {:?}", result2.err());
+
+        // Verify both events were created
+        let replay = shard_mgr.replay().unwrap();
+        let lines: Vec<&str> = replay
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .collect();
+        assert_eq!(lines.len(), 2, "expected 2 events, got {}", lines.len());
+    }
+
+    #[test]
+    fn create_force_skips_duplicate_check() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        // Create first item
+        let args1 = CreateArgs {
+            title: "Test item".to_string(),
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            description: None,
+            blocks: vec![],
+            force: false,
+        };
+
+        let result1 = run_create(&args1, Some("agent"), OutputMode::Json, root);
+        assert!(result1.is_ok());
+
+        // Create second item with --force (should not run duplicate check)
+        let args2 = CreateArgs {
+            title: "Test item".to_string(),
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            description: None,
+            blocks: vec![],
+            force: true,  // Force skip duplicate check
+        };
+
+        let result2 = run_create(&args2, Some("agent"), OutputMode::Json, root);
+        assert!(result2.is_ok(), "--force should allow duplicate creation");
+
+        // Verify both events were created
+        let replay = shard_mgr.replay().unwrap();
+        let lines: Vec<&str> = replay
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .collect();
+        assert_eq!(lines.len(), 2);
     }
 }

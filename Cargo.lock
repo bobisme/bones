@@ -203,6 +203,7 @@ dependencies = [
  "assert_cmd",
  "blake3",
  "bones-core",
+ "bones-search",
  "bones-triage",
  "chrono",
  "clap",

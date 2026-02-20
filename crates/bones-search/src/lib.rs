@@ -6,9 +6,12 @@
 //! - **Errors**: Use `anyhow::Result` for return types.
 //! - **Logging**: Use `tracing` macros (`info!`, `warn!`, `error!`, `debug!`, `trace!`).
 
+pub mod duplicates;
 pub mod fusion;
 pub mod semantic;
 pub mod structural;
+
+pub use duplicates::find_duplicates;
 
 use tracing::{info, instrument};
 
