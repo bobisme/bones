@@ -18,6 +18,7 @@ pub mod health;
 pub mod import;
 pub mod init;
 pub mod list;
+pub mod log;
 pub mod migrate;
 pub mod mine;
 pub mod move_cmd;

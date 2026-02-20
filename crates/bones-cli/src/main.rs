@@ -99,6 +99,30 @@ enum Commands {
 
     #[command(
         next_help_heading = "Read",
+        about = "Show chronological event timeline for one item",
+        long_about = "Read append-only event shards and show timeline entries for a single item ID.",
+        after_help = "EXAMPLES:\n    # Show timeline for one item\n    bn log bn-abc\n\n    # Filter to recent events\n    bn log bn-abc --since 2026-02-01T00:00:00Z\n\n    # Machine-readable output\n    bn log bn-abc --json"
+    )]
+    Log(cmd::log::LogArgs),
+
+    #[command(
+        next_help_heading = "Read",
+        about = "Show recent global event history",
+        long_about = "Read append-only event shards and show recent events across all items.",
+        after_help = "EXAMPLES:\n    # Show recent global activity\n    bn history\n\n    # Filter by agent and limit\n    bn history --agent alice -n 20\n\n    # Machine-readable output\n    bn history --json"
+    )]
+    History(cmd::log::HistoryArgs),
+
+    #[command(
+        next_help_heading = "Read",
+        about = "Attribute a field's last write",
+        long_about = "Find the most recent event that modified a field on an item.",
+        after_help = "EXAMPLES:\n    # Show who last changed the title\n    bn blame bn-abc title\n\n    # Machine-readable output\n    bn blame bn-abc title --json"
+    )]
+    Blame(cmd::log::BlameArgs),
+
+    #[command(
+        next_help_heading = "Read",
         about = "List known agents",
         long_about = "List all known agents with current assignment counts and last-activity timestamps.",
         after_help = "EXAMPLES:\n    # List known agents\n    bn agents\n\n    # Machine-readable output\n    bn agents --json"
@@ -579,6 +603,15 @@ fn main() -> anyhow::Result<()> {
         Commands::Show(ref args) => timing::timed("cmd.show", || {
             cmd::show::run_show(args, output, &project_root)
         }),
+        Commands::Log(ref args) => {
+            timing::timed("cmd.log", || cmd::log::run_log(args, output, &project_root))
+        }
+        Commands::History(ref args) => timing::timed("cmd.history", || {
+            cmd::log::run_history(args, output, &project_root)
+        }),
+        Commands::Blame(ref args) => timing::timed("cmd.blame", || {
+            cmd::log::run_blame(args, output, &project_root)
+        }),
         Commands::Search(ref args) => timing::timed("cmd.search", || {
             cmd::search::run_search(args, output, &project_root)
         }),
@@ -807,6 +840,24 @@ mod tests {
     }
 
     #[test]
+    fn log_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "log", "item-123"]);
+        assert!(matches!(cli.command, Commands::Log(_)));
+    }
+
+    #[test]
+    fn history_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "history"]);
+        assert!(matches!(cli.command, Commands::History(_)));
+    }
+
+    #[test]
+    fn blame_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "blame", "item-123", "title"]);
+        assert!(matches!(cli.command, Commands::Blame(_)));
+    }
+
+    #[test]
     fn do_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "do", "item-123"]);
         assert!(matches!(cli.command, Commands::Do(_)));
@@ -867,6 +918,9 @@ mod tests {
             vec!["bn", "create", "--title", "x"],
             vec!["bn", "list"],
             vec!["bn", "show", "x"],
+            vec!["bn", "log", "x"],
+            vec!["bn", "history"],
+            vec!["bn", "blame", "x", "title"],
             vec!["bn", "do", "x"],
             vec!["bn", "done", "x"],
             vec!["bn", "did", "x"],
