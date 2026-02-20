@@ -35,6 +35,112 @@ pub struct UntagArgs {
     pub labels: Vec<String>,
 }
 
+/// Normalize a label into canonical storage form.
+///
+/// Rules:
+/// - trim surrounding whitespace
+/// - convert to lowercase
+/// - collapse internal whitespace to `-`
+/// - allow at most one namespace separator `:` (not at start/end)
+/// - reject `/`
+/// - segments must start with ASCII alphanumeric and then contain only
+///   ASCII alphanumeric, `-`, or `_`
+pub(crate) fn normalize_label(input: &str) -> Result<String, validate::ValidationError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(validate::ValidationError::new(
+            "label",
+            input,
+            "must not be empty",
+            "provide a non-empty label",
+            "invalid_label",
+        ));
+    }
+
+    let normalized = trimmed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_ascii_lowercase();
+
+    if normalized.chars().count() > validate::MAX_LABEL_LEN {
+        return Err(validate::ValidationError::new(
+            "label",
+            input,
+            format!("must be <= {} characters", validate::MAX_LABEL_LEN),
+            "shorten the label",
+            "invalid_label",
+        ));
+    }
+
+    if normalized.contains('/') {
+        return Err(validate::ValidationError::new(
+            "label",
+            input,
+            "must not contain '/'",
+            "remove '/' from the label",
+            "invalid_label",
+        ));
+    }
+
+    let colon_count = normalized.matches(':').count();
+    if colon_count > 1 || normalized.starts_with(':') || normalized.ends_with(':') {
+        return Err(validate::ValidationError::new(
+            "label",
+            input,
+            "namespace separator ':' may appear at most once and not at start/end",
+            "use labels like backend or area:frontend",
+            "invalid_label",
+        ));
+    }
+
+    for segment in normalized.split(':') {
+        let mut chars = segment.chars();
+        let Some(first) = chars.next() else {
+            return Err(validate::ValidationError::new(
+                "label",
+                input,
+                "namespace segment must not be empty",
+                "use labels like backend or area:frontend",
+                "invalid_label",
+            ));
+        };
+
+        if !first.is_ascii_alphanumeric() {
+            return Err(validate::ValidationError::new(
+                "label",
+                input,
+                "must start with an ASCII letter or number",
+                "start each label segment with [a-z0-9]",
+                "invalid_label",
+            ));
+        }
+
+        if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(validate::ValidationError::new(
+                "label",
+                input,
+                "may only contain ASCII letters, numbers, '-', '_', and a single ':' separator",
+                "remove spaces or punctuation from the label",
+                "invalid_label",
+            ));
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_labels(inputs: &[String]) -> Result<Vec<String>, validate::ValidationError> {
+    let mut out = Vec::new();
+    for label in inputs {
+        let normalized = normalize_label(label)?;
+        if !out.contains(&normalized) {
+            out.push(normalized);
+        }
+    }
+    Ok(out)
+}
+
 /// Open the projection DB, returning a helpful error if it doesn't exist.
 fn open_db(project_root: &std::path::Path) -> anyhow::Result<Connection> {
     let db_path = project_root.join(".bones").join("bones.db");
@@ -122,12 +228,14 @@ pub fn run_tag(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    for label in &args.labels {
-        if let Err(e) = validate::validate_label(label) {
+
+    let normalized_labels = match normalize_labels(&args.labels) {
+        Ok(labels) => labels,
+        Err(e) => {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
+    };
 
     // Parse and validate item ID
     let item_id = ItemId::parse(&args.id)
@@ -150,19 +258,19 @@ pub fn run_tag(
         }
     };
 
-    // Compute new labels: current + args.labels (deduplicated, preserving order)
+    // Compute new labels: current + requested labels (deduplicated, preserving order)
     let mut new_labels = current_labels.clone();
-    for label in &args.labels {
+    for label in &normalized_labels {
         if !new_labels.contains(label) {
             new_labels.push(label.clone());
         }
     }
+
     // Identify which labels were actually added (not already present)
-    let added: Vec<&str> = args
-        .labels
+    let added: Vec<String> = normalized_labels
         .iter()
         .filter(|l| !current_labels.contains(*l))
-        .map(String::as_str)
+        .cloned()
         .collect();
 
     // Emit event
@@ -231,12 +339,14 @@ pub fn run_untag(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    for label in &args.labels {
-        if let Err(e) = validate::validate_label(label) {
+
+    let normalized_labels = match normalize_labels(&args.labels) {
+        Ok(labels) => labels,
+        Err(e) => {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
+    };
 
     // Parse and validate item ID
     let item_id = ItemId::parse(&args.id)
@@ -259,9 +369,9 @@ pub fn run_untag(
         }
     };
 
-    // Compute new labels: current minus args.labels
+    // Compute new labels: current minus requested labels
     let labels_to_remove: std::collections::HashSet<&str> =
-        args.labels.iter().map(String::as_str).collect();
+        normalized_labels.iter().map(String::as_str).collect();
     let new_labels: Vec<String> = current_labels
         .iter()
         .filter(|l| !labels_to_remove.contains(l.as_str()))
@@ -269,11 +379,10 @@ pub fn run_untag(
         .collect();
 
     // Identify which labels were actually removed
-    let removed: Vec<&str> = args
-        .labels
+    let removed: Vec<String> = normalized_labels
         .iter()
         .filter(|l| current_labels.contains(*l))
-        .map(String::as_str)
+        .cloned()
         .collect();
 
     // Emit event
@@ -355,6 +464,18 @@ mod tests {
         let w = Wrapper::parse_from(["test", "item-1", "stale"]);
         assert_eq!(w.args.id, "item-1");
         assert_eq!(w.args.labels, vec!["stale"]);
+    }
+
+    #[test]
+    fn normalize_label_lowercases_and_hyphenates_spaces() {
+        let normalized = normalize_label(" Area:Needs Triage ").expect("normalize");
+        assert_eq!(normalized, "area:needs-triage");
+    }
+
+    #[test]
+    fn normalize_label_rejects_bad_namespace_and_slash() {
+        assert!(normalize_label("area:team:backend").is_err());
+        assert!(normalize_label("docs/readme").is_err());
     }
 
     #[test]

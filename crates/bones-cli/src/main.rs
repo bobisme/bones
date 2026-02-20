@@ -263,6 +263,22 @@ enum Commands {
 
     #[command(
         next_help_heading = "Metadata",
+        about = "List all labels with usage counts",
+        long_about = "List global label inventory from the projection database.",
+        after_help = "EXAMPLES:\n    # List labels\n    bn labels\n\n    # Group by namespace\n    bn labels --namespace\n\n    # Emit machine-readable output\n    bn labels --json"
+    )]
+    Labels(cmd::labels::LabelsArgs),
+
+    #[command(
+        next_help_heading = "Metadata",
+        about = "Canonical single-label operations",
+        long_about = "Manage one label at a time. `bn label add/rm` are canonical aliases for `bn tag`/`bn untag`.",
+        after_help = "EXAMPLES:\n    # Add one label\n    bn label add bn-abc area:backend\n\n    # Remove one label\n    bn label rm bn-abc area:backend"
+    )]
+    Label(cmd::labels::LabelArgs),
+
+    #[command(
+        next_help_heading = "Metadata",
         about = "Assign an item to an agent",
         long_about = "Assign an item to an agent by emitting an item.assign event.",
         after_help = "EXAMPLES:\n    # Assign item to alice\n    bn assign bn-abc alice\n\n    # Emit machine-readable output\n    bn assign bn-abc alice --json"
@@ -673,6 +689,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Comments(ref args) => timing::timed("cmd.comments", || {
             cmd::comment::run_comments(args, output, &project_root)
         }),
+        Commands::Labels(ref args) => timing::timed("cmd.labels", || {
+            cmd::labels::run_labels(args, output, &project_root)
+        }),
+        Commands::Label(ref args) => timing::timed("cmd.label", || {
+            cmd::labels::run_label(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Assign(ref args) => timing::timed("cmd.assign", || {
             cmd::assign::run_assign(args, cli.agent_flag(), output, &project_root)
         }),
@@ -928,6 +950,18 @@ mod tests {
     }
 
     #[test]
+    fn labels_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "labels"]);
+        assert!(matches!(cli.command, Commands::Labels(_)));
+    }
+
+    #[test]
+    fn label_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "label", "add", "item-123", "area:backend"]);
+        assert!(matches!(cli.command, Commands::Label(_)));
+    }
+
+    #[test]
     fn move_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "move", "item-123", "--parent", "goal-1"]);
         assert!(matches!(cli.command, Commands::Move(_)));
@@ -968,6 +1002,8 @@ mod tests {
             vec!["bn", "untag", "x", "l"],
             vec!["bn", "comment", "add", "x", "hello"],
             vec!["bn", "comments", "x"],
+            vec!["bn", "labels"],
+            vec!["bn", "label", "add", "x", "l"],
             vec!["bn", "move", "x", "--parent", "p"],
             vec!["bn", "completions", "bash"],
             vec!["bn", "diagnose"],
@@ -1122,6 +1158,8 @@ mod tests {
         let cli = Cli::parse_from(["bn", "--agent", "me", "comment", "add", "x", "hi"]);
         assert_eq!(cli.agent_flag(), Some("me"));
 
+        let cli = Cli::parse_from(["bn", "--agent", "me", "label", "add", "x", "l"]);
+        assert_eq!(cli.agent_flag(), Some("me"));
         let cli = Cli::parse_from(["bn", "--agent", "me", "move", "x", "--parent", "p"]);
         assert_eq!(cli.agent_flag(), Some("me"));
     }

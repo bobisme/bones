@@ -63,6 +63,13 @@ pub struct QueryLabel {
     pub created_at_us: i64,
 }
 
+/// Global label inventory row with usage count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelCount {
+    pub name: String,
+    pub count: usize,
+}
+
 /// An assignee of an item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryAssignee {
@@ -374,6 +381,35 @@ pub fn get_labels(conn: &Connection, item_id: &str) -> Result<Vec<QueryLabel>> {
     let mut labels = Vec::new();
     for row in rows {
         labels.push(row.context("read label row")?);
+    }
+    Ok(labels)
+}
+
+/// List global label usage counts across all items.
+///
+/// # Errors
+///
+/// Returns an error if the aggregate query fails.
+pub fn list_labels(conn: &Connection) -> Result<Vec<LabelCount>> {
+    let sql = "SELECT label, COUNT(*) as count \
+               FROM item_labels \
+               GROUP BY label \
+               ORDER BY count DESC, label ASC";
+
+    let mut stmt = conn.prepare(sql).context("prepare list_labels")?;
+    let rows = stmt
+        .query_map([], |row| {
+            let count: i64 = row.get(1)?;
+            Ok(LabelCount {
+                name: row.get(0)?,
+                count: usize::try_from(count).unwrap_or(usize::MAX),
+            })
+        })
+        .context("execute list_labels")?;
+
+    let mut labels = Vec::new();
+    for row in rows {
+        labels.push(row.context("read list_labels row")?);
     }
     Ok(labels)
 }
@@ -1252,6 +1288,25 @@ mod tests {
         assert_eq!(labels[0].label, "alpha");
         assert_eq!(labels[1].label, "mike");
         assert_eq!(labels[2].label, "zulu");
+    }
+
+    #[test]
+    fn list_labels_returns_counts() {
+        let conn = test_db();
+        insert_item(&conn, "bn-001", "Item 1", "open", "default");
+        insert_item(&conn, "bn-002", "Item 2", "open", "default");
+        insert_item(&conn, "bn-003", "Item 3", "open", "default");
+
+        insert_label(&conn, "bn-001", "area:backend");
+        insert_label(&conn, "bn-002", "area:backend");
+        insert_label(&conn, "bn-003", "type:bug");
+
+        let labels = list_labels(&conn).unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].name, "area:backend");
+        assert_eq!(labels[0].count, 2);
+        assert_eq!(labels[1].name, "type:bug");
+        assert_eq!(labels[1].count, 1);
     }
 
     #[test]
