@@ -4,7 +4,7 @@
 //! Reciprocal Rank Fusion (RRF) to produce a ranked list of similar items.
 //! Excludes the source item from results.
 
-use crate::cmd::dup::build_fts_query;
+use crate::cmd::dup::{build_fts_query, has_meaningful_signal_overlap};
 use crate::cmd::show::resolve_item_id;
 use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::config::load_project_config;
@@ -205,8 +205,7 @@ pub fn run_similar(
     let results: Vec<SimilarResult> = candidates
         .into_iter()
         .filter(|c| c.item_id != resolved_id)
-        .take(args.limit)
-        .map(|c| {
+        .filter_map(|c| {
             let title = conn
                 .query_row(
                     "SELECT title FROM items WHERE item_id = ?1",
@@ -215,15 +214,20 @@ pub fn run_similar(
                 )
                 .unwrap_or_else(|_| "<unknown>".to_string());
 
-            SimilarResult {
+            if !has_meaningful_signal_overlap(&source.title, &title) {
+                return None;
+            }
+
+            Some(SimilarResult {
                 id: c.item_id,
                 title,
                 score: c.composite_score,
                 lexical_score: rank_to_score(c.lexical_rank, k),
                 semantic_score: rank_to_score(c.semantic_rank, k),
                 structural_score: rank_to_score(c.structural_rank, k),
-            }
+            })
         })
+        .take(args.limit)
         .collect();
 
     let similar_output = SimilarOutput {

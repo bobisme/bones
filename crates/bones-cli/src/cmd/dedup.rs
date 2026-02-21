@@ -3,7 +3,7 @@
 //! Scans all open items, builds a sparse similarity graph using BM25 prefiltering
 //! and fusion scoring, then reports duplicate clusters.
 
-use crate::cmd::dup::build_fts_query;
+use crate::cmd::dup::{build_fts_query, has_meaningful_signal_overlap};
 use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::config::load_project_config;
 use bones_core::db::{fts, query};
@@ -181,6 +181,12 @@ pub fn run_dedup(
 
         for cand in candidates {
             if cand.item_id == item.item_id || !candidate_ids.contains(&cand.item_id) {
+                continue;
+            }
+            let Some(candidate_title) = titles.get(&cand.item_id) else {
+                continue;
+            };
+            if !has_meaningful_signal_overlap(&item.title, candidate_title) {
                 continue;
             }
             let score = cand.composite_score as f64;

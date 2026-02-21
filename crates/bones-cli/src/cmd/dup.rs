@@ -16,6 +16,7 @@ use bones_core::db::fts;
 use bones_core::db::query;
 use clap::Args;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Write;
 
 #[derive(Args, Debug)]
@@ -224,6 +225,10 @@ pub fn run_dup(
             continue; // skip self
         }
 
+        if !has_meaningful_signal_overlap(&source.title, &hit.title) {
+            continue;
+        }
+
         // Normalize: candidate_rank / source_rank (both negative → 0-1)
         // Higher = more similar.
         let normalized_score = if can_normalize {
@@ -334,6 +339,32 @@ pub fn build_fts_query(title: &str, description: Option<&str>) -> String {
     tokens.join(" OR ")
 }
 
+pub fn has_meaningful_signal_overlap(left: &str, right: &str) -> bool {
+    let left_tokens = similarity_signal_tokens(left);
+    let right_tokens = similarity_signal_tokens(right);
+    if left_tokens.is_empty() || right_tokens.is_empty() {
+        return false;
+    }
+
+    let mut shared = 0usize;
+    let mut shared_long_token = false;
+    for token in left_tokens.intersection(&right_tokens) {
+        shared += 1;
+        if token.len() >= 9 {
+            shared_long_token = true;
+        }
+    }
+
+    shared >= 2 || shared_long_token
+}
+
+fn similarity_signal_tokens(text: &str) -> HashSet<String> {
+    tokenize_fts_terms(text, 4)
+        .into_iter()
+        .filter(|token| !is_template_noise_token(token) && !is_similarity_noise_token(token))
+        .collect()
+}
+
 fn tokenize_fts_terms(text: &str, min_len: usize) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
         .filter_map(|tok| {
@@ -387,6 +418,24 @@ fn is_template_noise_token(token: &str) -> bool {
             | "track"
             | "with"
             | "work"
+    )
+}
+
+fn is_similarity_noise_token(token: &str) -> bool {
+    matches!(
+        token,
+        "discovery"
+            | "goal"
+            | "guardrails"
+            | "implementation"
+            | "migration"
+            | "phase"
+            | "planning"
+            | "program"
+            | "regression"
+            | "risk"
+            | "rollout"
+            | "stabilization"
     )
 }
 
@@ -556,6 +605,22 @@ mod tests {
             q, "phase OR implementation OR planning",
             "expected template-noise filtering to fall back to title tokens"
         );
+    }
+
+    #[test]
+    fn meaningful_overlap_rejects_phase_scaffolding_only() {
+        assert!(!has_meaningful_signal_overlap(
+            "Phase 2 - implementation and migration: Search relevance and dedup quality",
+            "Phase 3 - rollout and stabilization: Reliability and observability hardening"
+        ));
+    }
+
+    #[test]
+    fn meaningful_overlap_accepts_shared_domain_tokens() {
+        assert!(has_meaningful_signal_overlap(
+            "[Phase 2] API contracts and service integration implementation",
+            "[Phase 3] API contracts and service integration planning"
+        ));
     }
 
     // -----------------------------------------------------------------------
