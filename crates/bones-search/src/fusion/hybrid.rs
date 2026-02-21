@@ -7,7 +7,9 @@
 //!   lexical cohort and dependency graph
 
 use crate::fusion::scoring::rrf_fuse;
-use crate::semantic::{SemanticModel, knn_search, sync_projection_embeddings};
+use crate::semantic::{
+    SemanticModel, SemanticSearchResult, knn_search, sync_projection_embeddings,
+};
 use crate::structural::structural_similarity;
 use anyhow::{Context, Result};
 use bones_core::db::fts::search_bm25;
@@ -20,6 +22,8 @@ use tracing::warn;
 
 const MAX_STRUCTURAL_SEEDS: usize = 16;
 const MAX_STRUCTURAL_CANDIDATES: usize = 128;
+const MIN_SEMANTIC_SCORE: f32 = 0.60;
+const MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL: f32 = 0.62;
 static SEMANTIC_DEGRADED_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Unified fused result with per-layer explanation fields.
@@ -80,7 +84,7 @@ fn hybrid_search_inner(
             .and_then(|_| model.embed(query))
             .and_then(|embedding| knn_search(db, &embedding, limit))
         {
-            Ok(hits) => hits.into_iter().map(|h| h.item_id).collect(),
+            Ok(hits) => semantic_ranked_items(hits, lexical_ranked_owned.is_empty()),
             Err(e) => {
                 if !SEMANTIC_DEGRADED_WARNED.swap(true, Ordering::SeqCst) {
                     warn!("semantic layer unavailable; using lexical+structural ranking: {e}");
@@ -119,6 +123,11 @@ fn hybrid_search_inner(
         let semantic_rank = find_rank(&semantic_ranked, &item_id);
         let structural_rank = find_rank(&structural_ranked, &item_id);
 
+        // Avoid returning graph-only expansions that have no textual relevance.
+        if lexical_rank == usize::MAX && semantic_rank == usize::MAX {
+            continue;
+        }
+
         out.push(HybridSearchResult {
             item_id,
             score,
@@ -148,6 +157,21 @@ fn rank_to_score(rank: usize, k: usize) -> f32 {
     } else {
         1.0 / (k as f32 + rank as f32)
     }
+}
+
+fn semantic_ranked_items(hits: Vec<SemanticSearchResult>, lexical_is_empty: bool) -> Vec<String> {
+    if hits.is_empty() {
+        return Vec::new();
+    }
+
+    if lexical_is_empty && hits[0].score < MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL {
+        return Vec::new();
+    }
+
+    hits.into_iter()
+        .filter(|hit| hit.score >= MIN_SEMANTIC_SCORE)
+        .map(|hit| hit.item_id)
+        .collect()
 }
 
 fn derive_structural_ranked(
@@ -500,6 +524,69 @@ mod tests {
         assert!(
             results.iter().any(|r| r.structural_score > 0.0),
             "expected at least one non-zero structural score"
+        );
+    }
+
+    #[test]
+    fn semantic_ranked_items_drops_low_confidence_when_lexical_empty() {
+        let hits = vec![
+            SemanticSearchResult {
+                item_id: "bn-001".to_string(),
+                score: 0.55,
+            },
+            SemanticSearchResult {
+                item_id: "bn-002".to_string(),
+                score: 0.53,
+            },
+        ];
+
+        let ranked = semantic_ranked_items(hits, true);
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn semantic_ranked_items_keeps_high_confidence_hits() {
+        let hits = vec![
+            SemanticSearchResult {
+                item_id: "bn-001".to_string(),
+                score: 0.70,
+            },
+            SemanticSearchResult {
+                item_id: "bn-002".to_string(),
+                score: 0.61,
+            },
+            SemanticSearchResult {
+                item_id: "bn-003".to_string(),
+                score: 0.59,
+            },
+        ];
+
+        let ranked = semantic_ranked_items(hits, true);
+        assert_eq!(ranked, vec!["bn-001".to_string(), "bn-002".to_string()]);
+    }
+
+    #[test]
+    fn hybrid_search_excludes_structural_only_results() {
+        let conn = setup_db_with_structural_overlap();
+        let mut graph = DiGraph::new();
+        let n101 = graph.add_node("bn-101".to_string());
+        let n102 = graph.add_node("bn-102".to_string());
+        let n103 = graph.add_node("bn-103".to_string());
+        graph.add_edge(n101, n102, ());
+        graph.add_edge(n101, n103, ());
+
+        let results = hybrid_search_with_graph("authentication", &conn, None, &graph, 10, 60)
+            .expect("hybrid search should succeed");
+
+        assert!(
+            results
+                .iter()
+                .all(|row| { row.lexical_rank != usize::MAX || row.semantic_rank != usize::MAX }),
+            "results should not include structural-only rows"
+        );
+        assert!(
+            results.iter().all(|row| row.item_id != "bn-103"),
+            "bn-103 should not appear as structural-only expansion"
         );
     }
 }
