@@ -6,6 +6,7 @@ members = [
     "crates/bones-search",
     "crates/bones-cli",
     "crates/bones-sim",
+    "crates/bones-sqlite-vec",
 ]
 
 [workspace.package]
@@ -46,3 +47,4 @@ sha2 = "0.10"
 toml = "0.8"
 ratatui = "0.29"
 crossterm = "0.28"
+sqlite-vec = "0.1.7-alpha.10"

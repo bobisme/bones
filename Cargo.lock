@@ -246,6 +246,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "bones-sqlite-vec",
  "bumpalo",
  "chrono",
  "criterion",
@@ -295,6 +296,14 @@ dependencies = [
  "serde_json",
  "terseid",
  "tracing",
+]
+
+[[package]]
+name = "bones-sqlite-vec"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "sqlite-vec",
 ]
 
 [[package]]
@@ -2201,7 +2210,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2493,6 +2502,15 @@ dependencies = [
  "nom",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "sqlite-vec"
+version = "0.1.7-alpha.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9dad2e5788b411800d8e15d55ee2c672ba0c0c87076713a1e6e2c9b83372a92"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

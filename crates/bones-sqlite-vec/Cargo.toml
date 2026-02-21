@@ -1,0 +1,11 @@
+[package]
+name = "bones-sqlite-vec"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+rusqlite = { workspace = true }
+sqlite-vec = { workspace = true }

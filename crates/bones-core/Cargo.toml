@@ -19,6 +19,7 @@ toml = { workspace = true }
 dirs = { workspace = true }
 terseid = { workspace = true }
 tracing = { workspace = true }
+bones-sqlite-vec = { path = "../bones-sqlite-vec" }
 bumpalo = "3.20.2"
 memmap2 = "0.9.10"
 

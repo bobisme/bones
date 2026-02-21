@@ -44,3 +44,10 @@ Install completions locally via `just completions` (see `justfile`).
 cargo test
 just install
 ```
+
+## Semantic acceleration
+
+- `sqlite-vec` is bundled at build time and auto-registered as a SQLite extension.
+- When available, `bn` reports vector acceleration in capability/health output.
+- If unavailable, semantic search still works via Rust-side KNN over stored embeddings.
+- Set `BONES_SQLITE_VEC_AUTO=0` to disable auto-registration for troubleshooting.

@@ -16,6 +16,7 @@ pub mod schema;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
+use tracing::debug;
 
 /// Busy timeout used for projection DB connections.
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,6 +31,10 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create projection db directory {}", parent.display()))?;
+    }
+
+    if let Err(err) = bones_sqlite_vec::register_auto_extension() {
+        debug!(%err, "sqlite-vec auto-extension unavailable");
     }
 
     let mut conn = Connection::open(path)

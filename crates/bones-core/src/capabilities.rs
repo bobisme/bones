@@ -52,9 +52,9 @@ use crate::cache::CACHE_MAGIC;
 pub struct Capabilities {
     /// SQLite FTS5 extension is available and index (`items_fts`) is built.
     pub fts5: bool,
-    /// Semantic search model (MiniLM) is loaded and vectors table exists.
+    /// Semantic search model assets are available.
     pub semantic: bool,
-    /// sqlite-vec extension is available for vector operations.
+    /// sqlite-vec extension is available for vector acceleration.
     pub vectors: bool,
     /// Binary columnar cache (`events.bin`) exists and has a valid header.
     pub binary_cache: bool,
@@ -140,7 +140,7 @@ pub fn describe_capabilities(caps: &Capabilities) -> Vec<CapabilityStatus> {
         CapabilityStatus {
             name: "vectors",
             available: caps.vectors,
-            fallback: "semantic search disabled",
+            fallback: "semantic search uses Rust KNN (no sqlite-vec acceleration)",
         },
         CapabilityStatus {
             name: "binary_cache",
@@ -318,10 +318,13 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn vectors_is_false_without_extension() {
-        // sqlite-vec is not loaded in the test environment.
+    fn vectors_probe_matches_direct_query() {
         let conn = bare_db();
-        assert!(!probe_vectors(&conn));
+        let probed = probe_vectors(&conn);
+        let direct = conn
+            .query_row("SELECT vec_version()", [], |row| row.get::<_, String>(0))
+            .is_ok();
+        assert_eq!(probed, direct);
     }
 
     // -----------------------------------------------------------------------
@@ -430,7 +433,7 @@ mod tests {
         let conn = bare_db();
         let caps = detect_capabilities(&conn);
         assert!(!caps.fts5, "no FTS5 on bare db");
-        assert!(!caps.vectors, "no vectors on bare db");
+        // vectors may be available when sqlite-vec is auto-registered.
         // semantic may be true on developer machines where model assets are
         // present in cache; this test only asserts DB-derived capabilities.
         assert!(!caps.binary_cache, "no binary_cache (in-memory db)");
