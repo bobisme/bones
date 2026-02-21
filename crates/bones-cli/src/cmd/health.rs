@@ -6,14 +6,34 @@ use std::path::Path;
 use bones_core::db::query;
 use bones_triage::graph::{RawGraph, find_sccs, health_metrics};
 use bones_triage::topology::{TopologyMode, analyze};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde::Serialize;
 
 use crate::output::{CliError, OutputMode, render, render_error};
 
 /// Arguments for `bn health`.
 #[derive(Args, Debug, Default)]
-pub struct HealthArgs {}
+pub struct HealthArgs {
+    /// Topology analysis mode.
+    #[arg(long = "topology", alias = "mode", value_enum, default_value = "basic")]
+    pub topology: HealthTopologyMode,
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum)]
+pub enum HealthTopologyMode {
+    #[default]
+    Basic,
+    Advanced,
+}
+
+impl From<HealthTopologyMode> for TopologyMode {
+    fn from(value: HealthTopologyMode) -> Self {
+        match value {
+            HealthTopologyMode::Basic => TopologyMode::Basic,
+            HealthTopologyMode::Advanced => TopologyMode::Advanced,
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct HealthOutput {
@@ -31,7 +51,7 @@ struct HealthOutput {
 
 /// Execute `bn health`.
 pub fn run_health(
-    _args: &HealthArgs,
+    args: &HealthArgs,
     output: OutputMode,
     project_root: &Path,
 ) -> anyhow::Result<()> {
@@ -56,7 +76,8 @@ pub fn run_health(
 
     let metrics = health_metrics(&raw.graph);
     let cycle_count = find_sccs(&raw.graph).len();
-    let topology = analyze(&raw.graph, TopologyMode::Advanced).unwrap_or_else(|err| {
+    let requested_mode: TopologyMode = args.topology.into();
+    let topology = analyze(&raw.graph, requested_mode).unwrap_or_else(|err| {
         bones_triage::topology::TopologyResult {
             mode: TopologyMode::Basic,
             advanced_applied: false,
@@ -186,7 +207,21 @@ mod tests {
         }
 
         let parsed = Wrapper::parse_from(["test"]);
-        let _ = parsed.args;
+        assert!(matches!(parsed.args.topology, HealthTopologyMode::Basic));
+    }
+
+    #[test]
+    fn health_args_parse_basic_mode() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: HealthArgs,
+        }
+
+        let parsed = Wrapper::parse_from(["test", "--topology", "advanced"]);
+        assert!(matches!(parsed.args.topology, HealthTopologyMode::Advanced));
     }
 
     #[test]

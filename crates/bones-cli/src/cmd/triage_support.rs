@@ -1,18 +1,29 @@
 use anyhow::{Context, Result};
 use bones_core::db::query::{self, ItemFilter, SortOrder};
 use bones_core::model::item::Urgency;
-use bones_triage::feedback::load_agent_profile;
+use bones_triage::feedback::{load_agent_profile, sample_weights};
 use bones_triage::graph::{NormalizedGraph, RawGraph, compute_critical_path, find_all_cycles};
 use bones_triage::metrics::betweenness::betweenness_centrality;
 use bones_triage::metrics::eigenvector::eigenvector_centrality;
 use bones_triage::metrics::hits::hits;
-use bones_triage::metrics::pagerank::{PageRankConfig, pagerank};
+use bones_triage::metrics::pagerank::{
+    EdgeChange, EdgeChangeKind, PageRankConfig, PageRankMethod, PageRankResult, pagerank,
+    pagerank_incremental,
+};
 use bones_triage::score::{CompositeWeights, MetricInputs, composite_score, normalize_metric};
+use petgraph::visit::EdgeRef;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 const MICROS_PER_DAY: f64 = 86_400_000_000.0;
 const TOPOLOGY_BLEND_WEIGHT: f64 = 0.10;
+const PAGERANK_CACHE_FILE: &str = "triage_pagerank.json";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RankedItem {
@@ -34,6 +45,14 @@ pub(crate) struct TriageSnapshot {
     pub cycles: Vec<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PageRankDiskCache {
+    version: u8,
+    content_hash: String,
+    scores: HashMap<String, f64>,
+    edges: Vec<(String, String)>,
+}
+
 pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSnapshot> {
     let all_items = query::list_items(
         conn,
@@ -50,8 +69,8 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         .filter(|item| is_active_state(&item.state))
         .collect();
 
-    let raw_for_cycles = RawGraph::from_sqlite(conn).context("load dependency graph for cycles")?;
-    let cycles = find_all_cycles(&raw_for_cycles.graph);
+    let raw_graph = RawGraph::from_sqlite(conn).context("load dependency graph for triage")?;
+    let cycles = find_all_cycles(&raw_graph.graph);
 
     if active_items.is_empty() {
         return Ok(TriageSnapshot {
@@ -61,14 +80,14 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         });
     }
 
-    let normalized = NormalizedGraph::from_raw(
-        RawGraph::from_sqlite(conn).context("load dependency graph for scoring")?,
-    );
+    let mut normalized = NormalizedGraph::from_raw(raw_graph);
+    normalized.condensed = normalized.reduced.clone();
     let critical_path = compute_critical_path(&normalized);
-    let pagerank_result = pagerank(&normalized, &PageRankConfig::default());
+    let pagerank_result = compute_pagerank(conn, &normalized);
     let betweenness = betweenness_centrality(&normalized);
     let hits_result = hits(&normalized, 100, 1e-6);
     let eigenvector_result = eigenvector_centrality(&normalized, 100, 1e-6);
+    let pagerank_method = pagerank_method_label(pagerank_result.method).to_string();
 
     let ids: Vec<String> = active_items
         .iter()
@@ -114,7 +133,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
 
     let unresolved_blockers = load_unresolved_blocker_counts(conn)?;
     let active_unblocks = load_active_unblocks_counts(conn)?;
-    let weights = learned_weights_from_feedback();
+    let weights = sampled_weights_from_feedback(seed_from_graph(normalized.content_hash()));
 
     let mut ranked: Vec<RankedItem> = active_items
         .iter()
@@ -162,15 +181,15 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
 
             let explanation = if urgency == Urgency::Urgent {
                 format!(
-                    "Urgent override is active. Secondary signals: {driver_a} and {driver_b}."
+                    "Urgent override is active. Secondary signals: {driver_a} and {driver_b}. PageRank: {pagerank_method}."
                 )
             } else if blocked_by_active == 0 {
                 format!(
-                    "Driven by {driver_a} and {driver_b}. Ready now; unblocks {unblocks_active} active item(s)."
+                    "Driven by {driver_a} and {driver_b}. Ready now; unblocks {unblocks_active} active item(s). PageRank: {pagerank_method}."
                 )
             } else {
                 format!(
-                    "Driven by {driver_a} and {driver_b}. Blocked by {blocked_by_active} active dependency(ies)."
+                    "Driven by {driver_a} and {driver_b}. Blocked by {blocked_by_active} active dependency(ies). PageRank: {pagerank_method}."
                 )
             };
 
@@ -209,7 +228,152 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
     })
 }
 
-fn learned_weights_from_feedback() -> CompositeWeights<f64> {
+fn compute_pagerank(conn: &Connection, normalized: &NormalizedGraph) -> PageRankResult {
+    let config = PageRankConfig::default();
+    let Some(cache_path) = pagerank_cache_path(conn) else {
+        return pagerank(normalized, &config);
+    };
+
+    let current_edges = edge_list(&normalized.raw);
+
+    if let Ok(Some(cache)) = load_pagerank_cache(&cache_path) {
+        if cache.content_hash == normalized.content_hash() {
+            return PageRankResult {
+                scores: cache.scores,
+                iterations: 0,
+                converged: true,
+                method: PageRankMethod::Incremental,
+            };
+        }
+
+        let changes = diff_edge_changes(&cache.edges, &current_edges);
+        if !changes.is_empty() {
+            let result = pagerank_incremental(normalized, &cache.scores, &changes, &config);
+            let _ = save_pagerank_cache(
+                &cache_path,
+                &PageRankDiskCache {
+                    version: 1,
+                    content_hash: normalized.content_hash().to_string(),
+                    scores: result.scores.clone(),
+                    edges: current_edges,
+                },
+            );
+            return result;
+        }
+    }
+
+    let result = pagerank(normalized, &config);
+    let _ = save_pagerank_cache(
+        &cache_path,
+        &PageRankDiskCache {
+            version: 1,
+            content_hash: normalized.content_hash().to_string(),
+            scores: result.scores.clone(),
+            edges: current_edges,
+        },
+    );
+
+    result
+}
+
+fn pagerank_method_label(method: PageRankMethod) -> &'static str {
+    match method {
+        PageRankMethod::Full => "full",
+        PageRankMethod::Incremental => "incremental",
+        PageRankMethod::IncrementalFallback => "incremental_fallback",
+    }
+}
+
+fn pagerank_cache_path(conn: &Connection) -> Option<PathBuf> {
+    let mut stmt = conn.prepare("PRAGMA database_list").ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })
+        .ok()?;
+
+    for row in rows {
+        let Ok((name, file_path)) = row else {
+            continue;
+        };
+        if name != "main" || file_path.is_empty() {
+            continue;
+        }
+
+        let db_path = PathBuf::from(file_path);
+        let bones_dir = db_path.parent()?;
+        return Some(bones_dir.join("cache").join(PAGERANK_CACHE_FILE));
+    }
+
+    None
+}
+
+fn load_pagerank_cache(path: &PathBuf) -> Result<Option<PageRankDiskCache>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read(path).with_context(|| format!("read pagerank cache {}", path.display()))?;
+    let cache = serde_json::from_slice::<PageRankDiskCache>(&raw)
+        .with_context(|| format!("parse pagerank cache {}", path.display()))?;
+    Ok(Some(cache))
+}
+
+fn save_pagerank_cache(path: &PathBuf, cache: &PageRankDiskCache) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create pagerank cache dir {}", parent.display()))?;
+    }
+
+    let body = serde_json::to_vec(cache).context("serialize pagerank cache")?;
+    fs::write(path, body).with_context(|| format!("write pagerank cache {}", path.display()))
+}
+
+fn edge_list(raw: &RawGraph) -> Vec<(String, String)> {
+    let mut edges = raw
+        .graph
+        .edge_references()
+        .filter_map(|edge| {
+            let source = raw.graph.node_weight(edge.source())?;
+            let target = raw.graph.node_weight(edge.target())?;
+            Some((source.clone(), target.clone()))
+        })
+        .collect::<Vec<_>>();
+    edges.sort_unstable();
+    edges
+}
+
+fn diff_edge_changes(
+    previous: &[(String, String)],
+    current: &[(String, String)],
+) -> Vec<EdgeChange> {
+    let previous_map: std::collections::HashSet<(String, String)> =
+        previous.iter().cloned().collect();
+    let current_map: std::collections::HashSet<(String, String)> =
+        current.iter().cloned().collect();
+
+    let mut changes = Vec::new();
+
+    for (from, to) in current_map.difference(&previous_map) {
+        changes.push(EdgeChange {
+            from: from.clone(),
+            to: to.clone(),
+            kind: EdgeChangeKind::Added,
+        });
+    }
+
+    for (from, to) in previous_map.difference(&current_map) {
+        changes.push(EdgeChange {
+            from: from.clone(),
+            to: to.clone(),
+            kind: EdgeChangeKind::Removed,
+        });
+    }
+
+    changes
+}
+
+fn sampled_weights_from_feedback(seed: u64) -> CompositeWeights<f64> {
     let Ok(project_root) = std::env::current_dir() else {
         return CompositeWeights::default();
     };
@@ -220,57 +384,22 @@ fn learned_weights_from_feedback() -> CompositeWeights<f64> {
         return CompositeWeights::default();
     };
 
-    normalize_weights(CompositeWeights {
-        alpha: posterior_mean(
-            profile.posteriors.alpha.alpha_param,
-            profile.posteriors.alpha.beta_param,
-        ),
-        beta: posterior_mean(
-            profile.posteriors.beta.alpha_param,
-            profile.posteriors.beta.beta_param,
-        ),
-        gamma: posterior_mean(
-            profile.posteriors.gamma.alpha_param,
-            profile.posteriors.gamma.beta_param,
-        ),
-        delta: posterior_mean(
-            profile.posteriors.delta.alpha_param,
-            profile.posteriors.delta.beta_param,
-        ),
-        epsilon: posterior_mean(
-            profile.posteriors.epsilon.alpha_param,
-            profile.posteriors.epsilon.beta_param,
-        ),
-    })
-}
-
-fn posterior_mean(alpha: f64, beta: f64) -> f64 {
-    let a = if alpha.is_finite() && alpha > 0.0 {
-        alpha
-    } else {
-        1.0
-    };
-    let b = if beta.is_finite() && beta > 0.0 {
-        beta
-    } else {
-        1.0
-    };
-    a / (a + b)
-}
-
-fn normalize_weights(weights: CompositeWeights<f64>) -> CompositeWeights<f64> {
-    let total = weights.alpha + weights.beta + weights.gamma + weights.delta + weights.epsilon;
-    if !total.is_finite() || total <= f64::EPSILON {
-        return CompositeWeights::default();
+    if let Some(seed) = std::env::var("BONES_TRIAGE_RNG_SEED")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+    {
+        let mut rng = StdRng::seed_from_u64(seed);
+        return sample_weights(&profile, &mut rng);
     }
 
-    CompositeWeights {
-        alpha: weights.alpha / total,
-        beta: weights.beta / total,
-        gamma: weights.gamma / total,
-        delta: weights.delta / total,
-        epsilon: weights.epsilon / total,
-    }
+    let mut rng = StdRng::seed_from_u64(seed);
+    sample_weights(&profile, &mut rng)
+}
+
+fn seed_from_graph(content_hash: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content_hash.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn is_active_state(state: &str) -> bool {

@@ -7,9 +7,10 @@
 
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use bones_core::config::load_project_config;
+use bones_core::db::fts;
 use bones_core::db::query;
 use bones_search::fusion::hybrid_search;
-use bones_search::semantic::SemanticModel;
+use bones_search::semantic::{SemanticModel, knn_search, sync_projection_embeddings};
 use clap::Args;
 use serde::Serialize;
 use std::io::Write;
@@ -32,6 +33,21 @@ pub struct SearchArgs {
     /// Maximum number of results to return.
     #[arg(short = 'n', long, default_value = "10")]
     pub limit: usize,
+
+    /// Force lexical-only search (FTS5/BM25).
+    #[arg(long)]
+    pub lexical: bool,
+
+    /// Force semantic-only search (embedding KNN).
+    #[arg(long)]
+    pub semantic: bool,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum SearchMode {
+    Hybrid,
+    LexicalOnly,
+    SemanticOnly,
 }
 
 /// A single search result row.
@@ -84,6 +100,8 @@ pub fn run_search(
         anyhow::bail!("empty search query");
     }
 
+    let mode = resolve_mode(args)?;
+
     let db_path = project_root.join(".bones/bones.db");
 
     let conn = match query::try_open_projection(&db_path)? {
@@ -101,50 +119,60 @@ pub fn run_search(
         }
     };
 
-    let cfg = load_project_config(project_root).unwrap_or_default();
-    let semantic_model = if cfg.search.semantic {
-        match SemanticModel::load() {
-            Ok(model) => Some(model),
-            Err(err) => {
-                tracing::warn!(
-                    "semantic model unavailable; using lexical+structural search only: {err}"
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
     let limit = args.limit.min(1000);
+    let cfg = load_project_config(project_root).unwrap_or_default();
 
-    let hits = hybrid_search(&args.query, &conn, semantic_model.as_ref(), limit, 60).map_err(
-        |e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."),
-    )?;
+    let results = match mode {
+        SearchMode::LexicalOnly => lexical_only_search(&conn, &args.query, limit)?,
+        SearchMode::SemanticOnly => semantic_only_search(&conn, &args.query, limit)?,
+        SearchMode::Hybrid => {
+            let semantic_model = if cfg.search.semantic {
+                match SemanticModel::load() {
+                    Ok(model) => Some(model),
+                    Err(err) => {
+                        tracing::warn!(
+                            "semantic model unavailable; using lexical+structural search only: {err}"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            hybrid_search(&args.query, &conn, semantic_model.as_ref(), limit, 60).map_err(
+                |e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."),
+            )?
+            .into_iter()
+            .map(|hit| (hit.item_id, f64::from(hit.score)))
+            .collect()
+        }
+    };
 
     // Enrich hits with item state
-    let mut results: Vec<SearchResult> = Vec::with_capacity(hits.len());
-    for hit in hits {
+    let mut results_with_meta: Vec<SearchResult> = Vec::with_capacity(results.len());
+    for (item_id, score) in results {
         // Fetch state from items table
         let (title, state) = conn
             .query_row(
                 "SELECT title, state FROM items WHERE item_id = ?1",
-                rusqlite::params![&hit.item_id],
+                rusqlite::params![&item_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap_or_else(|_| ("<unknown>".to_string(), "unknown".to_string()));
 
-        results.push(SearchResult {
-            id: hit.item_id,
+        results_with_meta.push(SearchResult {
+            id: item_id,
             title,
-            score: f64::from(hit.score),
+            score,
             state,
         });
     }
 
     let search_output = SearchOutput {
         query: args.query.clone(),
-        count: results.len(),
-        results,
+        count: results_with_meta.len(),
+        results: results_with_meta,
     };
 
     render_mode(
@@ -153,6 +181,53 @@ pub fn run_search(
         |out, w| render_search_text(out, w),
         |out, w| render_search_human(out, w),
     )
+}
+
+fn resolve_mode(args: &SearchArgs) -> anyhow::Result<SearchMode> {
+    if args.lexical && args.semantic {
+        anyhow::bail!("--lexical and --semantic are mutually exclusive");
+    }
+
+    if args.lexical {
+        Ok(SearchMode::LexicalOnly)
+    } else if args.semantic {
+        Ok(SearchMode::SemanticOnly)
+    } else {
+        Ok(SearchMode::Hybrid)
+    }
+}
+
+fn lexical_only_search(
+    conn: &rusqlite::Connection,
+    query_text: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<(String, f64)>> {
+    let hits = fts::search_bm25(conn, query_text, limit as u32)
+        .map_err(|e| anyhow::anyhow!("lexical search error: {e}"))?;
+    Ok(hits
+        .into_iter()
+        .map(|hit| (hit.item_id, hit.rank))
+        .collect())
+}
+
+fn semantic_only_search(
+    conn: &rusqlite::Connection,
+    query_text: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<(String, f64)>> {
+    let model = SemanticModel::load()
+        .map_err(|e| anyhow::anyhow!("semantic model unavailable for --semantic mode: {e}"))?;
+    sync_projection_embeddings(conn, &model)
+        .map_err(|e| anyhow::anyhow!("semantic index sync failed: {e}"))?;
+    let embedding = model
+        .embed(query_text)
+        .map_err(|e| anyhow::anyhow!("semantic embedding failed: {e}"))?;
+    let hits = knn_search(conn, &embedding, limit)
+        .map_err(|e| anyhow::anyhow!("semantic KNN search failed: {e}"))?;
+    Ok(hits
+        .into_iter()
+        .map(|hit| (hit.item_id, f64::from(hit.score)))
+        .collect())
 }
 
 /// Render search results in human-readable format.
@@ -276,6 +351,75 @@ mod tests {
         let w = Wrapper::parse_from(["test", "auth*", "-n", "5"]);
         assert_eq!(w.args.query, "auth*");
         assert_eq!(w.args.limit, 5);
+        assert!(!w.args.lexical);
+        assert!(!w.args.semantic);
+    }
+
+    #[test]
+    fn search_args_parse_layer_flags() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: SearchArgs,
+        }
+
+        let lexical = Wrapper::parse_from(["test", "auth", "--lexical"]);
+        assert!(lexical.args.lexical);
+        assert!(!lexical.args.semantic);
+
+        let semantic = Wrapper::parse_from(["test", "auth", "--semantic"]);
+        assert!(semantic.args.semantic);
+        assert!(!semantic.args.lexical);
+    }
+
+    #[test]
+    fn resolve_mode_rejects_conflicting_flags() {
+        let args = SearchArgs {
+            query: "auth".into(),
+            limit: 10,
+            lexical: true,
+            semantic: true,
+        };
+
+        assert!(resolve_mode(&args).is_err());
+    }
+
+    #[test]
+    fn resolve_mode_selects_expected_mode() {
+        let lexical = SearchArgs {
+            query: "auth".into(),
+            limit: 10,
+            lexical: true,
+            semantic: false,
+        };
+        assert!(matches!(
+            resolve_mode(&lexical).expect("mode"),
+            SearchMode::LexicalOnly
+        ));
+
+        let semantic = SearchArgs {
+            query: "auth".into(),
+            limit: 10,
+            lexical: false,
+            semantic: true,
+        };
+        assert!(matches!(
+            resolve_mode(&semantic).expect("mode"),
+            SearchMode::SemanticOnly
+        ));
+
+        let hybrid = SearchArgs {
+            query: "auth".into(),
+            limit: 10,
+            lexical: false,
+            semantic: false,
+        };
+        assert!(matches!(
+            resolve_mode(&hybrid).expect("mode"),
+            SearchMode::Hybrid
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -369,6 +513,8 @@ mod tests {
         let args = SearchArgs {
             query: "authentication".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         run_search(&args, OutputMode::Human, &root).unwrap();
     }
@@ -379,6 +525,8 @@ mod tests {
         let args = SearchArgs {
             query: "auth".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         run_search(&args, OutputMode::Json, &root).unwrap();
     }
@@ -389,6 +537,8 @@ mod tests {
         let args = SearchArgs {
             query: "zzznomatch".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         // Should succeed (not error) even with no results
         run_search(&args, OutputMode::Human, &root).unwrap();
@@ -400,6 +550,8 @@ mod tests {
         let args = SearchArgs {
             query: "auth*".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         run_search(&args, OutputMode::Human, &root).unwrap();
     }
@@ -410,6 +562,8 @@ mod tests {
         let args = SearchArgs {
             query: "test".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         assert!(run_search(&args, OutputMode::Human, dir.path()).is_err());
     }
@@ -420,6 +574,8 @@ mod tests {
         let args = SearchArgs {
             query: "   ".into(),
             limit: 10,
+            lexical: false,
+            semantic: false,
         };
         assert!(run_search(&args, OutputMode::Human, &root).is_err());
     }

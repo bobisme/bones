@@ -228,6 +228,7 @@ dependencies = [
  "dirs",
  "petgraph",
  "predicates",
+ "rand 0.8.5",
  "ratatui",
  "rusqlite",
  "serde",

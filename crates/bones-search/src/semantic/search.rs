@@ -40,6 +40,10 @@ pub fn knn_search(
         return Ok(Vec::new());
     }
 
+    if let Some(results) = try_knn_search_sqlite_vec(db, query_embedding, limit)? {
+        return Ok(results);
+    }
+
     let mut stmt = db
         .prepare("SELECT item_id, embedding_json FROM item_embeddings")
         .context("failed to prepare semantic KNN query (semantic index missing?)")?;
@@ -91,6 +95,78 @@ pub fn knn_search(
     scored.truncate(limit);
 
     Ok(scored)
+}
+
+fn try_knn_search_sqlite_vec(
+    db: &Connection,
+    query_embedding: &[f32],
+    limit: usize,
+) -> Result<Option<Vec<SemanticSearchResult>>> {
+    let vec_available = db
+        .query_row("SELECT vec_version()", [], |row| row.get::<_, String>(0))
+        .is_ok();
+    if !vec_available {
+        return Ok(None);
+    }
+
+    let query_json = encode_embedding_json(query_embedding);
+    let mut stmt = match db.prepare(
+        "SELECT item_id,
+                vec_distance_cosine(vec_f32(embedding_json), vec_f32(?1)) AS distance
+         FROM item_embeddings
+         ORDER BY distance ASC
+         LIMIT ?2",
+    ) {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            debug!("sqlite-vec KNN unavailable, falling back to Rust KNN: {err}");
+            return Ok(None);
+        }
+    };
+
+    let rows = match stmt.query_map(rusqlite::params![query_json, limit as i64], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(err) => {
+            debug!("sqlite-vec KNN query failed, falling back to Rust KNN: {err}");
+            return Ok(None);
+        }
+    };
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (item_id, distance) = row.context("failed to read sqlite-vec KNN row")?;
+        let distance = distance as f32;
+        let score = if distance <= 1.0 {
+            1.0 - distance
+        } else {
+            1.0 - (distance / 2.0)
+        }
+        .clamp(0.0, 1.0);
+        out.push(SemanticSearchResult { item_id, score });
+    }
+
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.item_id.cmp(&b.item_id))
+    });
+
+    Ok(Some(out))
+}
+
+fn encode_embedding_json(embedding: &[f32]) -> String {
+    let mut encoded = String::from("[");
+    for (idx, value) in embedding.iter().enumerate() {
+        if idx != 0 {
+            encoded.push(',');
+        }
+        encoded.push_str(&value.to_string());
+    }
+    encoded.push(']');
+    encoded
 }
 
 fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f32> {

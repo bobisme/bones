@@ -32,6 +32,7 @@ dirs = { workspace = true }
 terseid = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
+rand = { workspace = true }
 ureq = { version = "2.10", features = ["json"] }
 ratatui = { workspace = true }
 crossterm = { workspace = true }

@@ -51,10 +51,22 @@ pub fn find_duplicates_with_model(
 ) -> Result<Vec<DupCandidate>> {
     let fused = hybrid_search_with_graph(query_title, db, model, graph, limit, config.rrf_k)?;
 
+    let has_semantic = fused.iter().any(|c| c.semantic_rank != usize::MAX);
+    let has_structural = fused.iter().any(|c| c.structural_rank != usize::MAX);
+    let active_layers = 1 + usize::from(has_semantic) + usize::from(has_structural);
+    let max_rrf = active_layers as f32 / (config.rrf_k as f32 + 1.0);
+    let normalize_rrf = |score: f32| {
+        if max_rrf <= f32::EPSILON {
+            0.0
+        } else {
+            (score / max_rrf).clamp(0.0, 1.0)
+        }
+    };
+
     let mut candidates: Vec<DupCandidate> = fused
         .into_iter()
         .map(|r| {
-            let risk = classify_risk(r.score, config);
+            let risk = classify_risk(normalize_rrf(r.score), config);
             DupCandidate {
                 item_id: r.item_id,
                 composite_score: r.score,
@@ -66,10 +78,6 @@ pub fn find_duplicates_with_model(
         })
         .collect();
 
-    let has_semantic = candidates.iter().any(|c| c.semantic_rank != usize::MAX);
-    let has_structural = candidates.iter().any(|c| c.structural_rank != usize::MAX);
-    let active_layers = 1 + usize::from(has_semantic) + usize::from(has_structural);
-    let max_rrf = active_layers as f32 / (config.rrf_k as f32 + 1.0);
     let cutoff = config.maybe_related_threshold * max_rrf;
 
     candidates.retain(|c| c.composite_score >= cutoff);
