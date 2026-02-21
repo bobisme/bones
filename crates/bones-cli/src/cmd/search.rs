@@ -15,6 +15,9 @@ use clap::Args;
 use serde::Serialize;
 use std::io::Write;
 
+const MIN_SEMANTIC_SCORE: f32 = 0.60;
+const MIN_SEMANTIC_TOP_SCORE: f32 = 0.62;
+
 #[derive(Args, Debug)]
 #[command(
     about = "Search items using full-text search",
@@ -72,6 +75,8 @@ pub struct SearchOutput {
     pub count: usize,
     /// Ordered list of results (best match first).
     pub results: Vec<SearchResult>,
+    /// Effective fallback query used when primary plain query produced no hits.
+    pub fallback_query: Option<String>,
 }
 
 /// Execute `bn search <query>`.
@@ -122,32 +127,18 @@ pub fn run_search(
     let limit = args.limit.min(1000);
     let cfg = load_project_config(project_root).unwrap_or_default();
 
-    let results = match mode {
-        SearchMode::LexicalOnly => lexical_only_search(&conn, &args.query, limit)?,
-        SearchMode::SemanticOnly => semantic_only_search(&conn, &args.query, limit)?,
-        SearchMode::Hybrid => {
-            let semantic_model = if cfg.search.semantic {
-                match SemanticModel::load() {
-                    Ok(model) => Some(model),
-                    Err(err) => {
-                        tracing::warn!(
-                            "semantic model unavailable; using lexical+structural search only: {err}"
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            };
+    let mut results = execute_search_mode(mode, &conn, &args.query, limit, cfg.search.semantic)?;
+    let mut fallback_query = None;
 
-            hybrid_search(&args.query, &conn, semantic_model.as_ref(), limit, 60).map_err(
-                |e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."),
-            )?
-            .into_iter()
-            .map(|hit| (hit.item_id, f64::from(hit.score)))
-            .collect()
+    if results.is_empty()
+        && mode != SearchMode::SemanticOnly
+        && let Some(or_query) = or_fallback_query(&args.query)
+    {
+        results = execute_search_mode(mode, &conn, &or_query, limit, cfg.search.semantic)?;
+        if !results.is_empty() {
+            fallback_query = Some(or_query);
         }
-    };
+    }
 
     // Enrich hits with item state
     let mut results_with_meta: Vec<SearchResult> = Vec::with_capacity(results.len());
@@ -173,6 +164,7 @@ pub fn run_search(
         query: args.query.clone(),
         count: results_with_meta.len(),
         results: results_with_meta,
+        fallback_query,
     };
 
     render_mode(
@@ -195,6 +187,84 @@ fn resolve_mode(args: &SearchArgs) -> anyhow::Result<SearchMode> {
     } else {
         Ok(SearchMode::Hybrid)
     }
+}
+
+fn execute_search_mode(
+    mode: SearchMode,
+    conn: &rusqlite::Connection,
+    query_text: &str,
+    limit: usize,
+    semantic_enabled: bool,
+) -> anyhow::Result<Vec<(String, f64)>> {
+    match mode {
+        SearchMode::LexicalOnly => lexical_only_search(conn, query_text, limit),
+        SearchMode::SemanticOnly => semantic_only_search(conn, query_text, limit),
+        SearchMode::Hybrid => {
+            let semantic_model = if semantic_enabled {
+                match SemanticModel::load() {
+                    Ok(model) => Some(model),
+                    Err(err) => {
+                        tracing::warn!(
+                            "semantic model unavailable; using lexical+structural search only: {err}"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            hybrid_search(query_text, conn, semantic_model.as_ref(), limit, 60)
+                .map_err(|e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."))
+                .map(|hits| {
+                    hits.into_iter()
+                        .map(|hit| (hit.item_id, f64::from(hit.score)))
+                        .collect()
+                })
+        }
+    }
+}
+
+fn or_fallback_query(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Respect explicit FTS syntax if user is intentionally using it.
+    if trimmed
+        .chars()
+        .any(|ch| matches!(ch, '"' | '*' | '(' | ')' | ':' | '^'))
+    {
+        return None;
+    }
+
+    if trimmed
+        .split_whitespace()
+        .any(|token| matches!(token.to_ascii_uppercase().as_str(), "AND" | "OR" | "NOT"))
+    {
+        return None;
+    }
+
+    let mut tokens: Vec<String> = trimmed
+        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+        .filter_map(|raw| {
+            let token = raw.trim_matches(|c: char| c == '-' || c == '_');
+            if token.len() >= 2 {
+                Some(token.to_ascii_lowercase())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if tokens.len() < 2 {
+        return None;
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    tokens.retain(|token| seen.insert(token.clone()));
+    Some(tokens.join(" OR "))
 }
 
 fn lexical_only_search(
@@ -224,10 +294,19 @@ fn semantic_only_search(
         .map_err(|e| anyhow::anyhow!("semantic embedding failed: {e}"))?;
     let hits = knn_search(conn, &embedding, limit)
         .map_err(|e| anyhow::anyhow!("semantic KNN search failed: {e}"))?;
-    Ok(hits
-        .into_iter()
+    Ok(filter_semantic_hits(hits))
+}
+
+fn filter_semantic_hits(
+    hits: Vec<bones_search::semantic::SemanticSearchResult>,
+) -> Vec<(String, f64)> {
+    if hits.is_empty() || hits[0].score < MIN_SEMANTIC_TOP_SCORE {
+        return Vec::new();
+    }
+    hits.into_iter()
+        .filter(|hit| hit.score >= MIN_SEMANTIC_SCORE)
         .map(|hit| (hit.item_id, f64::from(hit.score)))
-        .collect())
+        .collect()
 }
 
 /// Render search results in human-readable format.
@@ -242,6 +321,9 @@ fn render_search_human(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result
     }
 
     writeln!(w, "{} result(s) for '{}':", out.count, out.query)?;
+    if let Some(fallback_query) = &out.fallback_query {
+        writeln!(w, "(fallback query applied: {fallback_query})")?;
+    }
     writeln!(w, "{:-<90}", "")?;
     writeln!(w, "{:<16}  {:<8}  {:>8}  TITLE", "ID", "STATE", "SCORE")?;
     writeln!(w, "{:-<90}", "")?;
@@ -261,6 +343,14 @@ fn render_search_text(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result<
     if out.results.is_empty() {
         writeln!(w, "advice  no-results  query={}", out.query)?;
         return Ok(());
+    }
+
+    if let Some(fallback_query) = &out.fallback_query {
+        writeln!(
+            w,
+            "advice  fallback-query  original={}  effective={}",
+            out.query, fallback_query
+        )?;
     }
 
     for result in &out.results {
@@ -422,6 +512,19 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn or_fallback_query_builds_or_query_for_plain_multi_term_input() {
+        let fallback = or_fallback_query("semantic ranking rollout");
+        assert_eq!(fallback.as_deref(), Some("semantic OR ranking OR rollout"));
+    }
+
+    #[test]
+    fn or_fallback_query_skips_explicit_fts_syntax() {
+        assert!(or_fallback_query("auth* AND service").is_none());
+        assert!(or_fallback_query("title:auth").is_none());
+        assert!(or_fallback_query("\"auth service\"").is_none());
+    }
+
     // -----------------------------------------------------------------------
     // render_search_human
     // -----------------------------------------------------------------------
@@ -432,6 +535,7 @@ mod tests {
             query: "nonexistent".into(),
             count: 0,
             results: vec![],
+            fallback_query: None,
         };
         let mut buf = Vec::new();
         render_search_human(&out, &mut buf).unwrap();
@@ -459,6 +563,7 @@ mod tests {
                     state: "doing".into(),
                 },
             ],
+            fallback_query: None,
         };
         let mut buf = Vec::new();
         render_search_human(&out, &mut buf).unwrap();
@@ -591,10 +696,48 @@ mod tests {
                 score: -2.5,
                 state: "open".into(),
             }],
+            fallback_query: None,
         };
         let json = serde_json::to_string(&out).unwrap();
         assert!(json.contains("bn-001"));
         assert!(json.contains("auth"));
         assert!(json.contains("Auth bug"));
+    }
+
+    #[test]
+    fn filter_semantic_hits_drops_low_confidence_queries() {
+        let hits = vec![
+            bones_search::semantic::SemanticSearchResult {
+                item_id: "bn-001".into(),
+                score: 0.40,
+            },
+            bones_search::semantic::SemanticSearchResult {
+                item_id: "bn-002".into(),
+                score: 0.39,
+            },
+        ];
+        assert!(filter_semantic_hits(hits).is_empty());
+    }
+
+    #[test]
+    fn filter_semantic_hits_keeps_high_confidence_rows() {
+        let hits = vec![
+            bones_search::semantic::SemanticSearchResult {
+                item_id: "bn-001".into(),
+                score: 0.70,
+            },
+            bones_search::semantic::SemanticSearchResult {
+                item_id: "bn-002".into(),
+                score: 0.61,
+            },
+            bones_search::semantic::SemanticSearchResult {
+                item_id: "bn-003".into(),
+                score: 0.59,
+            },
+        ];
+        let filtered = filter_semantic_hits(hits);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].0, "bn-001");
+        assert_eq!(filtered[1].0, "bn-002");
     }
 }

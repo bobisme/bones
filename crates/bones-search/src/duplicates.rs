@@ -66,10 +66,11 @@ pub fn find_duplicates_with_model(
     let mut candidates: Vec<DupCandidate> = fused
         .into_iter()
         .map(|r| {
-            let risk = classify_risk(normalize_rrf(r.score), config);
+            let normalized_score = normalize_rrf(r.score);
+            let risk = classify_risk(normalized_score, config);
             DupCandidate {
                 item_id: r.item_id,
-                composite_score: r.score,
+                composite_score: normalized_score,
                 lexical_rank: r.lexical_rank,
                 semantic_rank: r.semantic_rank,
                 structural_rank: r.structural_rank,
@@ -78,9 +79,7 @@ pub fn find_duplicates_with_model(
         })
         .collect();
 
-    let cutoff = config.maybe_related_threshold * max_rrf;
-
-    candidates.retain(|c| c.composite_score >= cutoff);
+    candidates.retain(|c| c.composite_score >= config.maybe_related_threshold);
     Ok(candidates)
 }
 

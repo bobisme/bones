@@ -248,41 +248,55 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
 }
 
 fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(
-        w,
-        "{}  {}  {}  {}",
-        item.id, item.kind, item.state, item.title
-    )?;
+    writeln!(w, "Item {}", item.id)?;
+    writeln!(w, "{:-<72}", "")?;
+    writeln!(w, "{}", item.title)?;
+    writeln!(w, "kind:        {}", item.kind)?;
+    writeln!(w, "state:       {}", item.state)?;
+    writeln!(w, "urgency:     {}", item.urgency)?;
     if let Some(ref size) = item.size {
-        writeln!(w, "{}  size  {}", item.id, size)?;
+        writeln!(w, "size:        {}", size)?;
     }
     if let Some(ref parent) = item.parent_id {
-        writeln!(w, "{}  parent  {}", item.id, parent)?;
+        writeln!(w, "parent:      {}", parent)?;
     }
     if !item.labels.is_empty() {
-        writeln!(w, "{}  labels  {}", item.id, item.labels.join(","))?;
+        writeln!(w, "labels:      {}", item.labels.join(", "))?;
     }
     if !item.assignees.is_empty() {
-        writeln!(w, "{}  assignees  {}", item.id, item.assignees.join(","))?;
+        writeln!(w, "assignees:   {}", item.assignees.join(", "))?;
     }
     if !item.depends_on.is_empty() {
-        writeln!(w, "{}  depends_on  {}", item.id, item.depends_on.join(","))?;
+        writeln!(w, "depends_on:  {}", item.depends_on.join(", "))?;
     }
     if !item.dependents.is_empty() {
-        writeln!(w, "{}  dependents  {}", item.id, item.dependents.join(","))?;
+        writeln!(w, "dependents:  {}", item.dependents.join(", "))?;
     }
     if let Some(ref desc) = item.description {
-        writeln!(w, "{}  description  {}", item.id, desc.replace('\n', " "))?;
+        writeln!(w)?;
+        writeln!(w, "Description")?;
+        writeln!(w, "{:-<72}", "")?;
+        for line in desc.lines() {
+            writeln!(w, "{line}")?;
+        }
     }
-    for comment in &item.comments {
-        writeln!(
-            w,
-            "{}  comment  ts={}  [{}] {}",
-            item.id,
-            micros_to_rfc3339(comment.created_at_us),
-            comment.author,
-            comment.body
-        )?;
+
+    if !item.comments.is_empty() {
+        writeln!(w)?;
+        writeln!(w, "Comments ({})", item.comments.len())?;
+        writeln!(w, "{:-<72}", "")?;
+        for (idx, comment) in item.comments.iter().enumerate() {
+            if idx > 0 {
+                writeln!(w)?;
+            }
+            writeln!(
+                w,
+                "[{}] {}: {}",
+                micros_to_rfc3339(comment.created_at_us),
+                comment.author,
+                comment.body
+            )?;
+        }
     }
     Ok(())
 }
@@ -330,34 +344,49 @@ pub fn resolve_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
 
         // 3a. Prefix match on "bn-{input}%"
         let like_pattern = format!("bn-{input}%");
-        let prefix: Option<String> = conn
-            .query_row(
-                "SELECT item_id FROM items WHERE item_id LIKE ?1 AND is_deleted = 0 \
-                 ORDER BY item_id LIMIT 1",
-                params![like_pattern],
-                |row| row.get(0),
-            )
-            .ok();
-        if prefix.is_some() {
-            return Ok(prefix);
+        if let Some(resolved) = resolve_prefix_match(conn, input, &like_pattern)? {
+            return Ok(Some(resolved));
         }
     } else {
         // 3b. Prefix match on "{input}%" (already has "bn-")
         let like_pattern = format!("{input}%");
-        let prefix: Option<String> = conn
-            .query_row(
-                "SELECT item_id FROM items WHERE item_id LIKE ?1 AND is_deleted = 0 \
-                 ORDER BY item_id LIMIT 1",
-                params![like_pattern],
-                |row| row.get(0),
-            )
-            .ok();
-        if prefix.is_some() {
-            return Ok(prefix);
+        if let Some(resolved) = resolve_prefix_match(conn, input, &like_pattern)? {
+            return Ok(Some(resolved));
         }
     }
 
     Ok(None)
+}
+
+fn resolve_prefix_match(
+    conn: &rusqlite::Connection,
+    input: &str,
+    like_pattern: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT item_id FROM items
+         WHERE item_id LIKE ?1 AND is_deleted = 0
+         ORDER BY item_id
+         LIMIT 6",
+    )?;
+
+    let rows = stmt.query_map(params![like_pattern], |row| row.get::<_, String>(0))?;
+    let mut matches = Vec::new();
+    for row in rows {
+        matches.push(row?);
+    }
+
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => {
+            anyhow::bail!(
+                "ambiguous item ID prefix '{}'; matches: {}",
+                input,
+                matches.join(", ")
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +530,8 @@ mod tests {
         let mut buf = Vec::new();
         render_show_text(&item, &mut buf).expect("render text");
         let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("comment  ts="));
+        assert!(out.contains("Comments (1)"));
+        assert!(out.contains("[1970-"));
     }
 
     // -----------------------------------------------------------------------
@@ -563,6 +593,27 @@ mod tests {
     fn resolve_not_found() {
         let conn = test_db_with_item("bn-abc123");
         assert!(resolve_item_id(&conn, "xyz999").unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_prefix_rejects_ambiguous_matches() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        migrations::migrate(&mut conn).expect("migrate");
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us)\
+             VALUES ('bn-100', 'A', 'task', 'open', 'default', 0, '', 100, 200)",
+            [],
+        )
+        .expect("insert first item");
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, search_labels, created_at_us, updated_at_us)\
+             VALUES ('bn-101', 'B', 'task', 'open', 'default', 0, '', 100, 200)",
+            [],
+        )
+        .expect("insert second item");
+
+        let err = resolve_item_id(&conn, "bn-10").expect_err("prefix should be ambiguous");
+        assert!(err.to_string().contains("ambiguous item ID prefix"));
     }
 
     #[test]

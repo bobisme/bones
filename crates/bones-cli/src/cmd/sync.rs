@@ -20,8 +20,10 @@ pub struct SyncReport {
     pub rebuilt: bool,
     /// Whether `git push` succeeded.
     pub pushed: bool,
-    /// Any non-fatal warnings collected during the run.
+    /// Hard errors collected during the run.
     pub errors: Vec<String>,
+    /// Non-fatal warnings collected during the run.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -45,14 +47,20 @@ pub fn sync_workflow(repo_dir: &Path, no_push: bool) -> Result<SyncReport> {
     let mut report = SyncReport::default();
 
     // Step 1: git pull
-    match run_git_pull(repo_dir) {
-        Ok(events_merged) => {
-            report.pulled = true;
-            report.events_merged = events_merged;
+    if has_tracking_upstream(repo_dir)? {
+        match run_git_pull(repo_dir) {
+            Ok(events_merged) => {
+                report.pulled = true;
+                report.events_merged = events_merged;
+            }
+            Err(e) => {
+                report.errors.push(format!("git pull: {e}"));
+            }
         }
-        Err(e) => {
-            report.errors.push(format!("git pull: {e}"));
-        }
+    } else {
+        report
+            .warnings
+            .push("git pull skipped: no upstream tracking branch configured".to_string());
     }
 
     // Step 2: bn admin rebuild --incremental
@@ -67,13 +75,19 @@ pub fn sync_workflow(repo_dir: &Path, no_push: bool) -> Result<SyncReport> {
 
     // Step 3: git push (skipped with --no-push)
     if !no_push {
-        match run_git_push(repo_dir) {
-            Ok(()) => {
-                report.pushed = true;
+        if has_push_target(repo_dir)? {
+            match run_git_push(repo_dir) {
+                Ok(()) => {
+                    report.pushed = true;
+                }
+                Err(e) => {
+                    report.errors.push(format!("git push: {e}"));
+                }
             }
-            Err(e) => {
-                report.errors.push(format!("git push: {e}"));
-            }
+        } else {
+            report
+                .warnings
+                .push("git push skipped: no push destination configured".to_string());
         }
     }
 
@@ -268,6 +282,38 @@ fn run_rebuild(repo_dir: &Path) -> Result<()> {
     }
 }
 
+fn has_tracking_upstream(repo_dir: &Path) -> Result<bool> {
+    let output = Command::new("git")
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ])
+        .current_dir(repo_dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .context("Failed to inspect git upstream tracking")?;
+    Ok(output.status.success())
+}
+
+fn has_push_target(repo_dir: &Path) -> Result<bool> {
+    let output = Command::new("git")
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{push}",
+        ])
+        .current_dir(repo_dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .context("Failed to inspect git push destination")?;
+    Ok(output.status.success())
+}
+
 fn is_git_work_tree(repo_dir: &Path) -> bool {
     let output = Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
@@ -314,6 +360,9 @@ fn print_report(report: &SyncReport, output: OutputMode) {
             for err in &report.errors {
                 println!("error={err}");
             }
+            for warning in &report.warnings {
+                println!("warning={warning}");
+            }
         }
         OutputMode::Pretty => {
             let stdout = std::io::stdout();
@@ -335,6 +384,14 @@ fn print_report(report: &SyncReport, output: OutputMode) {
                 let _ = pretty_section(&mut w, "Errors");
                 for e in &report.errors {
                     println!("- {e}");
+                }
+            }
+
+            if !report.warnings.is_empty() {
+                println!();
+                let _ = pretty_section(&mut w, "Warnings");
+                for wmsg in &report.warnings {
+                    println!("- {wmsg}");
                 }
             }
         }
@@ -507,12 +564,14 @@ mod tests {
             rebuilt: true,
             pushed: false,
             errors: vec!["git push: no remote".to_string()],
+            warnings: vec!["git pull skipped: no upstream".to_string()],
         };
         let json = serde_json::to_string(&report).expect("serialize");
         assert!(json.contains("\"pulled\":true"));
         assert!(json.contains("\"events_merged\":3"));
         assert!(json.contains("\"pushed\":false"));
         assert!(json.contains("git push: no remote"));
+        assert!(json.contains("git pull skipped: no upstream"));
     }
 
     #[test]
@@ -523,6 +582,7 @@ mod tests {
         assert!(!r.pushed);
         assert_eq!(r.events_merged, 0);
         assert!(r.errors.is_empty());
+        assert!(r.warnings.is_empty());
     }
 
     #[test]

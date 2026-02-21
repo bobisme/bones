@@ -20,9 +20,11 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 
+use crate::db::query;
 use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
+use crate::shard::ShardManager;
 
 // ---------------------------------------------------------------------------
 // ProjectionStats
@@ -109,10 +111,20 @@ impl<'conn> Projector<'conn> {
     ///
     /// Returns an error if the projection fails.
     pub fn project_event(&self, event: &Event) -> Result<bool> {
-        match self.project_event_inner(event)? {
-            ProjectResult::Projected => Ok(true),
-            ProjectResult::Duplicate => Ok(false),
+        let projected = match self.project_event_inner(event)? {
+            ProjectResult::Projected => true,
+            ProjectResult::Duplicate => false,
+        };
+
+        if let Err(err) = self.update_cursor_to_event_log_end(&event.event_hash) {
+            tracing::warn!(
+                event_hash = %event.event_hash,
+                error = %err,
+                "failed to update projection cursor after single-event projection"
+            );
         }
+
+        Ok(projected)
     }
 
     // -----------------------------------------------------------------------
@@ -197,6 +209,38 @@ impl<'conn> Projector<'conn> {
                 ],
             )
             .context("record projected event hash")?;
+        Ok(())
+    }
+
+    fn update_cursor_to_event_log_end(&self, event_hash: &str) -> Result<()> {
+        let main_db_file: String = self
+            .conn
+            .query_row(
+                "SELECT file FROM pragma_database_list WHERE name = 'main'",
+                [],
+                |row| row.get(0),
+            )
+            .context("read main database file from pragma_database_list")?;
+
+        if main_db_file.trim().is_empty() {
+            // In-memory projections used in tests have no on-disk log context.
+            return Ok(());
+        }
+
+        let db_path = std::path::Path::new(&main_db_file);
+        let Some(bones_dir) = db_path.parent() else {
+            return Ok(());
+        };
+
+        let shard_mgr = ShardManager::new(bones_dir);
+        let total_len = shard_mgr
+            .total_content_len()
+            .map_err(|e| anyhow::anyhow!("read event-log size for cursor update: {e}"))?;
+        let total_len_i64 = i64::try_from(total_len).unwrap_or(i64::MAX);
+
+        query::update_projection_cursor(self.conn, total_len_i64, Some(event_hash))
+            .context("write projection cursor after single-event projection")?;
+
         Ok(())
     }
 
@@ -721,10 +765,13 @@ mod tests {
     use crate::db::{migrations, query};
     use crate::event::data::*;
     use crate::event::types::EventType;
+    use crate::event::writer;
     use crate::model::item::{Kind, Size, State, Urgency};
     use crate::model::item_id::ItemId;
+    use crate::shard::ShardManager;
     use rusqlite::Connection;
     use std::collections::BTreeMap;
+    use tempfile::TempDir;
 
     fn test_db() -> Connection {
         let mut conn = Connection::open_in_memory().expect("open in-memory db");
@@ -770,6 +817,37 @@ mod tests {
             hash,
             ts,
         )
+    }
+
+    #[test]
+    fn project_event_updates_projection_cursor_for_file_backed_db() {
+        let dir = TempDir::new().expect("tempdir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(&bones_dir).expect("create .bones");
+
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard manager");
+
+        let db_path = bones_dir.join("bones.db");
+        let mut conn = Connection::open(&db_path).expect("open projection db");
+        migrations::migrate(&mut conn).expect("migrate");
+        ensure_tracking_table(&conn).expect("create tracking table");
+
+        let projector = Projector::new(&conn);
+        let mut event = make_create("bn-001", "Cursor update", "h1", 1000);
+        let line = writer::write_event(&mut event).expect("serialize event");
+        shard_mgr
+            .append(&line, false, std::time::Duration::from_secs(5))
+            .expect("append event line");
+
+        projector.project_event(&event).expect("project event");
+
+        let (offset, hash) = query::get_projection_cursor(&conn).expect("read projection cursor");
+        let expected_offset =
+            i64::try_from(shard_mgr.total_content_len().expect("content len")).unwrap_or(i64::MAX);
+
+        assert_eq!(offset, expected_offset);
+        assert_eq!(hash.as_deref(), Some(event.event_hash.as_str()));
     }
 
     // -----------------------------------------------------------------------

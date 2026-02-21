@@ -500,6 +500,8 @@ fn collect_projection_report(
 
     if report.drift_indicators.is_empty() {
         report.status = "ok".to_string();
+    } else if report.status == "ok" {
+        report.status = "drift_detected".to_string();
     }
 
     report
@@ -776,7 +778,7 @@ mod tests {
 
         let report = build_report(dir.path()).expect("diagnose report");
 
-        assert_eq!(report.projection.status, "ok");
+        assert_eq!(report.projection.status, "drift_detected");
         assert_eq!(report.projection.cursor_offset_matches_log, Some(false));
         assert!(
             !report.projection.drift_indicators.is_empty(),

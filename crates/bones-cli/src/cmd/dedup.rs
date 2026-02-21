@@ -3,6 +3,7 @@
 //! Scans all open items, builds a sparse similarity graph using BM25 prefiltering
 //! and fusion scoring, then reports duplicate clusters.
 
+use crate::cmd::dup::build_fts_query;
 use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::config::load_project_config;
 use bones_core::db::{fts, query};
@@ -130,7 +131,7 @@ pub fn run_dedup(
     let mut pair_scores: HashMap<(String, String), f64> = HashMap::new();
 
     for item in &open_items {
-        let query_text = build_query_text(&item.title, item.description.as_deref());
+        let query_text = build_fts_query(&item.title, item.description.as_deref());
         if query_text.trim().is_empty() {
             continue;
         }
@@ -240,13 +241,6 @@ fn render_human(groups: &Vec<DedupGroupOutput>, w: &mut dyn Write) -> std::io::R
         }
     }
     Ok(())
-}
-
-fn build_query_text(title: &str, description: Option<&str>) -> String {
-    match description.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(desc) => format!("{title} {desc}"),
-        None => title.to_string(),
-    }
 }
 
 fn normalized_bm25(rank: f64, source_rank: f64) -> f64 {
@@ -398,11 +392,11 @@ mod tests {
     }
 
     #[test]
-    fn build_query_text_uses_description_when_present() {
+    fn dedup_uses_sanitized_fts_query_builder() {
         assert_eq!(
-            build_query_text("title", Some("desc")),
-            "title desc".to_string()
+            build_fts_query("[Phase 2] title", Some("goal: desc")),
+            "title OR desc".to_string()
         );
-        assert_eq!(build_query_text("title", Some("  ")), "title".to_string());
+        assert_eq!(build_fts_query("title", Some("  ")), "title".to_string());
     }
 }

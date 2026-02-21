@@ -72,6 +72,28 @@ pub fn run_plan(args: &PlanArgs, output: OutputMode, project_root: &Path) -> any
             render_error(output, &CliError::new(&msg))?;
             anyhow::bail!("{msg}");
         }
+
+        let Some(item) = query::get_item(&conn, goal_id, false)? else {
+            let msg = format!("item not found: {goal_id}");
+            render_error(output, &CliError::new(&msg))?;
+            anyhow::bail!("{msg}");
+        };
+
+        if item.kind != "goal" {
+            let msg = format!(
+                "triage plan requires a goal item; '{}' is kind={}",
+                goal_id, item.kind
+            );
+            render_error(
+                output,
+                &CliError::with_details(
+                    &msg,
+                    "Use a goal ID (for example from `bn list --kind goal`) or run `bn plan` without an ID",
+                    "invalid_plan_target",
+                ),
+            )?;
+            anyhow::bail!("{msg}");
+        }
     }
 
     let open_items = query::list_items(

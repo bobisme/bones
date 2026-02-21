@@ -4,6 +4,7 @@
 //! Reciprocal Rank Fusion (RRF) to produce a ranked list of similar items.
 //! Excludes the source item from results.
 
+use crate::cmd::dup::build_fts_query;
 use crate::cmd::show::resolve_item_id;
 use crate::output::{CliError, OutputMode, render, render_error};
 use bones_core::config::load_project_config;
@@ -144,11 +145,20 @@ pub fn run_similar(
         }
     };
 
-    // Build query text from title + optional description
-    let query_text = match source.description.as_deref() {
-        Some(desc) if !desc.is_empty() => format!("{} {}", source.title, desc),
-        _ => source.title.clone(),
-    };
+    // Build a sanitized FTS query from title + optional description.
+    let query_text = build_fts_query(&source.title, source.description.as_deref());
+
+    if query_text.is_empty() {
+        let similar_output = SimilarOutput {
+            source_id: resolved_id,
+            source_title: source.title,
+            count: 0,
+            results: Vec::new(),
+        };
+        return render(output, &similar_output, |out, w| {
+            render_similar_human(out, w)
+        });
+    }
 
     let cfg = load_project_config(project_root).unwrap_or_default();
     let search_config = SearchConfig {
@@ -356,6 +366,33 @@ mod tests {
         (dir, root)
     }
 
+    fn setup_test_db_with_punctuation_titles() -> (tempfile::TempDir, std::path::PathBuf) {
+        let (dir, root) = setup_test_db();
+        let db_path = root.join(".bones").join("bones.db");
+        let conn = Connection::open(&db_path).expect("open db");
+        let proj = Projector::new(&conn);
+
+        proj.project_event(&make_create(
+            "bn-010",
+            "[Phase 2] Auth service goal: callback timeout",
+            Some("Investigate timeout in auth callback path"),
+            &["auth", "phase-2"],
+            "h10",
+        ))
+        .expect("insert punctuated source item");
+
+        proj.project_event(&make_create(
+            "bn-011",
+            "Auth callback timeout in phase 2",
+            Some("Auth callback timeout mirrors goal issue"),
+            &["auth"],
+            "h11",
+        ))
+        .expect("insert punctuated neighbor item");
+
+        (dir, root)
+    }
+
     // -----------------------------------------------------------------------
     // rank_to_score
     // -----------------------------------------------------------------------
@@ -554,6 +591,16 @@ mod tests {
         // "001" should resolve to "bn-001"
         let args = SimilarArgs {
             id: "001".into(),
+            limit: 10,
+        };
+        run_similar(&args, OutputMode::Human, &root).unwrap();
+    }
+
+    #[test]
+    fn run_similar_handles_titles_with_punctuation() {
+        let (_dir, root) = setup_test_db_with_punctuation_titles();
+        let args = SimilarArgs {
+            id: "bn-010".into(),
             limit: 10,
         };
         run_similar(&args, OutputMode::Human, &root).unwrap();

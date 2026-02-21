@@ -40,7 +40,7 @@ use ratatui::{
     widgets::{Block, Borders, Tabs},
 };
 use std::{
-    io::{self, Stdout},
+    io::{self, IsTerminal, Stdout},
     path::Path,
     time::Duration,
 };
@@ -325,6 +325,12 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
 /// Starts in the List view. Press `t` for Triage, `S` for Search, `l` to
 /// return to List, `q` to quit.
 pub fn run_tui(project_root: &Path) -> Result<()> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        anyhow::bail!(
+            "tui requires an interactive terminal (TTY). Use CLI commands like `bn list`, `bn search`, or `bn triage` in non-interactive environments"
+        );
+    }
+
     let mut app = TuiApp::new(project_root)?;
     let mut terminal = setup_terminal()?;
     let result = run_loop(&mut terminal, &mut app);

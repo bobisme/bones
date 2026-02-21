@@ -273,6 +273,23 @@ fn score_bar(score: f64, min_score: f64, max_score: f64) -> String {
     format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled))
 }
 
+fn display_score(score: f64) -> String {
+    if score.is_infinite() {
+        if score.is_sign_positive() {
+            return "URGENT".to_string();
+        }
+        return "PUNT".to_string();
+    }
+
+    if score >= f64::MAX / 2.0 {
+        "URGENT".to_string()
+    } else if score <= -f64::MAX / 2.0 {
+        "PUNT".to_string()
+    } else {
+        format!("{score:.4}")
+    }
+}
+
 fn render_next_card(
     item: &NextPick,
     w: &mut dyn Write,
@@ -280,12 +297,13 @@ fn render_next_card(
     max_score: f64,
 ) -> std::io::Result<()> {
     let bar = score_bar(item.score, min_score, max_score);
+    let score = display_score(item.score);
 
     writeln!(w, "Next item")?;
     writeln!(w, "{:-<72}", "")?;
     writeln!(w, "ID:    {}", item.id)?;
     writeln!(w, "Title: {}", item.title)?;
-    writeln!(w, "Score: [{bar}] {:.4}", item.score)?;
+    writeln!(w, "Score: [{bar}] {score}")?;
     writeln!(w, "Why:   {}", item.explanation)
 }
 
@@ -300,10 +318,11 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
     writeln!(w, "{:-<96}", "")?;
 
     for assignment in &payload.assignments {
+        let score = display_score(assignment.score);
         writeln!(
             w,
-            "{:>4}  {:<16}  {:>8.4}  {}",
-            assignment.agent_slot, assignment.id, assignment.score, assignment.title
+            "{:>4}  {:<16}  {:>8}  {}",
+            assignment.agent_slot, assignment.id, score, assignment.title
         )?;
         writeln!(w, "      why: {}", assignment.explanation)?;
     }
@@ -312,10 +331,11 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
 }
 
 fn render_next_text(item: &NextPick, w: &mut dyn Write) -> std::io::Result<()> {
+    let score = display_score(item.score);
     writeln!(
         w,
-        "{}  next  score={:.4}  {}  why={}",
-        item.id, item.score, item.title, item.explanation
+        "{}  next  score={}  {}  why={}",
+        item.id, score, item.title, item.explanation
     )
 }
 
@@ -326,14 +346,11 @@ fn render_assignments_text(payload: &NextAssignments, w: &mut dyn Write) -> std:
     }
 
     for assignment in &payload.assignments {
+        let score = display_score(assignment.score);
         writeln!(
             w,
-            "slot={}  {}  score={:.4}  {}  why={}",
-            assignment.agent_slot,
-            assignment.id,
-            assignment.score,
-            assignment.title,
-            assignment.explanation
+            "slot={}  {}  score={}  {}  why={}",
+            assignment.agent_slot, assignment.id, score, assignment.title, assignment.explanation
         )?;
     }
 
@@ -367,5 +384,12 @@ mod tests {
 
         assert_eq!(hi, "█".repeat(20));
         assert_eq!(lo, "░".repeat(20));
+    }
+
+    #[test]
+    fn display_score_maps_urgent_and_punt() {
+        assert_eq!(display_score(f64::MAX), "URGENT");
+        assert_eq!(display_score(f64::NEG_INFINITY), "PUNT");
+        assert_eq!(display_score(0.12567), "0.1257");
     }
 }

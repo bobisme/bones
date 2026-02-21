@@ -291,33 +291,103 @@ fn classify_match(score: f64, dup_threshold: f64, related_threshold: f64) -> Mat
 
 /// Build a sanitized FTS5 query from an item's title and optional description.
 ///
-/// Extracts word tokens (alphanumeric + hyphens), de-duplicates, and joins
-/// them with spaces for FTS5 OR semantics. Special FTS5 characters are stripped
-/// to prevent syntax errors.
+/// Extracts high-signal word tokens, de-duplicates, and joins them with `OR`
+/// for FTS matching. Boilerplate/template words are filtered to improve
+/// duplicate/similar precision on large generated backlogs.
 pub fn build_fts_query(title: &str, description: Option<&str>) -> String {
-    let combined = match description {
-        Some(desc) => format!("{title} {desc}"),
-        None => title.to_string(),
-    };
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens = Vec::new();
 
-    // Extract word tokens: alphanumeric and hyphens, minimum 3 chars to reduce noise
-    let mut tokens: Vec<String> = combined
-        .split(|c: char| !c.is_alphanumeric() && c != '-')
+    for token in tokenize_fts_terms(title, 3) {
+        if is_template_noise_token(&token) {
+            continue;
+        }
+        if seen.insert(token.clone()) {
+            tokens.push(token);
+        }
+    }
+
+    if let Some(description) = description {
+        let mut desc_added = 0usize;
+        for token in tokenize_fts_terms(description, 4) {
+            if desc_added >= 12 {
+                break;
+            }
+            if is_template_noise_token(&token) {
+                continue;
+            }
+            if seen.insert(token.clone()) {
+                tokens.push(token);
+                desc_added += 1;
+            }
+        }
+    }
+
+    if tokens.is_empty() {
+        for token in tokenize_fts_terms(title, 2) {
+            if seen.insert(token.clone()) {
+                tokens.push(token);
+            }
+        }
+    }
+
+    tokens.join(" OR ")
+}
+
+fn tokenize_fts_terms(text: &str, min_len: usize) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
         .filter_map(|tok| {
-            let t = tok.trim_matches('-');
-            if t.len() >= 3 {
-                Some(t.to_ascii_lowercase())
+            if tok.len() >= min_len {
+                Some(tok.to_ascii_lowercase())
             } else {
                 None
             }
         })
-        .collect();
+        .collect()
+}
 
-    // De-duplicate while preserving order
-    let mut seen = std::collections::HashSet::new();
-    tokens.retain(|t| seen.insert(t.clone()));
-
-    tokens.join(" ")
+fn is_template_noise_token(token: &str) -> bool {
+    matches!(
+        token,
+        "and"
+            | "acceptance"
+            | "analysis"
+            | "blockers"
+            | "build"
+            | "context"
+            | "criteria"
+            | "default"
+            | "define"
+            | "delivery"
+            | "description"
+            | "discovery"
+            | "document"
+            | "done"
+            | "doing"
+            | "for"
+            | "from"
+            | "goal"
+            | "guardrails"
+            | "implementation"
+            | "item"
+            | "items"
+            | "migration"
+            | "phase"
+            | "planning"
+            | "program"
+            | "regression"
+            | "risk"
+            | "rollout"
+            | "scope"
+            | "stabilization"
+            | "task"
+            | "tasks"
+            | "the"
+            | "this"
+            | "track"
+            | "with"
+            | "work"
+    )
 }
 
 /// Render duplicate candidates in human-readable format.
@@ -418,7 +488,7 @@ mod tests {
         let q = build_fts_query("Authentication timeout regression", None);
         assert!(q.contains("authentication"));
         assert!(q.contains("timeout"));
-        assert!(q.contains("regression"));
+        assert!(!q.contains("regression"));
     }
 
     #[test]
@@ -463,6 +533,29 @@ mod tests {
         assert!(!q.contains('*'));
         assert!(!q.contains('('));
         assert!(!q.contains('{'));
+    }
+
+    #[test]
+    fn build_fts_query_splits_hyphenated_tokens() {
+        let q = build_fts_query("pressure-test phase-2 callback-timeout", None);
+        assert!(q.contains("pressure"));
+        assert!(q.contains("test"));
+        assert!(!q.contains("phase"));
+        assert!(q.contains("callback"));
+        assert!(q.contains("timeout"));
+        assert!(!q.contains('-'));
+    }
+
+    #[test]
+    fn build_fts_query_filters_template_noise_tokens() {
+        let q = build_fts_query(
+            "Phase 2 implementation planning",
+            Some("Acceptance criteria and context"),
+        );
+        assert_eq!(
+            q, "phase OR implementation OR planning",
+            "expected template-noise filtering to fall back to title tokens"
+        );
     }
 
     // -----------------------------------------------------------------------
