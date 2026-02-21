@@ -147,6 +147,15 @@ pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Res
     Ok(SyncStats { embedded, removed })
 }
 
+/// Ensure semantic index tables exist without running embedding inference.
+///
+/// This is useful for maintenance flows that want predictable schema state
+/// (for example after a projection rebuild) while deferring embedding work
+/// until a semantic query is actually executed.
+pub fn ensure_semantic_index_schema(db: &Connection) -> Result<()> {
+    ensure_embedding_schema(db)
+}
+
 fn ensure_embedding_schema(db: &Connection) -> Result<()> {
     db.execute_batch(
         "
