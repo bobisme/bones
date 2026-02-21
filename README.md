@@ -1,5 +1,7 @@
 # bones
 
+![Judgement of the Backlog](images/judgement-of-the-backlog.webp)
+
 bones is a CRDT-native issue tracker for distributed human and agent collaboration.
 
 ## Installation
