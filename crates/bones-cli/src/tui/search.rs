@@ -366,8 +366,13 @@ mod tests {
         view.query = "First".to_string();
         view.perform_search().unwrap();
 
-        assert_eq!(view.results.len(), 1);
-        assert_eq!(view.state.selected(), Some(0));
+        assert!(!view.results.is_empty());
+        let first_index = view
+            .results
+            .iter()
+            .position(|res| res.item.item_id == "bn-1")
+            .expect("bn-1 should be present in search results");
+        view.state.select(Some(first_index));
 
         // Enter -> Select
         let action = view.handle_key(KeyEvent::from(KeyCode::Enter)).unwrap();

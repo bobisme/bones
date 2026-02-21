@@ -6,6 +6,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db;
@@ -105,7 +106,7 @@ fn emit_assign_event(
     let mut event = Event {
         wall_ts_us: ts,
         agent: actor.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Assign,
         item_id: ItemId::new_unchecked(item_id),
@@ -116,6 +117,9 @@ fn emit_assign_event(
         }),
         event_hash: String::new(),
     };
+
+    let project_root = bones_dir.parent().unwrap_or(bones_dir);
+    assign_next_itc(project_root, &mut event)?;
 
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;

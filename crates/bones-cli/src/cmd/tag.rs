@@ -1,6 +1,7 @@
 //! `bn bone tag` and `bn bone untag` — add/remove labels from work items.
 
 use crate::agent;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db::query::{get_labels, try_open_projection};
@@ -189,7 +190,7 @@ fn emit_labels_event(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".into(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Update,
         item_id: item_id.clone(),
@@ -200,6 +201,8 @@ fn emit_labels_event(
         }),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     let line =
         write_event(&mut event).map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;

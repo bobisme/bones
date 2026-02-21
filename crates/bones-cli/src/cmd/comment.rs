@@ -2,6 +2,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db::project;
@@ -240,7 +241,7 @@ fn run_comment_add(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.clone(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Comment,
         item_id,
@@ -250,6 +251,8 @@ fn run_comment_add(
         }),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     let line =
         write_event(&mut event).map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;

@@ -17,6 +17,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 
 #[derive(Args, Debug)]
@@ -303,7 +304,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
         let mut event = Event {
             wall_ts_us: plan.first_seen_ts,
             agent: "github/importer".to_string(),
-            itc: format!("itc:github:{}", plan.milestone.number),
+            itc: String::new(),
             parents: Vec::new(),
             event_type: EventType::Create,
             item_id: milestone_id,
@@ -321,7 +322,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
             event_hash: String::new(),
         };
 
-        append_event(&shard_manager, active_shard, &mut event)?;
+        append_event(project_root, &shard_manager, active_shard, &mut event)?;
         existing_item_ids.insert(event.item_id.to_string());
         report.imported_milestones += 1;
     }
@@ -350,13 +351,13 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
         let planned = plan_issue_events(issue, &comments, parent)?;
         let mut previous_hash: Option<String> = None;
 
-        for (index, planned_event) in planned.into_iter().enumerate() {
+        for planned_event in planned {
             let (event_type, data) = planned_event.payload.to_event_parts();
 
             let mut event = Event {
                 wall_ts_us: planned_event.ts,
                 agent: planned_event.agent,
-                itc: format!("itc:github:{}:{}", issue.number, index),
+                itc: String::new(),
                 parents: previous_hash.iter().cloned().collect(),
                 event_type,
                 item_id: issue_id.clone(),
@@ -364,7 +365,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
                 event_hash: String::new(),
             };
 
-            append_event(&shard_manager, active_shard, &mut event)?;
+            append_event(project_root, &shard_manager, active_shard, &mut event)?;
             previous_hash = Some(event.event_hash.clone());
 
             match event.event_type {
@@ -467,7 +468,7 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
         let mut event = Event {
             wall_ts_us: record.timestamp,
             agent: record.agent,
-            itc: format!("itc:jsonl:{line_no}"),
+            itc: String::new(),
             parents: parent_index
                 .get(item_id.as_str())
                 .cloned()
@@ -479,6 +480,7 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
             event_hash: String::new(),
         };
 
+        assign_next_itc(project_root, &mut event)?;
         let line = write_event(&mut event).context("failed to serialize imported event")?;
         let (year, month) = event_to_shard_timestamp(event.wall_ts_us)
             .with_context(|| format!("line {line_no}: invalid timestamp {}", event.wall_ts_us))?;
@@ -686,10 +688,12 @@ fn plan_issue_events(
 }
 
 fn append_event(
+    project_root: &Path,
     shard_manager: &ShardManager,
     active_shard: (i32, u32),
     event: &mut Event,
 ) -> Result<()> {
+    assign_next_itc(project_root, event)?;
     let line = write_event(event).context("failed to serialize imported event")?;
     shard_manager
         .append_raw(active_shard.0, active_shard.1, &line)

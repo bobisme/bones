@@ -12,6 +12,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -108,6 +109,7 @@ struct UpdateBatchOutput {
 }
 
 fn run_update_single(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -137,13 +139,15 @@ fn run_update_single(
         let mut event = Event {
             wall_ts_us: ts,
             agent: agent.to_string(),
-            itc: "itc:AQ".to_string(),
+            itc: String::new(),
             parents: vec![],
             event_type: EventType::Update,
             item_id: ItemId::new_unchecked(&resolved_id),
             data: EventData::Update(update_data),
             event_hash: String::new(),
         };
+
+        assign_next_itc(project_root, &mut event)?;
 
         let line = writer::write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -343,7 +347,7 @@ pub fn run_update(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_update_single(&conn, &shard_mgr, &agent, raw_id, &pending) {
+        match run_update_single(project_root, &conn, &shard_mgr, &agent, raw_id, &pending) {
             Ok(ok) => results.push(UpdateResult {
                 id: ok.id,
                 ok: true,

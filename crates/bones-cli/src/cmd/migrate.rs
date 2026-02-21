@@ -19,6 +19,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 
 #[derive(Args, Debug)]
@@ -209,7 +210,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 .actor
                 .clone()
                 .unwrap_or_else(|| "beads/importer".to_string()),
-            itc: format!("itc:beads:{}:create", issue.source_id),
+            itc: String::new(),
             parents: previous_hash
                 .get(item_id.as_str())
                 .cloned()
@@ -220,7 +221,12 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             data: EventData::Create(create),
             event_hash: String::new(),
         };
-        append_event(&shard_manager, active_shard, &mut create_event)?;
+        append_event(
+            project_root,
+            &shard_manager,
+            active_shard,
+            &mut create_event,
+        )?;
         previous_hash.insert(item_id.to_string(), create_event.event_hash.clone());
         report.projection_events += 1;
 
@@ -231,7 +237,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                     .actor
                     .clone()
                     .unwrap_or_else(|| "beads/importer".to_string()),
-                itc: format!("itc:beads:{}:assign", issue.source_id),
+                itc: String::new(),
                 parents: previous_hash
                     .get(item_id.as_str())
                     .cloned()
@@ -246,7 +252,12 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(&shard_manager, active_shard, &mut assign_event)?;
+            append_event(
+                project_root,
+                &shard_manager,
+                active_shard,
+                &mut assign_event,
+            )?;
             previous_hash.insert(item_id.to_string(), assign_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -261,7 +272,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                     .actor
                     .clone()
                     .unwrap_or_else(|| "beads/importer".to_string()),
-                itc: format!("itc:beads:{}:move", issue.source_id),
+                itc: String::new(),
                 parents: previous_hash
                     .get(item_id.as_str())
                     .cloned()
@@ -276,7 +287,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(&shard_manager, active_shard, &mut move_event)?;
+            append_event(project_root, &shard_manager, active_shard, &mut move_event)?;
             previous_hash.insert(item_id.to_string(), move_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -286,7 +297,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 let mut comment_event = Event {
                     wall_ts_us: comment.created_us,
                     agent: comment.author.clone(),
-                    itc: format!("itc:beads:{}:comment", issue.source_id),
+                    itc: String::new(),
                     parents: previous_hash
                         .get(item_id.as_str())
                         .cloned()
@@ -300,7 +311,12 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                     }),
                     event_hash: String::new(),
                 };
-                append_event(&shard_manager, active_shard, &mut comment_event)?;
+                append_event(
+                    project_root,
+                    &shard_manager,
+                    active_shard,
+                    &mut comment_event,
+                )?;
                 previous_hash.insert(item_id.to_string(), comment_event.event_hash.clone());
                 report.comments_imported += 1;
                 report.projection_events += 1;
@@ -321,7 +337,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
         let mut link_event = Event {
             wall_ts_us: 0,
             agent: "beads/importer".to_string(),
-            itc: format!("itc:beads:{}:link", dep.source_id),
+            itc: String::new(),
             parents: previous_hash
                 .get(source_item_id.as_str())
                 .cloned()
@@ -345,7 +361,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             .unwrap_or(0);
         link_event.wall_ts_us = source_ts.saturating_add(1);
 
-        append_event(&shard_manager, active_shard, &mut link_event)?;
+        append_event(project_root, &shard_manager, active_shard, &mut link_event)?;
         previous_hash.insert(source_item_id.to_string(), link_event.event_hash.clone());
         report.dependencies_imported += 1;
         report.projection_events += 1;
@@ -417,10 +433,12 @@ fn find_bones_dir(start: &Path) -> Option<PathBuf> {
 }
 
 fn append_event(
+    project_root: &Path,
     shard_manager: &ShardManager,
     active_shard: (i32, u32),
     event: &mut Event,
 ) -> Result<()> {
+    assign_next_itc(project_root, event)?;
     let line = write_event(event).context("failed to serialize migrated event")?;
     shard_manager
         .append_raw(active_shard.0, active_shard.1, &line)

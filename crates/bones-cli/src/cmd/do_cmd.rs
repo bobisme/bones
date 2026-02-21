@@ -6,6 +6,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -79,6 +80,7 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn run_do_single(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -125,13 +127,15 @@ fn run_do_single(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Move,
         item_id: ItemId::new_unchecked(&resolved_id),
         data: EventData::Move(move_data),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     // Serialize and write
     let line = writer::write_event(&mut event)
@@ -209,7 +213,7 @@ pub fn run_do(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_do_single(&conn, &shard_mgr, &agent, raw_id) {
+        match run_do_single(project_root, &conn, &shard_mgr, &agent, raw_id) {
             Ok(ok) => results.push(DoResult {
                 id: ok.id,
                 ok: true,

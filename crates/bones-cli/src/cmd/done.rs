@@ -10,6 +10,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -155,6 +156,7 @@ fn check_goal_auto_complete(
 }
 
 fn run_done_single(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -198,13 +200,15 @@ fn run_done_single(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Move,
         item_id: ItemId::new_unchecked(&resolved_id),
         data: EventData::Move(move_data),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -228,7 +232,7 @@ fn run_done_single(
             let mut parent_event = Event {
                 wall_ts_us: ts2,
                 agent: agent.to_string(),
-                itc: "itc:AQ".to_string(),
+                itc: String::new(),
                 parents: vec![],
                 event_type: EventType::Move,
                 item_id: ItemId::new_unchecked(&parent_id),
@@ -242,6 +246,8 @@ fn run_done_single(
                 }),
                 event_hash: String::new(),
             };
+
+            assign_next_itc(project_root, &mut parent_event)?;
 
             let parent_line = writer::write_event(&mut parent_event)
                 .map_err(|e| anyhow::anyhow!("failed to serialize parent event: {e}"))?;
@@ -324,7 +330,7 @@ pub fn run_done(
     let reason_ref = args.reason.as_deref();
 
     for raw_id in item_ids(args) {
-        match run_done_single(&conn, &shard_mgr, &agent, raw_id, reason_ref) {
+        match run_done_single(project_root, &conn, &shard_mgr, &agent, raw_id, reason_ref) {
             Ok(ok) => results.push(DoneResult {
                 id: ok.id,
                 ok: true,

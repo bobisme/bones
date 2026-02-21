@@ -3,6 +3,7 @@
 mod agent;
 mod cmd;
 mod git;
+mod itc_state;
 mod output;
 mod tui;
 mod validate;

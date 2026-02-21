@@ -4,6 +4,7 @@
 //! shard, projects it into the SQLite database, and outputs the result.
 
 use crate::agent;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -411,13 +412,15 @@ pub fn run_create(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.clone(),
-        itc: "itc:AQ".to_string(), // Initial ITC stamp
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Create,
         item_id: item_id.clone(),
         data: EventData::Create(create_data),
         event_hash: String::new(), // Will be computed by write_event
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     // 15. Compute hash and serialize
     let line = writer::write_event(&mut event)

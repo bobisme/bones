@@ -15,7 +15,21 @@ pub fn run_rebuild(project_root: &Path, _incremental: bool, output: OutputMode) 
     let db_path = bones_dir.join("bones.db");
     let cache_path = bones_dir.join("cache/events.bin");
 
-    let db_report = bones_core::db::rebuild::rebuild(&events_dir, &db_path)?;
+    let db_report = if _incremental {
+        let apply = bones_core::db::incremental::incremental_apply(&events_dir, &db_path, false)?;
+        let conn = bones_core::db::open_projection(&db_path)?;
+        let item_count: usize =
+            conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))?;
+        bones_core::db::rebuild::RebuildReport {
+            event_count: apply.events_applied,
+            item_count,
+            elapsed: apply.elapsed,
+            shard_count: apply.shards_scanned,
+            fts5_rebuilt: false,
+        }
+    } else {
+        bones_core::db::rebuild::rebuild(&events_dir, &db_path)?
+    };
     let cache_stats = bones_core::cache::rebuild_cache(&events_dir, &cache_path)?;
 
     match output {

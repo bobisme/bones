@@ -21,6 +21,7 @@
 //! ```
 
 use crate::agent;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use bones_core::db;
@@ -217,6 +218,7 @@ fn find_event_by_hash(
 
 /// Emit a compensating event and project it.
 fn emit_compensating_event(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     original: &Event,
@@ -258,6 +260,18 @@ fn emit_compensating_event(
                     skipped: false,
                     skip_reason: None,
                     dry_run: true,
+                };
+            }
+
+            if let Err(e) = assign_next_itc(project_root, &mut comp_event) {
+                return UndoEventResult {
+                    original_hash: original.event_hash.clone(),
+                    original_type: original.event_type.as_str().to_string(),
+                    compensating_hash: None,
+                    compensating_type: Some(comp_type),
+                    skipped: true,
+                    skip_reason: Some(format!("failed to assign ITC stamp: {e}")),
+                    dry_run: false,
                 };
             }
 
@@ -397,6 +411,7 @@ pub fn run_undo(
             .collect();
 
         let result = emit_compensating_event(
+            project_root,
             &conn,
             &shard_mgr,
             &target_event,
@@ -477,6 +492,7 @@ pub fn run_undo(
         let prior_refs: Vec<&Event> = all_events[..global_idx].iter().collect();
 
         let result = emit_compensating_event(
+            project_root,
             &conn,
             &shard_mgr,
             original,

@@ -5,6 +5,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use bones_core::db;
@@ -138,6 +139,7 @@ struct DeleteBatchOutput {
 }
 
 fn run_delete_single(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -175,7 +177,7 @@ fn run_delete_single(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Delete,
         item_id: ItemId::new_unchecked(&resolved_id),
@@ -185,6 +187,8 @@ fn run_delete_single(
         }),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -251,7 +255,15 @@ pub fn run_delete(
     let reason_ref = args.reason.as_deref();
 
     for raw_id in item_ids(args) {
-        match run_delete_single(&conn, &shard_mgr, &agent, raw_id, reason_ref, args.force) {
+        match run_delete_single(
+            project_root,
+            &conn,
+            &shard_mgr,
+            &agent,
+            raw_id,
+            reason_ref,
+            args.force,
+        ) {
             Ok(resolved_id) => results.push(DeleteResult {
                 id: resolved_id,
                 ok: true,

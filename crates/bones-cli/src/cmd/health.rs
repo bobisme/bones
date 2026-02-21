@@ -5,6 +5,7 @@ use std::path::Path;
 
 use bones_core::db::query;
 use bones_triage::graph::{RawGraph, find_sccs, health_metrics};
+use bones_triage::topology::{TopologyMode, analyze};
 use clap::Args;
 use serde::Serialize;
 
@@ -20,6 +21,12 @@ struct HealthOutput {
     scc_count: usize,
     critical_path_length: usize,
     blocker_count: usize,
+    topology_mode: String,
+    advanced_applied: bool,
+    spectral_gap: Option<f64>,
+    betti_0: Option<usize>,
+    betti_1: Option<usize>,
+    topology_messages: Vec<String>,
 }
 
 /// Execute `bn health`.
@@ -49,12 +56,29 @@ pub fn run_health(
 
     let metrics = health_metrics(&raw.graph);
     let cycle_count = find_sccs(&raw.graph).len();
+    let topology = analyze(&raw.graph, TopologyMode::Advanced).unwrap_or_else(|err| {
+        bones_triage::topology::TopologyResult {
+            mode: TopologyMode::Basic,
+            advanced_applied: false,
+            spectral_gap: None,
+            betti_0: None,
+            betti_1: None,
+            effective_resistance_stats: None,
+            messages: vec![format!("advanced topology failed: {err}")],
+        }
+    });
 
     let payload = HealthOutput {
         density: metrics.density,
         scc_count: metrics.scc_count,
         critical_path_length: metrics.critical_path_length,
         blocker_count: metrics.blocker_count,
+        topology_mode: format!("{:?}", topology.mode).to_ascii_lowercase(),
+        advanced_applied: topology.advanced_applied,
+        spectral_gap: topology.spectral_gap,
+        betti_0: topology.betti_0,
+        betti_1: topology.betti_1,
+        topology_messages: topology.messages,
     };
 
     render(output, &payload, |report, w| {
@@ -121,6 +145,29 @@ fn render_health_human(
         "blocker_count", report.blocker_count
     )?;
 
+    let topology_status = if report.advanced_applied {
+        "✓ advanced"
+    } else {
+        "◐ basic"
+    };
+    writeln!(
+        w,
+        "{:<24} {:>12}  {topology_status}",
+        "topology_mode", report.topology_mode
+    )?;
+    if let Some(gap) = report.spectral_gap {
+        writeln!(w, "{:<24} {:>12.6}  info", "spectral_gap", gap)?;
+    }
+    if let Some(b0) = report.betti_0 {
+        writeln!(w, "{:<24} {:>12}  info", "betti_0", b0)?;
+    }
+    if let Some(b1) = report.betti_1 {
+        writeln!(w, "{:<24} {:>12}  info", "betti_1", b1)?;
+    }
+    for message in &report.topology_messages {
+        writeln!(w, "note: {message}")?;
+    }
+
     Ok(())
 }
 
@@ -149,6 +196,12 @@ mod tests {
             scc_count: 3,
             critical_path_length: 4,
             blocker_count: 2,
+            topology_mode: "advanced".to_string(),
+            advanced_applied: true,
+            spectral_gap: Some(0.123),
+            betti_0: Some(1),
+            betti_1: Some(0),
+            topology_messages: vec![],
         };
         let mut out = Vec::new();
 

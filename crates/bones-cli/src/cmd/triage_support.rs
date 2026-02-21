@@ -1,14 +1,18 @@
 use anyhow::{Context, Result};
 use bones_core::db::query::{self, ItemFilter, SortOrder};
 use bones_core::model::item::Urgency;
+use bones_triage::feedback::load_agent_profile;
 use bones_triage::graph::{NormalizedGraph, RawGraph, compute_critical_path, find_all_cycles};
 use bones_triage::metrics::betweenness::betweenness_centrality;
+use bones_triage::metrics::eigenvector::eigenvector_centrality;
+use bones_triage::metrics::hits::hits;
 use bones_triage::metrics::pagerank::{PageRankConfig, pagerank};
 use bones_triage::score::{CompositeWeights, MetricInputs, composite_score, normalize_metric};
 use rusqlite::Connection;
 use std::collections::HashMap;
 
 const MICROS_PER_DAY: f64 = 86_400_000_000.0;
+const TOPOLOGY_BLEND_WEIGHT: f64 = 0.10;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RankedItem {
@@ -63,6 +67,8 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
     let critical_path = compute_critical_path(&normalized);
     let pagerank_result = pagerank(&normalized, &PageRankConfig::default());
     let betweenness = betweenness_centrality(&normalized);
+    let hits_result = hits(&normalized, 100, 1e-6);
+    let eigenvector_result = eigenvector_centrality(&normalized, 100, 1e-6);
 
     let ids: Vec<String> = active_items
         .iter()
@@ -86,14 +92,29 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         .iter()
         .map(|id| betweenness.get(id).copied().unwrap_or(0.0))
         .collect();
+    let hub_raw: Vec<f64> = ids
+        .iter()
+        .map(|id| hits_result.hubs.get(id).copied().unwrap_or(0.0))
+        .collect();
+    let auth_raw: Vec<f64> = ids
+        .iter()
+        .map(|id| hits_result.authorities.get(id).copied().unwrap_or(0.0))
+        .collect();
+    let eigen_raw: Vec<f64> = ids
+        .iter()
+        .map(|id| eigenvector_result.scores.get(id).copied().unwrap_or(0.0))
+        .collect();
 
     let cp_norm = normalize_metric(&cp_raw);
     let pr_norm = normalize_metric(&pr_raw);
     let bc_norm = normalize_metric(&bc_raw);
+    let hub_norm = normalize_metric(&hub_raw);
+    let auth_norm = normalize_metric(&auth_raw);
+    let eigen_norm = normalize_metric(&eigen_raw);
 
     let unresolved_blockers = load_unresolved_blocker_counts(conn)?;
     let active_unblocks = load_active_unblocks_counts(conn)?;
-    let weights = CompositeWeights::default();
+    let weights = learned_weights_from_feedback();
 
     let mut ranked: Vec<RankedItem> = active_items
         .iter()
@@ -116,6 +137,12 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
                 },
                 &weights,
             );
+            let topology_signal = (hub_norm[idx] + auth_norm[idx] + eigen_norm[idx]) / 3.0;
+            let score = if score.is_finite() {
+                score + (TOPOLOGY_BLEND_WEIGHT * topology_signal)
+            } else {
+                score
+            };
 
             let blocked_by_active = unresolved_blockers.get(&item.item_id).copied().unwrap_or(0);
             let unblocks_active = active_unblocks.get(&item.item_id).copied().unwrap_or(0);
@@ -124,6 +151,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
                 ("critical-path", weights.alpha * cp_norm[idx]),
                 ("pagerank", weights.beta * pr_norm[idx]),
                 ("betweenness", weights.gamma * bc_norm[idx]),
+                ("topology", TOPOLOGY_BLEND_WEIGHT * topology_signal),
                 ("urgency", weights.delta * urgency_component(urgency)),
                 ("decay", weights.epsilon * decay_component(decay_days)),
             ];
@@ -179,6 +207,70 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         unblocked_ranked,
         cycles,
     })
+}
+
+fn learned_weights_from_feedback() -> CompositeWeights<f64> {
+    let Ok(project_root) = std::env::current_dir() else {
+        return CompositeWeights::default();
+    };
+    let agent_id = std::env::var("BONES_AGENT")
+        .or_else(|_| std::env::var("AGENT"))
+        .unwrap_or_else(|_| "default".to_string());
+    let Ok(profile) = load_agent_profile(&project_root, &agent_id) else {
+        return CompositeWeights::default();
+    };
+
+    normalize_weights(CompositeWeights {
+        alpha: posterior_mean(
+            profile.posteriors.alpha.alpha_param,
+            profile.posteriors.alpha.beta_param,
+        ),
+        beta: posterior_mean(
+            profile.posteriors.beta.alpha_param,
+            profile.posteriors.beta.beta_param,
+        ),
+        gamma: posterior_mean(
+            profile.posteriors.gamma.alpha_param,
+            profile.posteriors.gamma.beta_param,
+        ),
+        delta: posterior_mean(
+            profile.posteriors.delta.alpha_param,
+            profile.posteriors.delta.beta_param,
+        ),
+        epsilon: posterior_mean(
+            profile.posteriors.epsilon.alpha_param,
+            profile.posteriors.epsilon.beta_param,
+        ),
+    })
+}
+
+fn posterior_mean(alpha: f64, beta: f64) -> f64 {
+    let a = if alpha.is_finite() && alpha > 0.0 {
+        alpha
+    } else {
+        1.0
+    };
+    let b = if beta.is_finite() && beta > 0.0 {
+        beta
+    } else {
+        1.0
+    };
+    a / (a + b)
+}
+
+fn normalize_weights(weights: CompositeWeights<f64>) -> CompositeWeights<f64> {
+    let total = weights.alpha + weights.beta + weights.gamma + weights.delta + weights.epsilon;
+    if !total.is_finite() || total <= f64::EPSILON {
+        return CompositeWeights::default();
+    }
+
+    CompositeWeights {
+        alpha: weights.alpha / total,
+        beta: weights.beta / total,
+        gamma: weights.gamma / total,
+        delta: weights.delta / total,
+        epsilon: weights.epsilon / total,
+    }
 }
 
 fn is_active_state(state: &str) -> bool {

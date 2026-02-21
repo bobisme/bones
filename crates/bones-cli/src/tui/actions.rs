@@ -4,6 +4,7 @@
 //! item creation directly using the bones-core API, bypassing the CLI
 //! rendering layer that would corrupt the terminal screen.
 
+use crate::itc_state::assign_next_itc;
 use anyhow::{Context, Result};
 use bones_core::db::{project, query};
 use bones_core::event::Event;
@@ -49,7 +50,7 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Move,
         item_id: ItemId::new_unchecked(item_id),
@@ -61,6 +62,7 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
         event_hash: String::new(),
     };
 
+    assign_next_itc(project_root, &mut event)?;
     let line = writer::write_event(&mut event).context("serialize event")?;
     shard_mgr
         .append(&line, false, Duration::from_secs(5))
@@ -105,7 +107,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Move,
         item_id: ItemId::new_unchecked(item_id),
@@ -117,6 +119,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
         event_hash: String::new(),
     };
 
+    assign_next_itc(project_root, &mut event)?;
     let line = writer::write_event(&mut event).context("serialize event")?;
     shard_mgr
         .append(&line, false, Duration::from_secs(5))
@@ -163,7 +166,7 @@ pub fn create_task(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Create,
         item_id: item_id.clone(),
@@ -181,6 +184,7 @@ pub fn create_task(
         event_hash: String::new(),
     };
 
+    assign_next_itc(project_root, &mut event)?;
     let line = writer::write_event(&mut event).context("serialize event")?;
     shard_mgr
         .append(&line, false, Duration::from_secs(5))

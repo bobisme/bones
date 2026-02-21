@@ -4,7 +4,13 @@ use std::path::Path;
 use clap::Args;
 use serde::Serialize;
 
-use bones_core::db::query;
+use bones_core::db::query::{self, ItemFilter, SortOrder};
+use bones_triage::graph::RawGraph;
+use bones_triage::schedule::{
+    WhittleConfig, assign_fallback, check_indexability, compute_whittle_indices,
+};
+
+use std::collections::{HashMap, HashSet};
 
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
 use crate::output::{CliError, OutputMode, render, render_error, render_mode};
@@ -103,19 +109,7 @@ pub fn run_next(
         );
     }
 
-    let assignments: Vec<NextAssignment> = snapshot
-        .unblocked_ranked
-        .iter()
-        .take(agent_slots)
-        .enumerate()
-        .map(|(idx, item)| NextAssignment {
-            agent_slot: idx + 1,
-            id: item.id.clone(),
-            title: item.title.clone(),
-            score: item.score,
-            explanation: item.explanation.clone(),
-        })
-        .collect();
+    let assignments = multi_agent_assignments(&conn, &snapshot, agent_slots)?;
 
     let payload = NextAssignments { assignments };
     render_mode(
@@ -124,6 +118,101 @@ pub fn run_next(
         |assignments, w| render_assignments_text(assignments, w),
         |assignments, w| render_assignments_human(assignments, w),
     )
+}
+
+fn multi_agent_assignments(
+    conn: &rusqlite::Connection,
+    snapshot: &crate::cmd::triage_support::TriageSnapshot,
+    agent_slots: usize,
+) -> anyhow::Result<Vec<NextAssignment>> {
+    let ranked_by_id: HashMap<&str, &RankedItem> = snapshot
+        .unblocked_ranked
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect();
+
+    let unblocked_ids: HashSet<&str> = ranked_by_id.keys().copied().collect();
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    let mut sizes: HashMap<String, String> = HashMap::new();
+    for item in &snapshot.ranked {
+        scores.insert(item.id.clone(), item.score);
+        if let Some(size) = &item.size {
+            sizes.insert(item.id.clone(), size.to_ascii_lowercase());
+        }
+    }
+
+    let active_items = query::list_items(
+        conn,
+        &ItemFilter {
+            include_deleted: false,
+            sort: SortOrder::UpdatedDesc,
+            ..Default::default()
+        },
+    )?;
+    let in_progress: Vec<String> = active_items
+        .into_iter()
+        .filter(|item| item.state == "doing")
+        .map(|item| item.item_id)
+        .collect();
+
+    let graph = RawGraph::from_sqlite(conn)
+        .map_err(|e| anyhow::anyhow!("failed to load dependency graph for scheduling: {e}"))?;
+    let indexability = check_indexability(&graph.graph);
+
+    if indexability.indexable {
+        let whittle = compute_whittle_indices(
+            &graph.graph,
+            &scores,
+            &sizes,
+            &in_progress,
+            &WhittleConfig::default(),
+        );
+
+        let mut assignments = Vec::new();
+        for item in whittle {
+            if !unblocked_ids.contains(item.item_id.as_str()) {
+                continue;
+            }
+            let Some(base) = ranked_by_id.get(item.item_id.as_str()) else {
+                continue;
+            };
+            assignments.push(NextAssignment {
+                agent_slot: assignments.len() + 1,
+                id: base.id.clone(),
+                title: base.title.clone(),
+                score: base.score,
+                explanation: format!("{} (whittle={:.4})", base.explanation, item.index),
+            });
+            if assignments.len() >= agent_slots {
+                return Ok(assignments);
+            }
+        }
+    }
+
+    let fallback_items: Vec<String> = snapshot
+        .unblocked_ranked
+        .iter()
+        .map(|item| item.id.clone())
+        .collect();
+    let fallback = assign_fallback(&fallback_items, agent_slots, &scores, &[]);
+
+    let assignments = fallback
+        .into_iter()
+        .filter_map(|assignment| {
+            ranked_by_id
+                .get(assignment.item_id.as_str())
+                .map(|item| NextAssignment {
+                    agent_slot: assignment.agent_idx + 1,
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    score: item.score,
+                    explanation: format!("{} (fallback-scheduler)", item.explanation),
+                })
+        })
+        .take(agent_slots)
+        .collect();
+
+    Ok(assignments)
 }
 
 fn parse_agent_slots(agent_flag: Option<&str>) -> Result<usize, CliError> {

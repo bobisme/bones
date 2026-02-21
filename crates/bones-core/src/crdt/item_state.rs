@@ -47,6 +47,7 @@
 use std::collections::HashSet;
 
 use crate::clock::itc::Stamp;
+use crate::clock::text::stamp_from_text;
 use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
 use crate::crdt::lww::LwwRegister;
@@ -222,7 +223,8 @@ impl WorkItemState {
         }
 
         // Build LWW metadata from the event.
-        let stamp = derive_stamp_from_hash(&event.event_hash);
+        let stamp = stamp_from_text(&event.itc)
+            .unwrap_or_else(|| derive_stamp_from_hash(&event.event_hash));
         let agent_id = event.agent.clone();
         let event_hash = event.event_hash.clone();
 
@@ -550,16 +552,11 @@ fn apply_phase_transition(state: &mut EpochPhaseState, target: Phase) {
     // target == state.phase is a no-op.
 }
 
-/// Derive a unique ITC stamp from the event hash.
+/// Derive a unique fallback stamp from event hash.
 ///
-/// The ITC text format parser is not yet implemented. To ensure LWW
-/// tie-breaking works correctly, we derive a unique stamp from the
-/// event_hash (which is guaranteed unique per event). Different hashes
-/// produce concurrent stamps, so the LWW chain falls through to
-/// wall_ts → agent_id → event_hash for deterministic resolution.
-///
-/// Same event_hash → same stamp → equal → idempotent (correct for
-/// duplicate event application).
+/// Older events may carry non-decodable legacy ITC text. In that case,
+/// we preserve deterministic replay by deriving a stable fallback stamp
+/// from `event_hash`.
 fn derive_stamp_from_hash(event_hash: &str) -> Stamp {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

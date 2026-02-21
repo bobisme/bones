@@ -10,6 +10,7 @@
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -84,6 +85,7 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn run_reopen_single(
+    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -127,13 +129,15 @@ fn run_reopen_single(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type: EventType::Move,
         item_id: ItemId::new_unchecked(&resolved_id),
         data: EventData::Move(move_data),
         event_hash: String::new(),
     };
+
+    assign_next_itc(project_root, &mut event)?;
 
     let line = writer::write_event(&mut event)
         .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -205,7 +209,7 @@ pub fn run_reopen(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_reopen_single(&conn, &shard_mgr, &agent, raw_id) {
+        match run_reopen_single(project_root, &conn, &shard_mgr, &agent, raw_id) {
             Ok(ok) => results.push(ReopenResult {
                 id: ok.id,
                 ok: true,

@@ -22,6 +22,7 @@ use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
 
 use crate::agent;
+use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 
@@ -129,13 +130,16 @@ fn emit_event(
     let mut event = Event {
         wall_ts_us: ts,
         agent: agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: String::new(),
         parents: vec![],
         event_type,
         item_id: item_id.clone(),
         data,
         event_hash: String::new(),
     };
+
+    let project_root = bones_dir.parent().unwrap_or(bones_dir);
+    assign_next_itc(project_root, &mut event)?;
 
     let line = write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
 
