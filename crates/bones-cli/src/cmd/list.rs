@@ -23,6 +23,10 @@ pub struct ListArgs {
     #[arg(long)]
     pub state: Option<String>,
 
+    /// Include all states when no explicit state filter is provided.
+    #[arg(long, conflicts_with = "state")]
+    pub all: bool,
+
     /// Filter by kind: task, goal, bug.
     #[arg(short, long)]
     pub kind: Option<String>,
@@ -310,6 +314,7 @@ fn build_list_response(
     // Default to showing open items unless any filter is explicitly set.
     // Pagination/sort alone should not disable this default behavior.
     let has_any_filter = args.state.is_some()
+        || args.all
         || args.kind.is_some()
         || !args.label.is_empty()
         || args.urgency.is_some()
@@ -560,6 +565,7 @@ mod tests {
     fn default_args() -> ListArgs {
         ListArgs {
             state: None,
+            all: false,
             kind: None,
             label: vec![],
             urgency: None,
@@ -586,6 +592,7 @@ mod tests {
         }
         let w = Wrapper::parse_from(["test"]);
         assert!(w.args.state.is_none());
+        assert!(!w.args.all);
         assert!(w.args.kind.is_none());
         assert!(w.args.label.is_empty());
         assert!(w.args.urgency.is_none());
@@ -633,6 +640,7 @@ mod tests {
             "priority",
         ]);
         assert_eq!(w.args.state.as_deref(), Some("doing"));
+        assert!(!w.args.all);
         assert_eq!(w.args.kind.as_deref(), Some("bug"));
         assert_eq!(w.args.label, vec!["backend", "urgent"]);
         assert_eq!(w.args.urgency.as_deref(), Some("urgent"));
@@ -643,6 +651,18 @@ mod tests {
         assert_eq!(w.args.limit, 10);
         assert_eq!(w.args.offset, 5);
         assert_eq!(w.args.sort, "priority");
+    }
+
+    #[test]
+    fn list_args_parse_all_flag() {
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: ListArgs,
+        }
+        let w = Wrapper::parse_from(["test", "--all"]);
+        assert!(w.args.all);
+        assert!(w.args.state.is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -899,6 +919,28 @@ mod tests {
         let response_none =
             build_list_response(&conn, &args, ListSort::UpdatedDesc, Some(2002), None).unwrap();
         assert_eq!(response_none.total, 0);
+    }
+
+    #[test]
+    fn build_list_response_all_includes_non_open_states() {
+        let (_dir, root) = setup_test_db();
+        let db_path = root.join(".bones/bones.db");
+        let conn = Connection::open(db_path).unwrap();
+
+        let mut args = default_args();
+        args.all = true;
+
+        let response =
+            build_list_response(&conn, &args, ListSort::UpdatedDesc, None, None).unwrap();
+        assert_eq!(response.total, 3);
+        let states: std::collections::HashSet<&str> = response
+            .items
+            .iter()
+            .map(|item| item.state.as_str())
+            .collect();
+        assert!(states.contains("open"));
+        assert!(states.contains("doing"));
+        assert!(states.contains("done"));
     }
 
     #[test]

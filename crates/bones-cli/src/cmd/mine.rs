@@ -83,6 +83,7 @@ mod tests {
         let args = MineArgs {
             list: ListArgs {
                 state: Some("open".to_string()),
+                all: false,
                 kind: None,
                 label: vec![],
                 urgency: None,
@@ -126,6 +127,7 @@ mod tests {
         let args = MineArgs {
             list: ListArgs {
                 state: None,
+                all: false,
                 kind: None,
                 label: vec![],
                 urgency: None,

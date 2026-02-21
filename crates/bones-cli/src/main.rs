@@ -92,7 +92,7 @@ enum Commands {
         next_help_heading = "Read",
         about = "List work items",
         long_about = "List work items with optional filters and sort order.",
-        after_help = "EXAMPLES:\n    # List open items (default)\n    bn list\n\n    # Filter by state and label\n    bn list --state doing --label backend\n\n    # Emit machine-readable output\n    bn list --format json"
+        after_help = "EXAMPLES:\n    # List open items (default)\n    bn list\n\n    # List all states\n    bn list --all\n\n    # Filter by state and label\n    bn list --state doing --label backend\n\n    # Emit machine-readable output\n    bn list --format json"
     )]
     List(cmd::list::ListArgs),
 
