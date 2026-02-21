@@ -93,7 +93,14 @@ pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Res
 
     let projection_cursor = projection_cursor(db)?;
     let indexed_cursor = semantic_cursor(db)?;
-    if indexed_cursor == projection_cursor {
+    let active_items = active_item_count(db)?;
+    let embedded_items = embedding_count(db)?;
+    if should_skip_sync(
+        &indexed_cursor,
+        &projection_cursor,
+        active_items,
+        embedded_items,
+    ) {
         return Ok(SyncStats::default());
     }
 
@@ -180,6 +187,33 @@ fn semantic_cursor(db: &Connection) -> Result<(i64, Option<String>)> {
         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
     )
     .context("failed to read semantic index cursor")
+}
+
+fn active_item_count(db: &Connection) -> Result<usize> {
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM items WHERE is_deleted = 0",
+            [],
+            |row| row.get(0),
+        )
+        .context("failed to count active items for semantic sync")?;
+    Ok(usize::try_from(count).unwrap_or(0))
+}
+
+fn embedding_count(db: &Connection) -> Result<usize> {
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM item_embeddings", [], |row| row.get(0))
+        .context("failed to count semantic embeddings")?;
+    Ok(usize::try_from(count).unwrap_or(0))
+}
+
+fn should_skip_sync(
+    indexed_cursor: &(i64, Option<String>),
+    projection_cursor: &(i64, Option<String>),
+    active_items: usize,
+    embedded_items: usize,
+) -> bool {
+    indexed_cursor == projection_cursor && active_items == embedded_items
 }
 
 fn set_semantic_cursor(db: &Connection, offset: i64, hash: Option<&str>) -> Result<()> {
@@ -472,5 +506,20 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn should_skip_sync_requires_cardinality_match() {
+        let cursor = (7, Some("h7".to_string()));
+        assert!(should_skip_sync(&cursor, &cursor, 0, 0));
+        assert!(should_skip_sync(&cursor, &cursor, 3, 3));
+        assert!(!should_skip_sync(&cursor, &cursor, 3, 0));
+        assert!(!should_skip_sync(&cursor, &cursor, 0, 2));
+        assert!(!should_skip_sync(
+            &cursor,
+            &(8, Some("h8".to_string())),
+            3,
+            3
+        ));
     }
 }
