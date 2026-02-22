@@ -264,12 +264,12 @@ fn next_agent_slots_returns_assignments() {
     setup_triage_graph(dir.path());
 
     let output = bn_cmd(dir.path())
-        .args(["next", "--agent", "3", "--json"])
+        .args(["next", "3", "--json"])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "next --agent 3 failed: {}",
+        "next 3 failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 

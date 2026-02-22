@@ -16,8 +16,12 @@ use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
 use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 
 /// Arguments for `bn next`.
-#[derive(Args, Debug, Default)]
-pub struct NextArgs {}
+#[derive(Args, Debug)]
+pub struct NextArgs {
+    /// Number of parallel assignment slots to return.
+    #[arg(value_name = "count", default_value_t = 1)]
+    pub count: usize,
+}
 
 #[derive(Debug, Serialize)]
 struct NextPick {
@@ -49,14 +53,9 @@ struct EmptyNext {
 /// Execute `bn next`.
 ///
 /// - default: returns top-1 unblocked work item with explanation
-/// - `bn next --agent N`: returns up to `N` ranked assignments (one per slot)
-pub fn run_next(
-    _args: &NextArgs,
-    output: OutputMode,
-    agent_flag: Option<&str>,
-    project_root: &Path,
-) -> anyhow::Result<()> {
-    let agent_slots = match parse_agent_slots(agent_flag) {
+/// - `bn next N`: returns up to `N` ranked assignments (one per slot)
+pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
+    let agent_slots = match parse_assignment_count(args.count) {
         Ok(slots) => slots,
         Err(cli_err) => {
             render_error(output, &cli_err)?;
@@ -215,28 +214,16 @@ fn multi_agent_assignments(
     Ok(assignments)
 }
 
-fn parse_agent_slots(agent_flag: Option<&str>) -> Result<usize, CliError> {
-    let Some(raw) = agent_flag else {
-        return Ok(1);
-    };
-
-    let slots = raw.parse::<usize>().map_err(|_| {
-        CliError::with_details(
-            "bn next expects --agent <N> where N is a positive integer",
-            "example: bn next --agent 3",
-            "invalid_agent_slots",
-        )
-    })?;
-
-    if slots == 0 {
+fn parse_assignment_count(count: usize) -> Result<usize, CliError> {
+    if count == 0 {
         return Err(CliError::with_details(
-            "--agent count must be greater than zero",
-            "example: bn next --agent 3",
+            "count must be greater than zero",
+            "example: bn next 3",
             "invalid_agent_slots",
         ));
     }
 
-    Ok(slots)
+    Ok(count)
 }
 
 fn score_bounds(items: &[RankedItem]) -> (f64, f64) {
@@ -362,19 +349,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_agent_slots_defaults_to_one() {
-        assert_eq!(parse_agent_slots(None).unwrap(), 1);
+    fn parse_assignment_count_accepts_positive_integer() {
+        assert_eq!(parse_assignment_count(1).unwrap(), 1);
+        assert_eq!(parse_assignment_count(3).unwrap(), 3);
     }
 
     #[test]
-    fn parse_agent_slots_accepts_positive_integer() {
-        assert_eq!(parse_agent_slots(Some("3")).unwrap(), 3);
-    }
-
-    #[test]
-    fn parse_agent_slots_rejects_zero_and_non_numeric() {
-        assert!(parse_agent_slots(Some("0")).is_err());
-        assert!(parse_agent_slots(Some("bones-dev")).is_err());
+    fn parse_assignment_count_rejects_zero() {
+        assert!(parse_assignment_count(0).is_err());
     }
 
     #[test]

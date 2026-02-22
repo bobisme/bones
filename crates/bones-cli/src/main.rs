@@ -389,8 +389,8 @@ enum Commands {
     #[command(
         next_help_heading = "Triage",
         about = "Show the highest-priority unblocked item",
-        long_about = "Compute composite priority scores and return the best unblocked candidate.\n\nUse '--agent N' to request N parallel assignments (multi-agent mode).",
-        after_help = "EXAMPLES:\n    # Single best next item\n    bn next\n\n    # Multi-agent assignment (N slots)\n    bn next --agent 3\n\n    # Emit machine-readable output\n    bn next --format json"
+        long_about = "Compute composite priority scores and return the best unblocked candidate.\n\nUse optional positional '<count>' to request N parallel assignments (multi-agent mode).",
+        after_help = "EXAMPLES:\n    # Single best next item\n    bn next\n\n    # Multi-agent assignment (N slots)\n    bn next 3\n\n    # Emit machine-readable output\n    bn next --format json"
     )]
     Next(cmd::next::NextArgs),
 
@@ -1122,7 +1122,7 @@ fn main() -> anyhow::Result<()> {
             cmd::graph::run_graph(args, output, &project_root)
         }),
         Commands::Next(ref args) => timing::timed("cmd.next", || {
-            cmd::next::run_next(args, output, cli.agent_flag(), &project_root)
+            cmd::next::run_next(args, output, &project_root)
         }),
         Commands::Triage(ref args) => timing::timed("cmd.triage", || match &args.command {
             None => {
@@ -2000,9 +2000,12 @@ mod tests {
     }
 
     #[test]
-    fn next_supports_agent_slot_flag() {
-        let cli = Cli::parse_from(["bn", "next", "--agent", "3"]);
-        assert!(matches!(cli.command, Commands::Next(_)));
-        assert_eq!(cli.agent_flag(), Some("3"));
+    fn next_supports_positional_count() {
+        let cli = Cli::parse_from(["bn", "next", "3"]);
+        match &cli.command {
+            Commands::Next(args) => assert_eq!(args.count, 3),
+            _ => panic!("expected next command"),
+        }
+        assert_eq!(cli.agent_flag(), None);
     }
 }
