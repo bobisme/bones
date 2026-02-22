@@ -31,17 +31,22 @@ use tracing::{info, instrument};
 #[instrument]
 pub fn init() {
     info!("bones-core initialized");
-    // Ensure .gitattributes exists and has the union merge driver for events
-    let gitattributes_path = std::path::Path::new(".gitattributes");
-    let attr_line = ".bones/events merge=union\n";
+    // Ensure .bones/.gitattributes exists and has the union merge hint for events.
+    let bones_dir = std::path::Path::new(".bones");
+    if !bones_dir.is_dir() {
+        return;
+    }
+
+    let gitattributes_path = bones_dir.join(".gitattributes");
+    let attr_line = "events merge=union\n";
 
     let mut content = if gitattributes_path.exists() {
-        std::fs::read_to_string(gitattributes_path).unwrap_or_default()
+        std::fs::read_to_string(&gitattributes_path).unwrap_or_default()
     } else {
         String::new()
     };
 
-    if !content.contains(".bones/events merge=union") {
+    if !content.contains("events merge=union") {
         if !content.is_empty() && !content.ends_with('\n') {
             content.push('\n');
         }

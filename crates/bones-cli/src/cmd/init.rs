@@ -1,3 +1,6 @@
+use crate::cmd::bones_gitattributes::{
+    ensure_bones_gitattributes, remove_legacy_root_gitattributes_entry,
+};
 use crate::cmd::bones_gitignore::ensure_bones_gitignore;
 use crate::git;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
@@ -45,6 +48,7 @@ const SHARD_HEADER: &str =
 ///     current.events    (symlink -> YYYY-MM.events)
 ///   config.toml         (default project config template)
 ///   .gitignore          (derived/runtime files: db/cache/itc/lock)
+///   .gitattributes      (local merge policy for events)
 /// ```
 ///
 /// # Errors
@@ -108,6 +112,16 @@ pub fn run_init(args: &InitArgs, output: OutputMode, project_root: &Path) -> Res
         )
     })?;
 
+    ensure_bones_gitattributes(&bones_dir).with_context(|| {
+        format!(
+            "Failed to ensure {}",
+            bones_dir.join(".gitattributes").display()
+        )
+    })?;
+
+    remove_legacy_root_gitattributes_entry(project_root)
+        .context("Failed to migrate legacy root .gitattributes entry")?;
+
     if args.hooks {
         git::hooks::install_hooks(project_root)?;
     }
@@ -120,7 +134,8 @@ pub fn run_init(args: &InitArgs, output: OutputMode, project_root: &Path) -> Res
                 "paths": {
                     "active_shard": format!(".bones/events/{shard_name}"),
                     "config": ".bones/config.toml",
-                    "gitignore": ".bones/.gitignore"
+                    "gitignore": ".bones/.gitignore",
+                    "gitattributes": ".bones/.gitattributes"
                 },
                 "next_steps": [
                     "export AGENT=your-name",
@@ -186,6 +201,7 @@ mod tests {
         assert!(root.join(".bones/events").is_dir());
         assert!(root.join(".bones/config.toml").is_file());
         assert!(root.join(".bones/.gitignore").is_file());
+        assert!(root.join(".bones/.gitattributes").is_file());
 
         // Events dir must have at least the shard + symlink
         let count = fs::read_dir(root.join(".bones/events"))
@@ -199,6 +215,37 @@ mod tests {
 
         let symlink = root.join(".bones/events/current.events");
         assert!(symlink.is_symlink(), "current.events must be a symlink");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_migrates_legacy_root_gitattributes_entry() {
+        let root = make_temp_dir("legacy-root-gitattributes");
+        fs::write(
+            root.join(".gitattributes"),
+            ".bones/events merge=union\n*.png binary\n",
+        )
+        .expect("seed root gitattributes");
+
+        run_init(
+            &InitArgs {
+                force: false,
+                hooks: false,
+            },
+            OutputMode::Pretty,
+            &root,
+        )
+        .expect("init should succeed");
+
+        let root_content = fs::read_to_string(root.join(".gitattributes"))
+            .expect("root .gitattributes should remain with non-legacy entries");
+        assert!(!root_content.contains(".bones/events merge=union"));
+        assert!(root_content.contains("*.png binary"));
+
+        let bones_content = fs::read_to_string(root.join(".bones/.gitattributes"))
+            .expect(".bones/.gitattributes readable");
+        assert!(bones_content.contains("events merge=union"));
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -19,6 +19,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::cmd::bones_gitattributes::{
+    ensure_bones_gitattributes, remove_legacy_root_gitattributes_entry,
+};
 use crate::cmd::bones_gitignore::ensure_bones_gitignore;
 use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
@@ -150,6 +153,10 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
 
     ensure_bones_gitignore(&bones_dir)
         .context("failed to ensure .bones/.gitignore for derived files")?;
+    ensure_bones_gitattributes(&bones_dir)
+        .context("failed to ensure .bones/.gitattributes for merge attributes")?;
+    remove_legacy_root_gitattributes_entry(project_root)
+        .context("failed to migrate legacy root .gitattributes entry")?;
 
     let shard_manager = ShardManager::new(&bones_dir);
     let active_shard = shard_manager
@@ -1026,6 +1033,8 @@ fn to_micros_value(value: &JsonValue) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::OutputMode;
+    use tempfile::TempDir;
 
     #[test]
     fn map_status_and_priority() {
@@ -1096,5 +1105,41 @@ mod tests {
         assert!(merged.contains("Imported beads fields:"));
         assert!(merged.contains("acceptance_criteria:\n- first\n- second"));
         assert!(merged.contains("notes:\nRemember to migrate"));
+    }
+
+    #[test]
+    fn migrate_moves_legacy_root_gitattributes_entry_into_bones_dir() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join(".bones")).expect("create .bones");
+
+        std::fs::write(
+            root.join(".gitattributes"),
+            ".bones/events merge=union\n*.png binary\n",
+        )
+        .expect("seed root .gitattributes");
+
+        let source = root.join("beads.jsonl");
+        std::fs::write(
+            &source,
+            r#"{"id":"42","title":"Imported from beads"}"#.to_string() + "\n",
+        )
+        .expect("seed jsonl source");
+
+        let args = MigrateArgs {
+            beads_db: None,
+            beads_jsonl: Some(source),
+        };
+
+        run_migrate(&args, OutputMode::Text, root).expect("migration should succeed");
+
+        let bones_attrs = std::fs::read_to_string(root.join(".bones/.gitattributes"))
+            .expect("read .bones/.gitattributes");
+        assert!(bones_attrs.contains("events merge=union"));
+
+        let root_attrs =
+            std::fs::read_to_string(root.join(".gitattributes")).expect("read root .gitattributes");
+        assert!(!root_attrs.contains(".bones/events merge=union"));
+        assert!(root_attrs.contains("*.png binary"));
     }
 }
