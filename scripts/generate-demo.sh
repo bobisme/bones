@@ -217,7 +217,7 @@ create_story_bundle() {
 	title="$(track_title "$track")"
 
 	spec="$(create_item \
-		--title "[$(phase_title "$phase")] $title planning" \
+		--title "$title planning" \
 		--kind task \
 		--parent "$parent_id" \
 		--size m \
@@ -226,10 +226,10 @@ create_story_bundle() {
 		--label "$track" \
 		--description "$(story_description "$program" "$phase" "$track" "planning")")"
 	STORY_SPEC["$key"]="$spec"
-	register_item "$spec" "task" "[$(phase_title "$phase")] $title planning"
+	register_item "$spec" "task" "$title planning"
 
 	impl="$(create_item \
-		--title "[$(phase_title "$phase")] $title implementation" \
+		--title "$title implementation" \
 		--kind task \
 		--parent "$parent_id" \
 		--size l \
@@ -240,10 +240,10 @@ create_story_bundle() {
 		--label critical-path \
 		--description "$(story_description "$program" "$phase" "$track" "implementation")")"
 	STORY_IMPL["$key"]="$impl"
-	register_item "$impl" "task" "[$(phase_title "$phase")] $title implementation"
+	register_item "$impl" "task" "$title implementation"
 
 	bug="$(create_item \
-		--title "[$(phase_title "$phase")] Regression risk in $title" \
+		--title "Regression risk in $title" \
 		--kind bug \
 		--parent "$parent_id" \
 		--size m \
@@ -254,7 +254,7 @@ create_story_bundle() {
 		--label regression \
 		--description "$(story_description "$program" "$phase" "$track" "bug remediation")")"
 	STORY_BUG["$key"]="$bug"
-	register_item "$bug" "bug" "[$(phase_title "$phase")] Regression risk in $title"
+	register_item "$bug" "bug" "Regression risk in $title"
 }
 
 story_spec_id() {

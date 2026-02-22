@@ -8,7 +8,7 @@ use crate::output::{
 };
 use crate::validate;
 use bones_core::db::query;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use clap::Args;
 use rusqlite::params;
 use serde::Serialize;
@@ -53,9 +53,13 @@ pub struct ShowComment {
     pub created_at_us: i64,
 }
 
-fn micros_to_rfc3339(us: i64) -> String {
+fn micros_to_local_datetime(us: i64) -> String {
     DateTime::<Utc>::from_timestamp_micros(us)
-        .map(|ts| ts.to_rfc3339())
+        .map(|ts| {
+            ts.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|| us.to_string())
 }
 
@@ -238,7 +242,7 @@ fn render_show_human(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> 
             writeln!(
                 w,
                 "[{}] {}: {}",
-                micros_to_rfc3339(comment.created_at_us),
+                micros_to_local_datetime(comment.created_at_us),
                 comment.author,
                 comment.body
             )?;
@@ -292,7 +296,7 @@ fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
             writeln!(
                 w,
                 "[{}] {}: {}",
-                micros_to_rfc3339(comment.created_at_us),
+                micros_to_local_datetime(comment.created_at_us),
                 comment.author,
                 comment.body
             )?;
@@ -531,7 +535,7 @@ mod tests {
         render_show_text(&item, &mut buf).expect("render text");
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("Comments (1)"));
-        assert!(out.contains("[1970-"));
+        assert!(out.contains("] alice: Looking into it."));
     }
 
     // -----------------------------------------------------------------------
