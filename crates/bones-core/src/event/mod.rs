@@ -17,6 +17,7 @@
 
 pub mod canonical;
 pub mod data;
+pub mod hash_text;
 pub mod migrate;
 pub mod parser;
 pub mod types;
@@ -92,7 +93,8 @@ pub struct Event {
 
     /// BLAKE3 content hash of fields 1–7.
     ///
-    /// Format: `blake3:<hex>`. This is the event's identity in the
+    /// Format: `blake3:<payload>` (base64url in new writes). This is the
+    /// event's identity in the
     /// Merkle-DAG and is used for parent references, shard manifests,
     /// and sync diffing.
     pub event_hash: String,

@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod archive;
 pub mod assign;
+pub mod bones_gitignore;
 pub mod close;
 pub mod comment;
 pub mod compact;

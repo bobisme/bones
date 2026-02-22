@@ -90,7 +90,7 @@ pub enum ValidationErrorKind {
     InvalidUtf8,
     /// Wrong number of tab-separated fields.
     BadFieldCount,
-    /// The `event_hash` field has an invalid format (not `blake3:<hex>`).
+    /// The `event_hash` field has an invalid format.
     InvalidHashFormat,
     /// The `agent` field is empty or invalid.
     InvalidAgent,
@@ -492,7 +492,7 @@ mod tests {
             "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\n"
         );
         let hash = blake3::hash(hash_input.as_bytes());
-        let event_hash = format!("blake3:{}", hash.to_hex());
+        let event_hash = crate::event::hash_text::encode_blake3_hash(&hash);
         format!(
             "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\t{event_hash}"
         )
@@ -556,11 +556,12 @@ mod tests {
 
     #[test]
     fn validate_event_valid_with_parents() {
+        let parent = crate::event::hash_text::encode_blake3_hash(&blake3::hash(b"parent"));
         let line = make_line(
             1_000_000,
             "agent",
             "itc:AQ.1",
-            "blake3:a1b2c3d4e5f6",
+            &parent,
             "item.comment",
             "bn-a7x",
             &sample_comment_json(),

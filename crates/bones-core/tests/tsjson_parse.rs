@@ -337,7 +337,7 @@ fn roundtrip_item_redact() {
 
 #[test]
 fn roundtrip_with_single_parent() {
-    let parent_hash = "blake3:deadbeef01234567deadbeef01234567";
+    let parent_hash = "blake3:deadbeef01234567deadbeef01234567deadbeef01234567deadbeef01234567";
     let mut event = base_event(EventType::Comment, "bn-a7x", comment_data("Follow-up"));
     event.parents = vec![parent_hash.to_string()];
 
@@ -347,8 +347,8 @@ fn roundtrip_with_single_parent() {
 
 #[test]
 fn roundtrip_with_multiple_parents() {
-    let p1 = "blake3:aaaa0000";
-    let p2 = "blake3:bbbb1111";
+    let p1 = "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let p2 = "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let mut event = base_event(EventType::Comment, "bn-a7x", comment_data("Merge"));
     event.parents = vec![p1.to_string(), p2.to_string()];
 

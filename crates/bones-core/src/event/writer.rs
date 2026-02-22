@@ -15,6 +15,7 @@
 
 use super::Event;
 use super::canonical::canonicalize_json;
+use super::hash_text::encode_blake3_hash;
 
 /// The shard header line written at the start of new event log files.
 pub const SHARD_HEADER: &str = "# bones event log v1";
@@ -103,7 +104,7 @@ pub fn write_line(event: &Event) -> Result<String, WriteError> {
 /// The hash input is the UTF-8 bytes of:
 /// `{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{type}\t{item_id}\t{data_json}\n`
 ///
-/// Returns the hash in `blake3:<hex>` format.
+/// Returns the hash in `blake3:<base64url-no-pad>` format.
 ///
 /// # Errors
 ///
@@ -124,7 +125,7 @@ pub fn compute_event_hash(event: &Event) -> Result<String, WriteError> {
     );
 
     let hash = blake3::hash(hash_input.as_bytes());
-    Ok(format!("blake3:{hash}"))
+    Ok(encode_blake3_hash(&hash))
 }
 
 /// Compute the event hash and set it on a mutable Event, then serialize.

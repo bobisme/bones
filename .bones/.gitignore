@@ -1,0 +1,9 @@
+# bones: derived/local-only files
+bones.db
+bones.db-shm
+bones.db-wal
+feedback.jsonl
+agent_profiles/
+cache/
+itc/
+lock

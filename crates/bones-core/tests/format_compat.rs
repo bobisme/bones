@@ -28,6 +28,7 @@ use bones_core::event::data::{
     AssignAction, AssignData, CommentData, CompactData, CreateData, DeleteData, EventData,
     LinkData, MoveData, RedactData, SnapshotData, UnlinkData, UpdateData,
 };
+use bones_core::event::hash_text::decode_blake3_hash;
 use bones_core::event::types::EventType;
 use bones_core::event::writer::write_event;
 use bones_core::event::{ParseError, ParsedLine, detect_version, parse_line, parse_lines};
@@ -944,9 +945,13 @@ fn v1_roundtrip_through_current_writer() {
             original.data, reparsed_event.data,
             "v1 event {i}: data mismatch after roundtrip"
         );
+        let original_hash = decode_blake3_hash(&original.event_hash)
+            .unwrap_or_else(|| panic!("v1 event {i}: original hash is invalid"));
+        let reparsed_hash = decode_blake3_hash(&reparsed_event.event_hash)
+            .unwrap_or_else(|| panic!("v1 event {i}: reparsed hash is invalid"));
         assert_eq!(
-            original.event_hash, reparsed_event.event_hash,
-            "v1 event {i}: event_hash mismatch after roundtrip (hash not deterministic?)"
+            original_hash, reparsed_hash,
+            "v1 event {i}: event hash digest mismatch after roundtrip"
         );
     }
 

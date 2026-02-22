@@ -8,12 +8,13 @@
 //! - Each event's hash covers its content AND its parent hashes.
 //! - Modifying any event invalidates the hashes of all its descendants.
 //! - Parent hashes are sorted lexicographically before hashing.
-//! - The full BLAKE3 hash (64 hex chars) is used for maximum integrity.
-//! - Hash format: `blake3:<lowercase hex>`.
+//! - Hash format is text-prefixed (`blake3:<payload>`) with canonical base64url
+//!   writes and legacy hex accepted for validation.
 
 use std::collections::HashMap;
 
 use crate::event::Event;
+use crate::event::hash_text::decode_blake3_hash;
 use crate::event::writer::{WriteError, compute_event_hash};
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,15 @@ impl HashError {
 /// data serialization failure).
 pub fn verify_event_hash(event: &Event) -> Result<bool, HashError> {
     let expected = compute_event_hash(event)?;
-    Ok(event.event_hash == expected)
+    let stored = match decode_blake3_hash(&event.event_hash) {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    let computed = match decode_blake3_hash(&expected) {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    Ok(stored == computed)
 }
 
 /// Verify the Merkle-DAG integrity of a collection of events.
@@ -123,7 +132,16 @@ pub fn verify_chain(events: &[&Event]) -> Result<(), HashError> {
     for event in events {
         // 1. Verify each event's stored hash matches its computed hash.
         let expected = compute_event_hash(event)?;
-        if event.event_hash != expected {
+        let stored =
+            decode_blake3_hash(&event.event_hash).ok_or_else(|| HashError::HashMismatch {
+                stored: event.event_hash.clone(),
+                expected: expected.clone(),
+            })?;
+        let computed = decode_blake3_hash(&expected).ok_or_else(|| HashError::HashMismatch {
+            stored: event.event_hash.clone(),
+            expected: expected.clone(),
+        })?;
+        if stored != computed {
             return Err(HashError::HashMismatch {
                 stored: event.event_hash.clone(),
                 expected,

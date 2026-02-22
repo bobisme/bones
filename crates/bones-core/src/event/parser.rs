@@ -27,6 +27,7 @@ use tracing::warn;
 use crate::event::Event;
 use crate::event::canonical::canonicalize_json;
 use crate::event::data::EventData;
+use crate::event::hash_text::{decode_blake3_hash, encode_blake3_hash, is_valid_blake3_hash};
 use crate::event::migrate_event;
 use crate::event::types::EventType;
 use crate::model::item_id::ItemId;
@@ -67,7 +68,7 @@ pub enum ParseError {
     InvalidAgent(String),
     /// The `itc` field is empty.
     EmptyItc,
-    /// A parent hash has an invalid format (not `blake3:<hex>`).
+    /// A parent hash has an invalid format.
     InvalidParentHash(String),
     /// The event type string is not a known `item.<verb>`.
     InvalidEventType(String),
@@ -258,12 +259,6 @@ pub enum PartialParsedLine<'a> {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-/// Validate that a string looks like a `blake3:<hex>` hash.
-fn is_valid_blake3_hash(s: &str) -> bool {
-    s.strip_prefix("blake3:")
-        .is_some_and(|hex| !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()))
-}
-
 /// Compute the BLAKE3 event hash from the first 7 fields joined by tabs.
 ///
 /// Hash input: `{f1}\t{f2}\t{f3}\t{f4}\t{f5}\t{f6}\t{f7}\n`
@@ -277,7 +272,7 @@ fn compute_event_hash(fields: &[&str; 7]) -> String {
     }
     input.push('\n');
     let hash = blake3::hash(input.as_bytes());
-    format!("blake3:{}", hash.to_hex())
+    encode_blake3_hash(&hash)
 }
 
 /// Split a line on tab characters. Returns an iterator of field slices.
@@ -358,11 +353,11 @@ pub fn parse_line_partial(line: &str) -> Result<PartialParsedLine<'_>, ParseErro
 /// - `wall_ts_us` is a valid i64
 /// - `agent` is non-empty and contains no whitespace
 /// - `itc` is non-empty
-/// - `parents` are valid `blake3:<hex>` hashes (or empty)
+/// - `parents` are valid `blake3:<payload>` hashes (or empty)
 /// - `event_type` is a known `item.<verb>`
 /// - `item_id` is a valid bones ID
 /// - `data` is valid JSON matching the event type schema
-/// - `event_hash` is `blake3:<hex>` and matches the recomputed hash
+/// - `event_hash` is `blake3:<payload>` and matches the recomputed hash
 ///
 /// # Errors
 ///
@@ -464,7 +459,11 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
         &canonical_data,
     ];
     let computed = compute_event_hash(&hash_fields);
-    if computed != event_hash {
+    let expected_bytes = decode_blake3_hash(event_hash)
+        .ok_or_else(|| ParseError::InvalidEventHash(event_hash.to_string()))?;
+    let computed_bytes = decode_blake3_hash(&computed)
+        .ok_or_else(|| ParseError::InvalidEventHash(computed.clone()))?;
+    if expected_bytes != computed_bytes {
         return Err(ParseError::HashMismatch {
             expected: event_hash.to_string(),
             computed,
@@ -575,7 +574,7 @@ mod tests {
             "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\n"
         );
         let hash = blake3::hash(hash_input.as_bytes());
-        let event_hash = format!("blake3:{}", hash.to_hex());
+        let event_hash = encode_blake3_hash(&hash);
         format!(
             "{wall_ts_us}\t{agent}\t{itc}\t{parents}\t{event_type}\t{item_id}\t{canonical_data}\t{event_hash}"
         )
@@ -772,8 +771,8 @@ mod tests {
 
     #[test]
     fn parse_valid_event_with_multiple_parents() {
-        let p1 = "blake3:aaaa";
-        let p2 = "blake3:bbbb";
+        let p1 = encode_blake3_hash(&blake3::hash(b"p1"));
+        let p2 = encode_blake3_hash(&blake3::hash(b"p2"));
         let parents = format!("{p1},{p2}");
         let line = make_line(
             1_000,
@@ -787,7 +786,7 @@ mod tests {
         let result = parse_line(&line).expect("should parse");
         match result {
             ParsedLine::Event(event) => {
-                assert_eq!(event.parents, vec![p1, p2]);
+                assert_eq!(event.parents, vec![p1.as_str(), p2.as_str()]);
             }
             other => panic!("expected Event, got {other:?}"),
         }
@@ -1022,12 +1021,12 @@ mod tests {
 
         let data_json = canonicalize_json(&serde_json::to_value(&data).expect("serialize"));
 
-        let parent_hash = "blake3:a1b2c3d4e5f6";
+        let parent_hash = encode_blake3_hash(&blake3::hash(b"parent"));
         let line = make_line(
             1_708_012_201_000_000,
             "agent-x",
             "itc:AQ.1",
-            parent_hash,
+            &parent_hash,
             "item.move",
             "bn-a7x",
             &data_json,
@@ -1036,7 +1035,7 @@ mod tests {
         let parsed = parse_line(&line).expect("should parse");
         match parsed {
             ParsedLine::Event(event) => {
-                assert_eq!(event.parents, vec![parent_hash]);
+                assert_eq!(event.parents, vec![parent_hash.as_str()]);
                 assert_eq!(event.event_type, EventType::Move);
                 assert_eq!(event.data, EventData::Move(data));
             }
@@ -1212,12 +1211,18 @@ mod tests {
         let canonical_unknown = serde_json::from_str::<serde_json::Value>(unknown_data)
             .map(|v| canonicalize_json(&v))
             .unwrap();
-        let hash_input =
-            format!("2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\n");
-        let hash = blake3::hash(hash_input.as_bytes());
+        let unknown_fields = [
+            "2000",
+            "agent",
+            "itc:AQ.1",
+            "",
+            "item.future_type",
+            "bn-a7x",
+            canonical_unknown.as_str(),
+        ];
         let unknown_line = format!(
-            "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\tblake3:{}",
-            hash.to_hex()
+            "2000\tagent\titc:AQ.1\t\titem.future_type\tbn-a7x\t{canonical_unknown}\t{}",
+            compute_event_hash(&unknown_fields)
         );
 
         let input = format!("# bones event log v1\n{good_line}\n{unknown_line}\n");
@@ -1255,11 +1260,19 @@ mod tests {
         let canonical_u =
             canonicalize_json(&serde_json::from_str::<serde_json::Value>(unknown_data).unwrap());
         let mk_unknown = |ts: i64, et: &str| -> String {
-            let hash_input = format!("{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\n");
-            let hash = blake3::hash(hash_input.as_bytes());
+            let ts_s = ts.to_string();
+            let fields = [
+                ts_s.as_str(),
+                "agent",
+                "itc:X",
+                "",
+                et,
+                "bn-a7x",
+                canonical_u.as_str(),
+            ];
             format!(
-                "{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\tblake3:{}",
-                hash.to_hex()
+                "{ts}\tagent\titc:X\t\t{et}\tbn-a7x\t{canonical_u}\t{}",
+                compute_event_hash(&fields)
             )
         };
         let unknown1 = mk_unknown(2_000, "item.new_future_type");
@@ -1304,17 +1317,19 @@ mod tests {
 
     #[test]
     fn valid_blake3_hashes() {
-        assert!(is_valid_blake3_hash("blake3:abcdef0123456789"));
-        assert!(is_valid_blake3_hash("blake3:a"));
-        assert!(is_valid_blake3_hash(&format!("blake3:{}", "0".repeat(64))));
+        let digest = blake3::hash(b"parser-hash");
+        let new_style = encode_blake3_hash(&digest);
+        let legacy_style = format!("blake3:{}", digest.to_hex());
+        assert!(is_valid_blake3_hash(&new_style));
+        assert!(is_valid_blake3_hash(&legacy_style));
     }
 
     #[test]
     fn invalid_blake3_hashes() {
-        assert!(!is_valid_blake3_hash("blake3:")); // empty hex
+        assert!(!is_valid_blake3_hash("blake3:"));
         assert!(!is_valid_blake3_hash("sha256:abc")); // wrong prefix
         assert!(!is_valid_blake3_hash("abc123")); // no prefix
-        assert!(!is_valid_blake3_hash("blake3:xyz!")); // non-hex chars
+        assert!(!is_valid_blake3_hash("blake3:xyz!")); // invalid chars
         assert!(!is_valid_blake3_hash("")); // empty
     }
 

@@ -95,6 +95,9 @@ mod tests {
         let first = next_itc(temp.path(), "alice").expect("first stamp");
         let second = next_itc(temp.path(), "alice").expect("second stamp");
 
+        assert!(first.starts_with("itc:v3:"));
+        assert!(second.starts_with("itc:v3:"));
+
         assert_ne!(first, second);
         let first_stamp = stamp_from_text(&first).expect("decode first");
         let second_stamp = stamp_from_text(&second).expect("decode second");

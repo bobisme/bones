@@ -19,6 +19,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use crate::cmd::bones_gitignore::ensure_bones_gitignore;
 use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 
@@ -146,6 +147,9 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
 
     let bones_dir = find_bones_dir(project_root)
         .ok_or_else(|| anyhow::anyhow!("Not a bones project: .bones directory not found"))?;
+
+    ensure_bones_gitignore(&bones_dir)
+        .context("failed to ensure .bones/.gitignore for derived files")?;
 
     let shard_manager = ShardManager::new(&bones_dir);
     let active_shard = shard_manager

@@ -734,7 +734,7 @@ mod tests {
         let create = make_create("bn-aaa1", 1_700_000_001_000_000, "alice");
         let orphan_move = make_move(
             "bn-bb22",
-            "blake3:abcdef0123456789",
+            &bones_core::event::hash_text::encode_blake3_hash(&blake3::hash(b"missing-parent")),
             1_700_000_001_500_000,
             "bob",
         );

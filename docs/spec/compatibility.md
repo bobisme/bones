@@ -27,11 +27,11 @@ The current TSJSON format (v1) has **8 tab-separated fields** per event line:
 | 1 | `wall_ts_us` | Wall-clock timestamp, microseconds since Unix epoch (i64) |
 | 2 | `agent` | Agent/user identifier |
 | 3 | `itc` | Interval Tree Clock stamp (canonical text encoding) |
-| 4 | `parents` | Comma-separated parent hashes (`blake3:<hex>`) or empty |
+| 4 | `parents` | Comma-separated parent hashes (`blake3:<payload>`) or empty |
 | 5 | `type` | Event type (`item.<verb>`) |
 | 6 | `item_id` | Target work-item ID |
 | 7 | `data` | Canonical JSON payload (keys sorted, compact) |
-| 8 | `event_hash` | BLAKE3 content hash (`blake3:<hex>`) |
+| 8 | `event_hash` | BLAKE3 content hash (`blake3:<payload>`, base64url in current writers) |
 
 ## Backward Compatibility (new `bn` reads old events)
 
@@ -106,7 +106,7 @@ The following changes are safe to deploy without a format version bump:
 | Adding a new `item.<verb>` event type | Old readers skip unknown types |
 | Adding a new optional field to an event's JSON payload | Old readers ignore unknown fields |
 | Adding new comment lines (`#`) to shard headers | Comment lines are always skipped |
-| Changing the ITC clock algorithm (text encoding unchanged) | Field is opaque to the parser |
+| Changing ITC clock internals or text encoding (with a versioned `itc:vN:` prefix and decoder support) | TSJSON parser treats ITC as opaque text; CRDT decoder handles ITC prefix versions |
 | Adding new `item_id` prefixes or namespaces | Old readers pass IDs through opaquely |
 
 ## Version Detection Implementation
