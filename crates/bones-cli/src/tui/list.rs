@@ -394,6 +394,7 @@ enum CreateField {
     Description,
     Kind,
     Size,
+    Urgency,
     Labels,
 }
 
@@ -403,7 +404,8 @@ impl CreateField {
             Self::Title => Self::Description,
             Self::Description => Self::Kind,
             Self::Kind => Self::Size,
-            Self::Size => Self::Labels,
+            Self::Size => Self::Urgency,
+            Self::Urgency => Self::Labels,
             Self::Labels => Self::Title,
         }
     }
@@ -414,7 +416,8 @@ impl CreateField {
             Self::Description => Self::Title,
             Self::Kind => Self::Description,
             Self::Size => Self::Kind,
-            Self::Labels => Self::Size,
+            Self::Urgency => Self::Size,
+            Self::Labels => Self::Urgency,
         }
     }
 }
@@ -425,6 +428,7 @@ struct CreateDraft {
     description: Option<String>,
     kind: String,
     size: Option<String>,
+    urgency: String,
     labels: Vec<String>,
 }
 
@@ -445,6 +449,7 @@ struct CreateModalState {
     desc_col: usize,
     kind_idx: usize,
     size_idx: usize,
+    urgency_idx: usize,
     labels: String,
     labels_cursor: usize,
 }
@@ -459,7 +464,8 @@ impl Default for CreateModalState {
             desc_row: 0,
             desc_col: 0,
             kind_idx: 0,
-            size_idx: 4,
+            size_idx: 0,
+            urgency_idx: 0,
             labels: String::new(),
             labels_cursor: 0,
         }
@@ -485,6 +491,7 @@ impl CreateModalState {
             _ => 0,
         };
         modal.size_idx = Self::size_index(detail.size.as_deref());
+        modal.urgency_idx = Self::urgency_index(&detail.urgency);
         modal.labels = detail.labels.join(", ");
         modal.labels_cursor = char_len(&modal.labels);
         modal
@@ -524,6 +531,30 @@ impl CreateModalState {
         }
     }
 
+    fn urgency_options() -> [&'static str; 3] {
+        ["none", "urgent", "punted"]
+    }
+
+    fn urgency_index(urgency: &str) -> usize {
+        match urgency {
+            "urgent" => 1,
+            "punt" => 2,
+            _ => 0,
+        }
+    }
+
+    fn urgency_raw(&self) -> &'static str {
+        match self.urgency_idx {
+            1 => "urgent",
+            2 => "punt",
+            _ => "default",
+        }
+    }
+
+    fn urgency_display(&self) -> &'static str {
+        Self::urgency_options()[self.urgency_idx]
+    }
+
     fn can_submit(&self) -> bool {
         !self.title.trim().is_empty()
     }
@@ -551,6 +582,7 @@ impl CreateModalState {
             description: self.description_value(),
             kind: self.kind().to_string(),
             size: self.size(),
+            urgency: self.urgency_raw().to_string(),
             labels: self.labels_vec(),
         }
     }
@@ -626,6 +658,19 @@ impl CreateModalState {
                 KeyCode::Char('l') => self.size_idx = 5,
                 _ => {}
             },
+            CreateField::Urgency => match key.code {
+                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                    self.urgency_idx = self.urgency_idx.saturating_sub(1);
+                }
+                KeyCode::Right | KeyCode::Down | KeyCode::Char('j') => {
+                    self.urgency_idx =
+                        (self.urgency_idx + 1).min(Self::urgency_options().len() - 1);
+                }
+                KeyCode::Char('n') => self.urgency_idx = 0,
+                KeyCode::Char('u') => self.urgency_idx = 1,
+                KeyCode::Char('p') => self.urgency_idx = 2,
+                _ => {}
+            },
             CreateField::Labels => {
                 Self::edit_single_line(&mut self.labels, &mut self.labels_cursor, key);
             }
@@ -635,27 +680,7 @@ impl CreateModalState {
     }
 
     fn edit_single_line(text: &mut String, cursor: &mut usize, key: KeyEvent) {
-        match key.code {
-            KeyCode::Left => *cursor = cursor.saturating_sub(1),
-            KeyCode::Right => *cursor = (*cursor + 1).min(char_len(text)),
-            KeyCode::Home => *cursor = 0,
-            KeyCode::End => *cursor = char_len(text),
-            KeyCode::Backspace => {
-                if *cursor > 0 {
-                    let remove_idx = *cursor - 1;
-                    remove_char_at(text, remove_idx);
-                    *cursor = remove_idx;
-                }
-            }
-            KeyCode::Delete => {
-                remove_char_at(text, *cursor);
-            }
-            KeyCode::Char(c) => {
-                insert_char_at(text, *cursor, c);
-                *cursor += 1;
-            }
-            _ => {}
-        }
+        let _ = edit_single_line_readline(text, cursor, key);
     }
 
     fn edit_description(&mut self, key: KeyEvent) {
@@ -665,6 +690,24 @@ impl CreateModalState {
             &mut self.desc_col,
             key,
         );
+    }
+
+    fn handle_paste(&mut self, text: &str) {
+        match self.focus {
+            CreateField::Title => {
+                insert_single_line_text(&mut self.title, &mut self.title_cursor, text)
+            }
+            CreateField::Description => paste_multiline_text(
+                &mut self.description,
+                &mut self.desc_row,
+                &mut self.desc_col,
+                text,
+            ),
+            CreateField::Labels => {
+                insert_single_line_text(&mut self.labels, &mut self.labels_cursor, text)
+            }
+            _ => {}
+        }
     }
 }
 
@@ -736,12 +779,76 @@ impl NoteModalState {
     fn text(&self) -> String {
         self.lines.join("\n")
     }
+
+    fn handle_paste(&mut self, text: &str) {
+        paste_multiline_text(&mut self.lines, &mut self.row, &mut self.col, text);
+    }
 }
 
 fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key: KeyEvent) {
     if lines.is_empty() {
         lines.push(String::new());
     }
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    if matches!(key.code, KeyCode::Char('j')) && key.modifiers.contains(KeyModifiers::SHIFT) {
+        insert_newline(lines, row, col);
+        return;
+    }
+
+    if ctrl {
+        match key.code {
+            KeyCode::Char('a') => {
+                *col = 0;
+                return;
+            }
+            KeyCode::Char('e') => {
+                *col = char_len(&lines[*row]);
+                return;
+            }
+            KeyCode::Char('h') => {
+                backspace_multiline(lines, row, col);
+                return;
+            }
+            KeyCode::Char('d') => {
+                delete_multiline(lines, row, col);
+                return;
+            }
+            KeyCode::Char('w') => {
+                delete_prev_word_in_line(&mut lines[*row], col);
+                return;
+            }
+            KeyCode::Char('u') => {
+                let start = byte_index_at_char(&lines[*row], 0);
+                let end = byte_index_at_char(&lines[*row], *col);
+                lines[*row].replace_range(start..end, "");
+                *col = 0;
+                return;
+            }
+            KeyCode::Char('k') => {
+                let start = byte_index_at_char(&lines[*row], *col);
+                lines[*row].replace_range(start.., "");
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    if alt {
+        match key.code {
+            KeyCode::Char('b') => {
+                *col = prev_word_boundary(&lines[*row], *col);
+                return;
+            }
+            KeyCode::Char('f') => {
+                *col = next_word_boundary(&lines[*row], *col);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Left => {
             if *col > 0 {
@@ -774,40 +881,222 @@ fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key
         }
         KeyCode::Home => *col = 0,
         KeyCode::End => *col = char_len(&lines[*row]),
-        KeyCode::Enter => {
-            let split_at = byte_index_at_char(&lines[*row], *col);
-            let tail = lines[*row].split_off(split_at);
-            *row += 1;
-            *col = 0;
-            lines.insert(*row, tail);
-        }
+        KeyCode::Enter => insert_newline(lines, row, col),
         KeyCode::Backspace => {
-            if *col > 0 {
-                let remove_idx = *col - 1;
-                remove_char_at(&mut lines[*row], remove_idx);
-                *col = remove_idx;
-            } else if *row > 0 {
-                let current = lines.remove(*row);
-                *row -= 1;
-                *col = char_len(&lines[*row]);
-                lines[*row].push_str(&current);
-            }
+            backspace_multiline(lines, row, col);
         }
-        KeyCode::Delete => {
-            let line_len = char_len(&lines[*row]);
-            if *col < line_len {
-                remove_char_at(&mut lines[*row], *col);
-            } else if *row + 1 < lines.len() {
-                let next = lines.remove(*row + 1);
-                lines[*row].push_str(&next);
-            }
-        }
+        KeyCode::Delete => delete_multiline(lines, row, col),
+        KeyCode::Char('\n') | KeyCode::Char('\r') => insert_newline(lines, row, col),
         KeyCode::Char(c) => {
-            insert_char_at(&mut lines[*row], *col, c);
-            *col += 1;
+            if !ctrl && !alt {
+                insert_char_at(&mut lines[*row], *col, c);
+                *col += 1;
+            }
         }
         _ => {}
     }
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || matches!(ch, '_' | '-')
+}
+
+fn prev_word_boundary(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() || cursor == 0 {
+        return 0;
+    }
+
+    let mut idx = cursor.min(chars.len());
+    while idx > 0 && !is_word_char(chars[idx - 1]) {
+        idx -= 1;
+    }
+    while idx > 0 && is_word_char(chars[idx - 1]) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn next_word_boundary(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+
+    let mut idx = cursor.min(chars.len());
+    while idx < chars.len() && !is_word_char(chars[idx]) {
+        idx += 1;
+    }
+    while idx < chars.len() && is_word_char(chars[idx]) {
+        idx += 1;
+    }
+    idx
+}
+
+fn delete_prev_word_in_line(text: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let start = prev_word_boundary(text, *cursor);
+    let start_byte = byte_index_at_char(text, start);
+    let end_byte = byte_index_at_char(text, *cursor);
+    text.replace_range(start_byte..end_byte, "");
+    *cursor = start;
+}
+
+fn insert_newline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize) {
+    let split_at = byte_index_at_char(&lines[*row], *col);
+    let tail = lines[*row].split_off(split_at);
+    *row += 1;
+    *col = 0;
+    lines.insert(*row, tail);
+}
+
+fn backspace_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize) {
+    if *col > 0 {
+        let remove_idx = *col - 1;
+        remove_char_at(&mut lines[*row], remove_idx);
+        *col = remove_idx;
+    } else if *row > 0 {
+        let current = lines.remove(*row);
+        *row -= 1;
+        *col = char_len(&lines[*row]);
+        lines[*row].push_str(&current);
+    }
+}
+
+fn delete_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize) {
+    let line_len = char_len(&lines[*row]);
+    if *col < line_len {
+        remove_char_at(&mut lines[*row], *col);
+    } else if *row + 1 < lines.len() {
+        let next = lines.remove(*row + 1);
+        lines[*row].push_str(&next);
+    }
+}
+
+fn normalize_paste_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn insert_single_line_text(text: &mut String, cursor: &mut usize, pasted: &str) {
+    let flattened = normalize_paste_text(pasted).replace('\n', " ");
+    if flattened.is_empty() {
+        return;
+    }
+    let idx = byte_index_at_char(text, *cursor);
+    text.insert_str(idx, &flattened);
+    *cursor += flattened.chars().count();
+}
+
+fn paste_multiline_text(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, pasted: &str) {
+    if pasted.is_empty() {
+        return;
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    for ch in normalize_paste_text(pasted).chars() {
+        if ch == '\n' {
+            insert_newline(lines, row, col);
+        } else {
+            insert_char_at(&mut lines[*row], *col, ch);
+            *col += 1;
+        }
+    }
+}
+
+fn edit_single_line_readline(text: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    if ctrl {
+        match key.code {
+            KeyCode::Char('a') => {
+                *cursor = 0;
+                return false;
+            }
+            KeyCode::Char('e') => {
+                *cursor = char_len(text);
+                return false;
+            }
+            KeyCode::Char('h') => {
+                if *cursor > 0 {
+                    let remove_idx = *cursor - 1;
+                    remove_char_at(text, remove_idx);
+                    *cursor = remove_idx;
+                    return true;
+                }
+                return false;
+            }
+            KeyCode::Char('d') => {
+                let before = text.len();
+                remove_char_at(text, *cursor);
+                return text.len() != before;
+            }
+            KeyCode::Char('w') => {
+                let before = text.len();
+                delete_prev_word_in_line(text, cursor);
+                return text.len() != before;
+            }
+            KeyCode::Char('u') => {
+                let start = byte_index_at_char(text, 0);
+                let end = byte_index_at_char(text, *cursor);
+                text.replace_range(start..end, "");
+                *cursor = 0;
+                return true;
+            }
+            KeyCode::Char('k') => {
+                let start = byte_index_at_char(text, *cursor);
+                text.replace_range(start.., "");
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    if alt {
+        match key.code {
+            KeyCode::Char('b') => {
+                *cursor = prev_word_boundary(text, *cursor);
+                return false;
+            }
+            KeyCode::Char('f') => {
+                *cursor = next_word_boundary(text, *cursor);
+                return false;
+            }
+            _ => {}
+        }
+    }
+
+    match key.code {
+        KeyCode::Left => *cursor = cursor.saturating_sub(1),
+        KeyCode::Right => *cursor = (*cursor + 1).min(char_len(text)),
+        KeyCode::Home => *cursor = 0,
+        KeyCode::End => *cursor = char_len(text),
+        KeyCode::Backspace => {
+            if *cursor > 0 {
+                let remove_idx = *cursor - 1;
+                remove_char_at(text, remove_idx);
+                *cursor = remove_idx;
+                return true;
+            }
+        }
+        KeyCode::Delete => {
+            let before = text.len();
+            remove_char_at(text, *cursor);
+            return text.len() != before;
+        }
+        KeyCode::Char(c) => {
+            if !ctrl && !alt && !matches!(c, '\n' | '\r') {
+                insert_char_at(text, *cursor, c);
+                *cursor += 1;
+                return true;
+            }
+        }
+        _ => {}
+    }
+    false
 }
 
 fn char_len(value: &str) -> usize {
@@ -886,10 +1175,14 @@ pub struct ListView {
     input_mode: InputMode,
     /// Buffer for the search query being typed.
     search_buf: String,
+    /// Cursor position within `search_buf`.
+    search_cursor: usize,
     /// Query value before entering Search mode (for Esc cancel).
     search_prev_query: String,
     /// Buffer for the label filter being typed in the popup.
     label_buf: String,
+    /// Cursor position within `label_buf`.
+    label_cursor: usize,
     /// Current focus inside the filter popup.
     filter_field: FilterField,
     /// Whether to quit.
@@ -926,6 +1219,8 @@ pub struct ListView {
     note_modal: Option<NoteModalState>,
     /// Help overlay filter query.
     help_query: String,
+    /// Cursor position within `help_query`.
+    help_cursor: usize,
 }
 
 impl ListView {
@@ -975,8 +1270,10 @@ impl ListView {
             table_state: TableState::default(),
             input_mode: InputMode::default(),
             search_buf: String::new(),
+            search_cursor: 0,
             search_prev_query: String::new(),
             label_buf: String::new(),
+            label_cursor: 0,
             filter_field: FilterField::default(),
             should_quit: false,
             last_refresh: Instant::now(),
@@ -995,6 +1292,7 @@ impl ListView {
             create_modal_edit_item_id: None,
             note_modal: None,
             help_query: String::new(),
+            help_cursor: 0,
         };
         view.reload()?;
         Ok(view)
@@ -1292,6 +1590,34 @@ impl ListView {
         Ok(())
     }
 
+    pub fn handle_paste(&mut self, text: &str) {
+        match self.input_mode {
+            InputMode::CreateModal => {
+                if let Some(modal) = self.create_modal.as_mut() {
+                    modal.handle_paste(text);
+                }
+            }
+            InputMode::NoteModal => {
+                if let Some(modal) = self.note_modal.as_mut() {
+                    modal.handle_paste(text);
+                }
+            }
+            InputMode::Search => {
+                insert_single_line_text(&mut self.search_buf, &mut self.search_cursor, text);
+                self.filter.search_query = self.search_buf.clone();
+                let _ = self.refresh_semantic_search_ids();
+                self.apply_filter_and_sort();
+            }
+            InputMode::FilterLabel => {
+                insert_single_line_text(&mut self.label_buf, &mut self.label_cursor, text);
+            }
+            InputMode::Help => {
+                insert_single_line_text(&mut self.help_query, &mut self.help_cursor, text);
+            }
+            InputMode::FilterPopup | InputMode::Normal => {}
+        }
+    }
+
     fn handle_normal_key(&mut self, key: KeyEvent, ctrl: bool) {
         match key.code {
             // Quit
@@ -1371,6 +1697,7 @@ impl ListView {
             KeyCode::Char('/') => {
                 self.search_prev_query = self.filter.search_query.clone();
                 self.search_buf = self.filter.search_query.clone();
+                self.search_cursor = char_len(&self.search_buf);
                 self.input_mode = InputMode::Search;
             }
 
@@ -1398,12 +1725,14 @@ impl ListView {
             // Help overlay.
             KeyCode::Char('?') => {
                 self.help_query.clear();
+                self.help_cursor = 0;
                 self.input_mode = InputMode::Help;
             }
 
             // Filter popup
             KeyCode::Char('F') => {
                 self.label_buf = self.filter.label.clone().unwrap_or_default();
+                self.label_cursor = char_len(&self.label_buf);
                 self.filter_field = FilterField::default();
                 self.input_mode = InputMode::FilterPopup;
             }
@@ -1513,6 +1842,11 @@ impl ListView {
             .size
             .as_deref()
             .and_then(|raw| raw.parse::<Size>().ok());
+        let urgency = match draft.urgency.as_str() {
+            "urgent" => Urgency::Urgent,
+            "punt" => Urgency::Punt,
+            _ => Urgency::Default,
+        };
 
         let editing_id = self.create_modal_edit_item_id.take();
         let was_edit = editing_id.is_some();
@@ -1534,6 +1868,7 @@ impl ListView {
                         None => json!(null),
                     },
                 ),
+                ("urgency".to_string(), json!(draft.urgency)),
                 ("labels".to_string(), json!(draft.labels)),
             ];
             actions::update_item_fields(
@@ -1553,7 +1888,7 @@ impl ListView {
                 draft.description,
                 kind,
                 size,
-                Urgency::Default,
+                urgency,
                 draft.labels,
             )?
         };
@@ -1627,15 +1962,12 @@ impl ListView {
         match key.code {
             KeyCode::Esc => {
                 self.help_query.clear();
+                self.help_cursor = 0;
                 self.input_mode = InputMode::Normal;
             }
-            KeyCode::Backspace => {
-                self.help_query.pop();
+            _ => {
+                let _ = edit_single_line_readline(&mut self.help_query, &mut self.help_cursor, key);
             }
-            KeyCode::Char(c) => {
-                self.help_query.push(c);
-            }
-            _ => {}
         }
     }
 
@@ -1643,6 +1975,7 @@ impl ListView {
         match key.code {
             KeyCode::Esc => {
                 self.search_buf = self.search_prev_query.clone();
+                self.search_cursor = char_len(&self.search_prev_query);
                 self.filter.search_query = self.search_prev_query.clone();
                 let _ = self.refresh_semantic_search_ids();
                 self.apply_filter_and_sort();
@@ -1654,19 +1987,15 @@ impl ListView {
                 self.apply_filter_and_sort();
                 self.input_mode = InputMode::Normal;
             }
-            KeyCode::Backspace => {
-                self.search_buf.pop();
-                self.filter.search_query = self.search_buf.clone();
-                let _ = self.refresh_semantic_search_ids();
-                self.apply_filter_and_sort();
+            _ => {
+                let changed =
+                    edit_single_line_readline(&mut self.search_buf, &mut self.search_cursor, key);
+                if changed {
+                    self.filter.search_query = self.search_buf.clone();
+                    let _ = self.refresh_semantic_search_ids();
+                    self.apply_filter_and_sort();
+                }
             }
-            KeyCode::Char(c) => {
-                self.search_buf.push(c);
-                self.filter.search_query = self.search_buf.clone();
-                let _ = self.refresh_semantic_search_ids();
-                self.apply_filter_and_sort();
-            }
-            _ => {}
         }
     }
 
@@ -1683,10 +2012,11 @@ impl ListView {
             }
             KeyCode::Enter => {
                 if self.filter_field == FilterField::Label {
-                    // Enter on the label field → edit mode
+                    // Enter on the label field -> edit mode
+                    self.label_cursor = char_len(&self.label_buf);
                     self.input_mode = InputMode::FilterLabel;
                 } else {
-                    // Enter elsewhere → apply and close
+                    // Enter elsewhere -> apply and close
                     self.commit_label_filter();
                     self.apply_filter_and_sort();
                     self.input_mode = InputMode::Normal;
@@ -1724,13 +2054,9 @@ impl ListView {
             KeyCode::Esc | KeyCode::Enter => {
                 self.input_mode = InputMode::FilterPopup;
             }
-            KeyCode::Backspace => {
-                self.label_buf.pop();
+            _ => {
+                let _ = edit_single_line_readline(&mut self.label_buf, &mut self.label_cursor, key);
             }
-            KeyCode::Char(c) => {
-                self.label_buf.push(c);
-            }
-            _ => {}
         }
     }
 
@@ -1756,6 +2082,7 @@ impl ListView {
                 self.apply_filter_and_sort();
             }
             FilterField::Label => {
+                self.label_cursor = char_len(&self.label_buf);
                 self.input_mode = InputMode::FilterLabel;
             }
         }
@@ -2080,6 +2407,14 @@ fn urgency_color(urgency: &str) -> Color {
     }
 }
 
+fn urgency_label(urgency: &str) -> &str {
+    match urgency {
+        "default" => "none",
+        "punt" => "punted",
+        other => other,
+    }
+}
+
 fn kind_state_icon(kind: &str, state: &str) -> &'static str {
     let done = state == "done";
     match kind {
@@ -2160,7 +2495,7 @@ fn size_marker(size: &str) -> &str {
 }
 
 /// Build one table `Row` from a `WorkItem` and hierarchy depth.
-fn build_row(item: &WorkItem, depth: usize, width: u16) -> Row<'static> {
+fn build_row(item: &WorkItem, depth: usize, width: u16, is_selected: bool) -> Row<'static> {
     let indent = "  ".repeat(depth);
     let icon = kind_state_icon(&item.kind, &item.state);
     let labels_full = item
@@ -2189,6 +2524,12 @@ fn build_row(item: &WorkItem, depth: usize, width: u16) -> Row<'static> {
     let title_budget = text_budget.saturating_sub(label_with_gap.chars().count());
     let title = truncate(&item.title, title_budget);
 
+    let id_style = if is_selected {
+        Style::default()
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let cell = Cell::from(Line::from(vec![
         Span::raw(indent),
         Span::styled(
@@ -2196,7 +2537,7 @@ fn build_row(item: &WorkItem, depth: usize, width: u16) -> Row<'static> {
             Style::default().fg(icon_color(&item.kind, &item.state)),
         ),
         Span::raw(" "),
-        Span::styled(item.item_id.clone(), Style::default().fg(Color::DarkGray)),
+        Span::styled(item.item_id.clone(), id_style),
         Span::raw(" "),
         Span::styled(size_prefix, Style::default().fg(Color::Cyan)),
         Span::styled(title, title_style_for_urgency(&item.urgency)),
@@ -2285,7 +2626,7 @@ fn detail_lines(detail: &DetailItem) -> Vec<Line<'static>> {
     lines.push(Line::from(vec![
         Span::styled("Urgency: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            detail.urgency.clone(),
+            urgency_label(&detail.urgency).to_string(),
             Style::default().fg(urgency_color(&detail.urgency)),
         ),
     ]));
@@ -2486,8 +2827,9 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
 
     let type_focused = modal.focus == CreateField::Kind;
     let size_focused = modal.focus == CreateField::Size;
+    let urgency_focused = modal.focus == CreateField::Urgency;
     let labels_focused = modal.focus == CreateField::Labels;
-    let options_border = if type_focused || size_focused || labels_focused {
+    let options_border = if type_focused || size_focused || urgency_focused || labels_focused {
         Color::Green
     } else {
         Color::DarkGray
@@ -2524,6 +2866,13 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     } else {
         Style::default().fg(Color::White)
     };
+    let urgency_style = if urgency_focused {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
 
     let labels_text = if labels_focused {
         with_cursor(&modal.labels, modal.labels_cursor)
@@ -2547,6 +2896,9 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
             format!(" {} ", modal.size().unwrap_or_else(|| "(none)".to_string())),
             size_style,
         ),
+        Span::raw("   "),
+        Span::styled("Urgency: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!(" {} ", modal.urgency_display()), urgency_style),
         Span::raw("   "),
         Span::styled("Labels: ", Style::default().fg(Color::DarkGray)),
         Span::styled(labels_text, labels_style),
@@ -2724,7 +3076,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     let query_line = Line::from(vec![
         Span::styled("Filter: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            with_cursor(&app.help_query, app.help_query.chars().count()),
+            with_cursor(&app.help_query, app.help_cursor),
             Style::default().fg(Color::White),
         ),
     ]);
@@ -2792,11 +3144,15 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
             )]))]));
         }
         let depth = app.visible_depths.get(index).copied().unwrap_or(0);
-        rows.push(build_row(item, depth, body_width));
+        let is_selected = app.table_state.selected() == Some(index);
+        rows.push(build_row(item, depth, body_width, is_selected));
     }
 
     let block_title = match app.input_mode {
-        InputMode::Search => format!(" bones — search: {} ", app.search_buf),
+        InputMode::Search => format!(
+            " bones — search: {} ",
+            with_cursor(&app.search_buf, app.search_cursor)
+        ),
         _ => format!(
             " bones — {} of {} bones  [sort: {}] ",
             app.visible_items.len(),
@@ -2941,7 +3297,10 @@ fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
                     spans.push(Span::styled(format!("kind={k} "), val_style));
                 }
                 if let Some(ref u) = app.filter.urgency {
-                    spans.push(Span::styled(format!("urgency={u} "), val_style));
+                    spans.push(Span::styled(
+                        format!("urgency={} ", urgency_label(u)),
+                        val_style,
+                    ));
                 }
                 if let Some(ref l) = app.filter.label {
                     spans.push(Span::styled(format!("label={l} "), val_style));
@@ -3072,7 +3431,11 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         };
         let prefix = if is_focused { "► " } else { "  " };
 
-        let val_display = value.as_deref().unwrap_or("(any)");
+        let val_display = match (*field, value.as_deref()) {
+            (FilterField::Urgency, Some(v)) => urgency_label(v),
+            (_, Some(v)) => v,
+            (_, None) => "(any)",
+        };
         let line = Line::from(vec![
             Span::styled(prefix.to_string(), focused_style),
             Span::styled((*label).to_string(), label_style),
@@ -3095,16 +3458,24 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         let prefix = if is_focused { "► " } else { "  " };
         let editing = app.input_mode == InputMode::FilterLabel;
         let val_display = if app.label_buf.is_empty() {
-            "(any)".to_string()
+            if editing {
+                String::new()
+            } else {
+                "(any)".to_string()
+            }
         } else {
             app.label_buf.clone()
         };
-        let cursor = if editing && is_focused { "_" } else { "" };
+        let val_with_cursor = if editing && is_focused {
+            with_cursor(&val_display, app.label_cursor)
+        } else {
+            val_display
+        };
         let line = Line::from(vec![
             Span::styled(prefix.to_string(), focused_style),
             Span::styled("Label  ".to_string(), label_style),
             Span::styled(": ".to_string(), dim_style),
-            Span::styled(format!("{val_display}{cursor}"), val_style),
+            Span::styled(val_with_cursor, val_style),
             if editing {
                 Span::styled("  type to edit, Enter done".to_string(), dim_style)
             } else {
@@ -3757,8 +4128,10 @@ mod tests {
             table_state: TableState::default(),
             input_mode: InputMode::Normal,
             search_buf: String::new(),
+            search_cursor: 0,
             search_prev_query: String::new(),
             label_buf: String::new(),
+            label_cursor: 0,
             filter_field: FilterField::default(),
             should_quit: false,
             last_refresh: Instant::now(),
@@ -3777,6 +4150,7 @@ mod tests {
             create_modal_edit_item_id: None,
             note_modal: None,
             help_query: String::new(),
+            help_cursor: 0,
         };
         view.apply_filter_and_sort();
         view
@@ -3858,8 +4232,10 @@ mod tests {
             table_state: TableState::default(),
             input_mode: InputMode::Normal,
             search_buf: String::new(),
+            search_cursor: 0,
             search_prev_query: String::new(),
             label_buf: String::new(),
+            label_cursor: 0,
             filter_field: FilterField::default(),
             should_quit: false,
             last_refresh: Instant::now(),
@@ -3878,6 +4254,7 @@ mod tests {
             create_modal_edit_item_id: None,
             note_modal: None,
             help_query: String::new(),
+            help_cursor: 0,
         };
         view.apply_filter_and_sort();
         assert_eq!(view.table_state.selected(), None);

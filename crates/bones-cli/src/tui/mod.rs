@@ -49,6 +49,10 @@ impl TuiApp {
         self.list_view.handle_mouse(mouse);
     }
 
+    fn handle_paste(&mut self, text: String) {
+        self.list_view.handle_paste(&text);
+    }
+
     fn tick(&mut self) -> Result<()> {
         self.list_view.tick()
     }
@@ -103,6 +107,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut TuiApp)
             match event::read().context("event read")? {
                 Event::Key(key) => app.handle_key(key)?,
                 Event::Mouse(mouse) => app.handle_mouse(mouse),
+                Event::Paste(text) => app.handle_paste(text),
                 _ => {}
             }
         } else {

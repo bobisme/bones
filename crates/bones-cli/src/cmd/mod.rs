@@ -46,4 +46,6 @@ pub mod triage;
 pub(crate) mod triage_support;
 pub mod undo;
 pub mod update;
+pub mod urgency;
 pub mod verify;
+pub mod warm_search;

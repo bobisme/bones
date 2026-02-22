@@ -575,7 +575,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Item-scoped operations",
         long_about = "Grouped item operations including history, metadata, assignment, comments, and lifecycle detail.",
-        after_help = "QUICK REFERENCE:\n    bn bone log <id>                 # item event timeline\n    bn bone assign <id> <agent>      # assign\n    bn bone comment add <id> <text>  # add comment\n    bn bone tag <id> <label...>      # add labels\n    bn bone close <id>               # close item\n    bn bone reopen <id>              # reopen item\n\nEXAMPLES:\n    # Show item event timeline\n    bn bone log bn-abc\n\n    # Assign an item\n    bn bone assign bn-abc alice\n\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating\""
+        after_help = "QUICK REFERENCE:\n    bn bone log <id>                 # item event timeline\n    bn bone assign <id> <agent>      # assign\n    bn bone comment add <id> <text>  # add comment\n    bn bone tag <id> <label...>      # add labels\n    bn bone punt <id>                # set urgency=punt\n    bn bone escalate <id>            # set urgency=urgent\n    bn bone normalize <id>           # set urgency=default\n    bn bone close <id>               # close item\n    bn bone reopen <id>              # reopen item\n\nEXAMPLES:\n    # Show item event timeline\n    bn bone log bn-abc\n\n    # Assign an item\n    bn bone assign bn-abc alice\n\n    # Add a comment\n    bn bone comment add bn-abc \"Investigating\""
     )]
     Bone {
         #[command(subcommand)]
@@ -586,7 +586,7 @@ enum Commands {
         next_help_heading = "Project Maintenance",
         about = "Administrative and maintenance operations",
         long_about = "Grouped maintenance commands for verification, diagnostics, configuration, rebuild, and project housekeeping.",
-        after_help = "QUICK REFERENCE:\n    bn admin verify                    # verify event/manifests\n    bn admin diagnose                  # health diagnostics\n    bn admin rebuild --incremental     # rebuild projection\n    bn admin config show               # inspect effective config\n    bn admin compact                   # compact completed-item history\n\nEXAMPLES:\n    # Verify integrity\n    bn admin verify\n\n    # Rebuild projection\n    bn admin rebuild --incremental\n\n    # Update config\n    bn admin config set user.output json"
+        after_help = "QUICK REFERENCE:\n    bn admin verify                    # verify event/manifests\n    bn admin diagnose                  # health diagnostics\n    bn admin rebuild --incremental     # rebuild projection\n    bn admin warm-search               # precompute search embeddings\n    bn admin config show               # inspect effective config\n    bn admin compact                   # compact completed-item history\n\nEXAMPLES:\n    # Verify integrity\n    bn admin verify\n\n    # Rebuild projection\n    bn admin rebuild --incremental\n\n    # Prewarm semantic search\n    bn admin warm-search\n\n    # Update config\n    bn admin config set user.output json"
     )]
     Admin {
         #[command(subcommand)]
@@ -765,6 +765,12 @@ enum BoneCommand {
     Assign(cmd::assign::AssignArgs),
     #[command(about = "Unassign the current agent from an item")]
     Unassign(cmd::assign::UnassignArgs),
+    #[command(about = "Set item urgency to punt")]
+    Punt(cmd::urgency::UrgencyQuickArgs),
+    #[command(about = "Set item urgency to urgent")]
+    Escalate(cmd::urgency::UrgencyQuickArgs),
+    #[command(about = "Reset item urgency to default")]
+    Normalize(cmd::urgency::UrgencyQuickArgs),
     #[command(about = "Move an item under a parent")]
     Move(cmd::move_cmd::MoveArgs),
 }
@@ -832,6 +838,13 @@ enum AdminCommand {
         #[arg(long)]
         incremental: bool,
     },
+    #[command(
+        name = "warm-search",
+        about = "Precompute semantic search embeddings",
+        long_about = "Precompute and synchronize semantic search embeddings so the first interactive search avoids one-time warmup latency.",
+        after_help = "EXAMPLES:\n    # Warm search index after migration/rebuild\n    bn admin warm-search\n\n    # Machine-readable output\n    bn admin warm-search --format json"
+    )]
+    WarmSearch,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1218,6 +1231,15 @@ fn main() -> anyhow::Result<()> {
             BoneCommand::Unassign(args) => {
                 cmd::assign::run_unassign(args, cli.agent_flag(), output, &project_root)
             }
+            BoneCommand::Punt(args) => {
+                cmd::urgency::run_punt(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Escalate(args) => {
+                cmd::urgency::run_escalate(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Normalize(args) => {
+                cmd::urgency::run_normalize(args, cli.agent_flag(), output, &project_root)
+            }
             BoneCommand::Move(args) => {
                 cmd::move_cmd::run_move(args, cli.agent_flag(), output, &project_root)
             }
@@ -1253,6 +1275,7 @@ fn main() -> anyhow::Result<()> {
             AdminCommand::Rebuild { incremental } => {
                 cmd::rebuild::run_rebuild(&project_root, *incremental, output)
             }
+            AdminCommand::WarmSearch => cmd::warm_search::run_warm_search(&project_root, output),
         }),
 
         Commands::Data { ref command } => timing::timed("cmd.data", || match command {
@@ -1935,8 +1958,26 @@ mod tests {
     }
 
     #[test]
+    fn bone_urgency_shortcuts_parse() {
+        let punt = Cli::parse_from(["bn", "bone", "punt", "bn-abc"]);
+        assert!(matches!(punt.command, Commands::Bone { .. }));
+
+        let escalate = Cli::parse_from(["bn", "bone", "escalate", "bn-abc"]);
+        assert!(matches!(escalate.command, Commands::Bone { .. }));
+
+        let normalize = Cli::parse_from(["bn", "bone", "normalize", "bn-abc"]);
+        assert!(matches!(normalize.command, Commands::Bone { .. }));
+    }
+
+    #[test]
     fn admin_group_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "admin", "verify"]);
+        assert!(matches!(cli.command, Commands::Admin { .. }));
+    }
+
+    #[test]
+    fn admin_warm_search_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "admin", "warm-search"]);
         assert!(matches!(cli.command, Commands::Admin { .. }));
     }
 

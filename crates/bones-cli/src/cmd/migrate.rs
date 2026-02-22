@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,7 @@ struct SourceIssue {
     source_id: String,
     title: String,
     description: Option<String>,
+    extra_fields: Vec<(String, String)>,
     issue_type: String,
     status: String,
     priority: String,
@@ -88,17 +89,17 @@ struct JsonlIssue {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "type")]
     issue_type: Option<String>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
-    priority: Option<String>,
+    priority: Option<JsonValue>,
     #[serde(default)]
     labels: Vec<String>,
     #[serde(default)]
     assignee: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "created_by")]
     actor: Option<String>,
     #[serde(default)]
     created_at: Option<JsonValue>,
@@ -112,12 +113,15 @@ struct JsonlIssue {
     comments: Vec<JsonlComment>,
     #[serde(default)]
     dependencies: Vec<JsonlDependency>,
+    #[serde(flatten)]
+    extra_fields: BTreeMap<String, JsonValue>,
 }
 
 #[derive(Debug, Deserialize)]
 struct JsonlComment {
-    #[serde(default)]
+    #[serde(default, alias = "agent")]
     author: Option<String>,
+    #[serde(alias = "text")]
     body: String,
     #[serde(default)]
     created_at: Option<JsonValue>,
@@ -125,8 +129,9 @@ struct JsonlComment {
 
 #[derive(Debug, Deserialize)]
 struct JsonlDependency {
+    #[serde(alias = "depends_on_id", alias = "target_id")]
     target: String,
-    #[serde(default)]
+    #[serde(default, alias = "type", alias = "link_type")]
     kind: Option<String>,
 }
 
@@ -200,7 +205,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 .and_then(|p| id_map.get(p))
                 .map(ToString::to_string),
             causation: None,
-            description: issue.description.clone(),
+            description: merged_description(issue),
             extra: BTreeMap::new(),
         };
 
@@ -479,9 +484,26 @@ fn map_issue_fields(issue: &SourceIssue) -> (Kind, Vec<String>, State, Urgency) 
         _ => State::Open,
     };
 
-    let urgency = match issue.priority.to_ascii_uppercase().as_str() {
-        "P0" | "URGENT" => Urgency::Urgent,
-        _ => Urgency::Default,
+    let priority = issue.priority.trim().to_ascii_uppercase();
+    let urgency = if priority == "URGENT" || priority == "P0" {
+        Urgency::Urgent
+    } else if let Ok(value) = priority.parse::<i64>() {
+        if value <= 1 {
+            Urgency::Urgent
+        } else {
+            Urgency::Default
+        }
+    } else if let Some(value) = priority
+        .strip_prefix('P')
+        .and_then(|raw| raw.parse::<i64>().ok())
+    {
+        if value <= 0 {
+            Urgency::Urgent
+        } else {
+            Urgency::Default
+        }
+    } else {
+        Urgency::Default
     };
 
     (kind, labels, state, urgency)
@@ -495,38 +517,234 @@ fn normalize_link_type(kind: &str) -> String {
     }
 }
 
+fn merged_description(issue: &SourceIssue) -> Option<String> {
+    let mut out = String::new();
+    if let Some(description) = issue.description.as_ref().filter(|v| !v.trim().is_empty()) {
+        out.push_str(description.trim_end());
+    }
+
+    if !issue.extra_fields.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("Imported beads fields:\n");
+        for (idx, (name, value)) in issue.extra_fields.iter().enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            out.push_str(name);
+            out.push_str(":\n");
+            out.push_str(value.trim_end());
+            out.push('\n');
+        }
+    }
+
+    if out.trim().is_empty() {
+        None
+    } else {
+        Some(out.trim_end().to_string())
+    }
+}
+
+fn json_value_to_text(value: &JsonValue) -> Option<String> {
+    match value {
+        JsonValue::Null => None,
+        JsonValue::String(v) => {
+            if v.trim().is_empty() {
+                None
+            } else {
+                Some(v.clone())
+            }
+        }
+        JsonValue::Number(v) => Some(v.to_string()),
+        JsonValue::Bool(v) => Some(v.to_string()),
+        JsonValue::Array(v) => {
+            if v.is_empty() {
+                None
+            } else {
+                serde_json::to_string(v).ok()
+            }
+        }
+        JsonValue::Object(v) => {
+            if v.is_empty() {
+                None
+            } else {
+                serde_json::to_string(v).ok()
+            }
+        }
+    }
+}
+
+fn normalize_json_extra_fields(extra: BTreeMap<String, JsonValue>) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    for (name, value) in extra {
+        if let Some(text) = json_value_to_text(&value) {
+            fields.push((name, text));
+        }
+    }
+    fields
+}
+
+fn quote_sql_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn is_mapped_issue_column(name: &str) -> bool {
+    matches!(
+        name,
+        "id" | "title"
+            | "description"
+            | "type"
+            | "issue_type"
+            | "status"
+            | "priority"
+            | "assignee"
+            | "labels"
+            | "actor"
+            | "created_by"
+            | "created_at"
+            | "updated_at"
+            | "closed_at"
+            | "parent_id"
+    )
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<HashSet<String>> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .with_context(|| format!("failed to inspect sqlite table '{table}'"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut cols = HashSet::new();
+    for row in rows {
+        cols.insert(row?);
+    }
+    Ok(cols)
+}
+
+fn pick_first_column<'a>(columns: &'a HashSet<String>, candidates: &[&'a str]) -> Option<&'a str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| columns.contains(*candidate))
+}
+
 fn load_from_sqlite(path: &Path) -> Result<SourceData> {
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open sqlite database {}", path.display()))?;
 
+    let issue_columns = table_columns(&conn, "issues")?;
+    if issue_columns.is_empty() {
+        anyhow::bail!("expected beads table 'issues'");
+    }
+
+    let issue_type_expr = if issue_columns.contains("type") {
+        "COALESCE(type, 'task')"
+    } else if issue_columns.contains("issue_type") {
+        "COALESCE(issue_type, 'task')"
+    } else {
+        "'task'"
+    };
+    let status_expr = if issue_columns.contains("status") {
+        "COALESCE(status, 'open')"
+    } else {
+        "'open'"
+    };
+    let priority_expr = if issue_columns.contains("priority") {
+        "CAST(COALESCE(priority, 'P2') AS TEXT)"
+    } else {
+        "'P2'"
+    };
+    let assignee_expr = if issue_columns.contains("assignee") {
+        "NULLIF(TRIM(COALESCE(assignee, '')), '')"
+    } else {
+        "NULL"
+    };
+    let labels_expr = if issue_columns.contains("labels") {
+        "COALESCE(labels, '')"
+    } else {
+        "''"
+    };
+    let actor_expr = if issue_columns.contains("actor") {
+        "COALESCE(actor, '')"
+    } else if issue_columns.contains("created_by") {
+        "COALESCE(created_by, '')"
+    } else {
+        "''"
+    };
+    let created_expr = if issue_columns.contains("created_at") {
+        "created_at"
+    } else {
+        "0"
+    };
+    let updated_expr = if issue_columns.contains("updated_at") {
+        "updated_at"
+    } else {
+        created_expr
+    };
+    let closed_expr = if issue_columns.contains("closed_at") {
+        "closed_at"
+    } else {
+        "NULL"
+    };
+    let parent_expr = if issue_columns.contains("parent_id") {
+        "parent_id"
+    } else {
+        "NULL"
+    };
+    let mut extra_columns: Vec<String> = issue_columns
+        .iter()
+        .filter(|name| !is_mapped_issue_column(name))
+        .cloned()
+        .collect();
+    extra_columns.sort_unstable();
+    let extra_select = if extra_columns.is_empty() {
+        String::new()
+    } else {
+        extra_columns
+            .iter()
+            .map(|name| format!(", CAST(COALESCE({}, '') AS TEXT)", quote_sql_ident(name)))
+            .collect::<String>()
+    };
+
     let mut issues = Vec::new();
     {
-        let sql = "
+        let sql = format!(
+            "
             SELECT
                 id,
                 title,
                 COALESCE(description, ''),
-                COALESCE(type, 'task'),
-                COALESCE(status, 'open'),
-                COALESCE(priority, 'P2'),
-                NULLIF(TRIM(COALESCE(assignee, '')), ''),
-                COALESCE(labels, ''),
-                COALESCE(actor, ''),
-                CAST(COALESCE(created_at, 0) AS TEXT),
-                CAST(COALESCE(updated_at, COALESCE(created_at, 0)) AS TEXT),
-                CAST(closed_at AS TEXT),
-                parent_id
+                {issue_type_expr},
+                {status_expr},
+                {priority_expr},
+                {assignee_expr},
+                {labels_expr},
+                {actor_expr},
+                CAST(COALESCE({created_expr}, 0) AS TEXT),
+                CAST(COALESCE({updated_expr}, COALESCE({created_expr}, 0)) AS TEXT),
+                CAST({closed_expr} AS TEXT),
+                {parent_expr}
+                {extra_select}
             FROM issues
             ORDER BY id ASC
-        ";
+        "
+        );
 
-        let mut stmt = conn.prepare(sql).context(
-            "expected beads table 'issues' with columns id,title,description,type,status,priority,assignee,labels,actor,created_at,updated_at,closed_at,parent_id",
-        )?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("failed to query beads 'issues' table")?;
 
         let rows = stmt.query_map([], |row| {
             let labels_raw: String = row.get(7)?;
             let actor_raw: String = row.get(8)?;
+            let mut extra_fields = Vec::new();
+            for (offset, name) in extra_columns.iter().enumerate() {
+                let value: String = row.get(13 + offset)?;
+                if value.trim().is_empty() {
+                    continue;
+                }
+                extra_fields.push((name.clone(), value));
+            }
             Ok(SourceIssue {
                 source_id: row.get::<_, String>(0)?,
                 title: row.get::<_, String>(1)?,
@@ -534,6 +752,7 @@ fn load_from_sqlite(path: &Path) -> Result<SourceData> {
                     let v: String = row.get(2)?;
                     if v.trim().is_empty() { None } else { Some(v) }
                 },
+                extra_fields,
                 issue_type: row.get::<_, String>(3)?,
                 status: row.get::<_, String>(4)?,
                 priority: row.get::<_, String>(5)?,
@@ -563,13 +782,40 @@ fn load_from_sqlite(path: &Path) -> Result<SourceData> {
 
     let mut comments = Vec::new();
     {
-        let sql = "
-            SELECT issue_id, COALESCE(author, ''), COALESCE(body, ''), COALESCE(created_at, 0)
-            FROM comments
-            ORDER BY issue_id ASC
-        ";
+        let comment_columns = table_columns(&conn, "comments")?;
+        if !comment_columns.is_empty()
+            && let (Some(issue_col), Some(body_col)) = (
+                pick_first_column(&comment_columns, &["issue_id", "item_id", "source_id"]),
+                pick_first_column(&comment_columns, &["body", "text", "comment"]),
+            )
+        {
+            let author_expr = if let Some(author_col) =
+                pick_first_column(&comment_columns, &["author", "agent", "created_by"])
+            {
+                format!("COALESCE({author_col}, '')")
+            } else {
+                "''".to_string()
+            };
+            let created_expr = if let Some(created_col) = pick_first_column(
+                &comment_columns,
+                &["created_at", "created_us", "wall_ts_us"],
+            ) {
+                format!("COALESCE({created_col}, 0)")
+            } else {
+                "0".to_string()
+            };
 
-        if let Ok(mut stmt) = conn.prepare(sql) {
+            let sql = format!(
+                "
+                SELECT {issue_col}, {author_expr}, COALESCE({body_col}, ''), {created_expr}
+                FROM comments
+                ORDER BY {issue_col} ASC
+            "
+            );
+
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("failed to query beads 'comments' table")?;
             let rows = stmt.query_map([], |row| {
                 let author_raw: String = row.get(1)?;
                 let created_value: String = row.get(3)?;
@@ -593,9 +839,26 @@ fn load_from_sqlite(path: &Path) -> Result<SourceData> {
 
     let mut dependencies = Vec::new();
     {
-        let sql = "SELECT source_id, target_id, COALESCE(kind, 'blocks') FROM dependencies";
+        let dep_columns = table_columns(&conn, "dependencies")?;
+        if !dep_columns.is_empty()
+            && let (Some(source_col), Some(target_col)) = (
+                pick_first_column(&dep_columns, &["source_id", "issue_id", "item_id"]),
+                pick_first_column(&dep_columns, &["target_id", "depends_on_id", "depends_on"]),
+            )
+        {
+            let kind_expr = if let Some(kind_col) =
+                pick_first_column(&dep_columns, &["kind", "type", "link_type"])
+            {
+                format!("COALESCE({kind_col}, 'blocks')")
+            } else {
+                "'blocks'".to_string()
+            };
 
-        if let Ok(mut stmt) = conn.prepare(sql) {
+            let sql = format!("SELECT {source_col}, {target_col}, {kind_expr} FROM dependencies");
+
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("failed to query beads 'dependencies' table")?;
             let rows = stmt.query_map([], |row| {
                 Ok(SourceDependency {
                     source_id: row.get::<_, String>(0)?,
@@ -634,23 +897,43 @@ fn load_from_jsonl(path: &Path) -> Result<SourceData> {
         let parsed: JsonlIssue = serde_json::from_str(&line)
             .with_context(|| format!("invalid JSON on line {}", idx + 1))?;
 
+        let JsonlIssue {
+            id,
+            title,
+            description,
+            issue_type,
+            status,
+            priority,
+            labels,
+            assignee,
+            actor,
+            created_at,
+            updated_at,
+            closed_at,
+            parent_id,
+            comments: issue_comments,
+            dependencies: issue_dependencies,
+            extra_fields,
+        } = parsed;
+
         let issue = SourceIssue {
-            source_id: parsed.id.clone(),
-            title: parsed.title,
-            description: parsed.description,
-            issue_type: parsed.issue_type.unwrap_or_else(|| "task".to_string()),
-            status: parsed.status.unwrap_or_else(|| "open".to_string()),
-            priority: parsed.priority.unwrap_or_else(|| "P2".to_string()),
-            labels: parsed.labels,
-            assignee: parsed.assignee,
-            actor: parsed.actor,
-            created_us: to_micros_opt(parsed.created_at.as_ref()).unwrap_or(0),
-            updated_us: to_micros_opt(parsed.updated_at.as_ref()).unwrap_or(0),
-            closed_us: to_micros_opt(parsed.closed_at.as_ref()),
-            parent_source_id: parsed.parent_id,
+            source_id: id,
+            title,
+            description,
+            extra_fields: normalize_json_extra_fields(extra_fields),
+            issue_type: issue_type.unwrap_or_else(|| "task".to_string()),
+            status: status.unwrap_or_else(|| "open".to_string()),
+            priority: normalize_priority_value(priority.as_ref()),
+            labels,
+            assignee,
+            actor,
+            created_us: to_micros_opt(created_at.as_ref()).unwrap_or(0),
+            updated_us: to_micros_opt(updated_at.as_ref()).unwrap_or(0),
+            closed_us: to_micros_opt(closed_at.as_ref()),
+            parent_source_id: parent_id,
         };
 
-        for c in parsed.comments {
+        for c in issue_comments {
             comments.push(SourceComment {
                 issue_source_id: issue.source_id.clone(),
                 author: c.author.unwrap_or_else(|| "beads/importer".to_string()),
@@ -659,7 +942,7 @@ fn load_from_jsonl(path: &Path) -> Result<SourceData> {
             });
         }
 
-        for d in parsed.dependencies {
+        for d in issue_dependencies {
             dependencies.push(SourceDependency {
                 source_id: issue.source_id.clone(),
                 target_id: d.target,
@@ -683,6 +966,20 @@ fn split_labels(raw: &str) -> Vec<String> {
         .filter(|v| !v.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn normalize_priority_value(value: Option<&JsonValue>) -> String {
+    match value {
+        Some(JsonValue::String(s)) => s.clone(),
+        Some(JsonValue::Number(n)) => {
+            if let Some(v) = n.as_i64() {
+                format!("P{v}")
+            } else {
+                "P2".to_string()
+            }
+        }
+        _ => "P2".to_string(),
+    }
 }
 
 fn to_micros_opt(value: Option<&JsonValue>) -> Option<i64> {
@@ -732,6 +1029,7 @@ mod tests {
             source_id: "1".to_string(),
             title: "x".to_string(),
             description: None,
+            extra_fields: vec![],
             issue_type: "feature".to_string(),
             status: "deferred".to_string(),
             priority: "P0".to_string(),
@@ -762,5 +1060,37 @@ mod tests {
     fn parse_seconds_to_micros() {
         let v = JsonValue::Number(serde_json::Number::from(1_700_000_000_i64));
         assert_eq!(to_micros_value(&v), Some(1_700_000_000_000_000));
+    }
+
+    #[test]
+    fn merged_description_appends_extra_fields() {
+        let issue = SourceIssue {
+            source_id: "x".to_string(),
+            title: "x".to_string(),
+            description: Some("Primary body".to_string()),
+            extra_fields: vec![
+                (
+                    "acceptance_criteria".to_string(),
+                    "- first\n- second".to_string(),
+                ),
+                ("notes".to_string(), "Remember to migrate".to_string()),
+            ],
+            issue_type: "task".to_string(),
+            status: "open".to_string(),
+            priority: "P2".to_string(),
+            labels: vec![],
+            assignee: None,
+            actor: None,
+            created_us: 0,
+            updated_us: 0,
+            closed_us: None,
+            parent_source_id: None,
+        };
+
+        let merged = merged_description(&issue).expect("description");
+        assert!(merged.contains("Primary body"));
+        assert!(merged.contains("Imported beads fields:"));
+        assert!(merged.contains("acceptance_criteria:\n- first\n- second"));
+        assert!(merged.contains("notes:\nRemember to migrate"));
     }
 }
