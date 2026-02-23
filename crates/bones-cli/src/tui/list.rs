@@ -109,8 +109,11 @@ impl FilterState {
 /// Sort field for the item list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortField {
-    /// Sort by priority: urgent → default → punt, then updated_at desc.
+    /// Sort by dependency execution order (blockers before blocked),
+    /// using priority as the tie-breaker among ready items.
     #[default]
+    Execution,
+    /// Sort by priority: urgent → default → punt, then updated_at desc.
     Priority,
     /// Sort by created_at descending (newest first).
     Created,
@@ -121,6 +124,7 @@ pub enum SortField {
 impl SortField {
     fn label(self) -> &'static str {
         match self {
+            Self::Execution => "execution",
             Self::Priority => "priority",
             Self::Created => "created",
             Self::Updated => "updated",
@@ -129,9 +133,10 @@ impl SortField {
 
     fn next(self) -> Self {
         match self {
+            Self::Execution => Self::Priority,
             Self::Priority => Self::Created,
             Self::Created => Self::Updated,
-            Self::Updated => Self::Priority,
+            Self::Updated => Self::Execution,
         }
     }
 }
@@ -227,6 +232,10 @@ fn load_detail_refs(conn: &rusqlite::Connection, mut ids: Vec<String>) -> Result
 /// Sort a mutable slice of `WorkItem` by the given `SortField`.
 pub fn sort_items(items: &mut [WorkItem], sort: SortField) {
     items.sort_by(|a, b| match sort {
+        SortField::Execution => urgency_rank(&a.urgency)
+            .cmp(&urgency_rank(&b.urgency))
+            .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))
+            .then_with(|| a.item_id.cmp(&b.item_id)),
         SortField::Priority => urgency_rank(&a.urgency)
             .cmp(&urgency_rank(&b.urgency))
             .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))
@@ -240,6 +249,114 @@ pub fn sort_items(items: &mut [WorkItem], sort: SortField) {
             .cmp(&a.updated_at_us)
             .then_with(|| a.item_id.cmp(&b.item_id)),
     });
+}
+
+fn sort_items_execution(items: &mut Vec<WorkItem>, blocker_map: &HashMap<String, Vec<String>>) {
+    if items.is_empty() {
+        return;
+    }
+
+    let base_order: Vec<String> = items.iter().map(|item| item.item_id.clone()).collect();
+    let base_rank: HashMap<String, usize> = base_order
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (id.clone(), idx))
+        .collect();
+    let id_set: HashSet<String> = base_order.iter().cloned().collect();
+
+    let mut indegree: HashMap<String, usize> =
+        base_order.iter().map(|id| (id.clone(), 0)).collect();
+    let mut outgoing: HashMap<String, Vec<String>> = HashMap::new();
+
+    for blocked_id in &base_order {
+        if let Some(blockers) = blocker_map.get(blocked_id) {
+            for blocker_id in blockers {
+                if !id_set.contains(blocker_id) {
+                    continue;
+                }
+                *indegree.entry(blocked_id.clone()).or_insert(0) += 1;
+                outgoing
+                    .entry(blocker_id.clone())
+                    .or_default()
+                    .push(blocked_id.clone());
+            }
+        }
+    }
+
+    let mut ready: Vec<String> = base_order
+        .iter()
+        .filter(|id| indegree.get(*id).copied().unwrap_or(0) == 0)
+        .cloned()
+        .collect();
+
+    let mut ordered_ids = Vec::with_capacity(base_order.len());
+    while let Some(next_id) = ready.first().cloned() {
+        ready.remove(0);
+        ordered_ids.push(next_id.clone());
+
+        if let Some(children) = outgoing.get(&next_id) {
+            for child in children {
+                if let Some(deg) = indegree.get_mut(child) {
+                    if *deg > 0 {
+                        *deg -= 1;
+                    }
+                    if *deg == 0 {
+                        let rank = base_rank.get(child).copied().unwrap_or(usize::MAX);
+                        let insert_at = ready
+                            .binary_search_by_key(&rank, |id| {
+                                base_rank.get(id).copied().unwrap_or(usize::MAX)
+                            })
+                            .unwrap_or_else(|idx| idx);
+                        ready.insert(insert_at, child.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    if ordered_ids.len() < base_order.len() {
+        for id in &base_order {
+            if !ordered_ids.iter().any(|seen| seen == id) {
+                ordered_ids.push(id.clone());
+            }
+        }
+    }
+
+    let mut by_id: HashMap<String, WorkItem> = items
+        .drain(..)
+        .map(|item| (item.item_id.clone(), item))
+        .collect();
+    for item_id in ordered_ids {
+        if let Some(item) = by_id.remove(&item_id) {
+            items.push(item);
+        }
+    }
+}
+
+fn load_blocker_map(conn: &rusqlite::Connection) -> Result<HashMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT item_id, depends_on_item_id
+         FROM item_dependencies
+         WHERE link_type IN ('blocks', 'blocked_by')
+         ORDER BY item_id, depends_on_item_id",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (item_id, blocker_id) = row?;
+        map.entry(item_id).or_default().push(blocker_id);
+    }
+
+    for blockers in map.values_mut() {
+        blockers.sort_unstable();
+        blockers.dedup();
+    }
+
+    Ok(map)
 }
 
 fn build_hierarchy_order(
@@ -1159,6 +1276,8 @@ pub struct ListView {
     done_start_idx: Option<usize>,
     /// Parent relationship map from `item_id -> parent_id`.
     parent_map: HashMap<String, Option<String>>,
+    /// Blocking dependency map from `blocked_item_id -> [blocker_item_id...]`.
+    blocker_map: HashMap<String, Vec<String>>,
     /// Semantic model used for slash search.
     semantic_model: Option<SemanticModel>,
     /// Ranked IDs returned by semantic/hybrid slash search.
@@ -1262,6 +1381,7 @@ impl ListView {
             visible_depths: Vec::new(),
             done_start_idx: None,
             parent_map: HashMap::new(),
+            blocker_map: HashMap::new(),
             semantic_model,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
@@ -1308,6 +1428,7 @@ impl ListView {
                 self.visible_depths.clear();
                 self.done_start_idx = None;
                 self.parent_map.clear();
+                self.blocker_map.clear();
                 self.detail_item = None;
                 self.detail_item_id = None;
                 self.detail_scroll = 0;
@@ -1324,6 +1445,7 @@ impl ListView {
 
         let raw_items = query::list_items(&conn, &filter).context("list_items")?;
         self.parent_map.clear();
+        self.blocker_map = load_blocker_map(&conn).unwrap_or_default();
         self.all_items = raw_items
             .into_iter()
             .map(|qi| {
@@ -1419,7 +1541,13 @@ impl ListView {
         }
 
         if !query_active {
-            sort_items(&mut active_items, self.sort);
+            match self.sort {
+                SortField::Execution => {
+                    sort_items(&mut active_items, SortField::Priority);
+                    sort_items_execution(&mut active_items, &self.blocker_map);
+                }
+                _ => sort_items(&mut active_items, self.sort),
+            }
         }
 
         let (mut ordered, mut depths) = build_hierarchy_order(active_items, &self.parent_map);
@@ -3938,6 +4066,41 @@ mod tests {
     }
 
     #[test]
+    fn execution_sort_places_blockers_before_blocked_items() {
+        let mut items = vec![
+            make_item(
+                "bn-39t",
+                "Urgent blocked",
+                "open",
+                "task",
+                "urgent",
+                vec![],
+                100,
+                300,
+            ),
+            make_item(
+                "bn-22v",
+                "Prerequisite",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                100,
+            ),
+        ];
+        let mut blocker_map = HashMap::new();
+        blocker_map.insert("bn-39t".to_string(), vec!["bn-22v".to_string()]);
+
+        // Seed tie-break order similarly to runtime before execution ordering.
+        sort_items(&mut items, SortField::Priority);
+        sort_items_execution(&mut items, &blocker_map);
+
+        assert_eq!(items[0].item_id, "bn-22v");
+        assert_eq!(items[1].item_id, "bn-39t");
+    }
+
+    #[test]
     fn hierarchy_orders_children_beneath_parent() {
         let mut items = vec![
             make_item(
@@ -4066,13 +4229,15 @@ mod tests {
 
     #[test]
     fn sort_field_cycles_through_all_variants() {
-        let start = SortField::Priority;
+        let start = SortField::Execution;
         let s1 = start.next();
         let s2 = s1.next();
         let s3 = s2.next();
-        assert_eq!(s1, SortField::Created);
-        assert_eq!(s2, SortField::Updated);
-        assert_eq!(s3, SortField::Priority);
+        let s4 = s3.next();
+        assert_eq!(s1, SortField::Priority);
+        assert_eq!(s2, SortField::Created);
+        assert_eq!(s3, SortField::Updated);
+        assert_eq!(s4, SortField::Execution);
     }
 
     // -----------------------------------------------------------------------
@@ -4120,6 +4285,7 @@ mod tests {
             visible_depths: Vec::new(),
             done_start_idx: None,
             parent_map: HashMap::new(),
+            blocker_map: HashMap::new(),
             semantic_model: None,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
@@ -4209,7 +4375,7 @@ mod tests {
         let mut view = make_list_view();
         view.select_next();
         let item = view.selected_item().expect("item");
-        // After UpdatedDesc sort, order should be bn-001 (300) > bn-002 (200) > bn-003 (100)
+        // Default execution sort still keeps bn-001 before bn-002 for this fixture.
         assert_eq!(item.item_id, "bn-002");
     }
 
@@ -4224,6 +4390,7 @@ mod tests {
             visible_depths: Vec::new(),
             done_start_idx: None,
             parent_map: HashMap::new(),
+            blocker_map: HashMap::new(),
             semantic_model: None,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
@@ -4271,6 +4438,9 @@ mod tests {
     #[test]
     fn list_view_s_key_cycles_sort() {
         let mut view = make_list_view();
+        assert_eq!(view.sort, SortField::Execution);
+        view.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+            .unwrap();
         assert_eq!(view.sort, SortField::Priority);
         view.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
             .unwrap();
@@ -4372,7 +4542,7 @@ mod tests {
     #[test]
     fn list_view_detail_mode_does_not_cycle_sort() {
         let mut view = make_list_view();
-        assert_eq!(view.sort, SortField::Priority);
+        assert_eq!(view.sort, SortField::Execution);
 
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap();
@@ -4380,7 +4550,7 @@ mod tests {
 
         view.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
             .unwrap();
-        assert_eq!(view.sort, SortField::Priority);
+        assert_eq!(view.sort, SortField::Execution);
     }
 
     #[test]
