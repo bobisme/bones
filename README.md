@@ -25,14 +25,14 @@ The short version:
 
 If your automation currently calls `bv --robot-*`, the equivalent bones shape is usually: same intent, but as normal subcommands with machine output.
 
-| beads_viewer | bones equivalent |
-|---|---|
-| `bv --robot-next` | `bn next --format json` |
-| `bv --robot-triage` | `bn triage --format json` |
-| `bv --robot-plan` | `bn triage plan --format json` |
-| `bv --robot-graph` | `bn triage graph --format json` |
-| `bv --robot-health` style checks | `bn triage health --format json` |
-| duplicate/related robot flows | `bn triage dup <id> --format json`, `bn triage dedup --format json`, `bn triage similar <id> --format json` |
+| beads_viewer                     | bones equivalent                                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `bv --robot-next`                | `bn next --format json`                                                                                     |
+| `bv --robot-triage`              | `bn triage --format json`                                                                                   |
+| `bv --robot-plan`                | `bn triage plan --format json`                                                                              |
+| `bv --robot-graph`               | `bn triage graph --format json`                                                                             |
+| `bv --robot-health` style checks | `bn triage health --format json`                                                                            |
+| duplicate/related robot flows    | `bn triage dup <id> --format json`, `bn triage dedup --format json`, `bn triage similar <id> --format json` |
 
 The overall intent is similar: let agents consume structured prioritization/search/graph data. bones keeps that in the main CLI command family instead of a large parallel flag namespace.
 
@@ -105,27 +105,9 @@ bn data migrate-from-beads --beads-jsonl export.jsonl
 
 ## Installation
 
-### From crates.io
-
 ```bash
-cargo install bones-cli
+cargo install --locked --git https://github.com/bobisme/bones --tag 0.15.0
 ```
-
-### From source
-
-```bash
-git clone https://github.com/bobisme/bones
-cd bones
-cargo install --path crates/bones-cli
-```
-
-### Prebuilt binaries
-
-Download release archives from:
-
-- <https://github.com/bobisme/bones/releases>
-
-Each release publishes Linux/macOS binaries for x86_64 and arm64 with SHA256 checksum files.
 
 ## Shell completions
 
@@ -153,4 +135,4 @@ just install
 - If unavailable, semantic search still works via Rust-side KNN over stored embeddings.
 - Set `BONES_SQLITE_VEC_AUTO=0` to disable auto-registration for troubleshooting.
 
-![Judgement of the Backlog](images/judgement-of-the-backlog.webp)
+![bones](images/bones-card.webp)
