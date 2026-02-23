@@ -528,8 +528,21 @@ fn map_item_id(source_id: &str) -> Result<ItemId> {
     let mut hasher = Hasher::new();
     hasher.update(b"beads:");
     hasher.update(source_id.as_bytes());
-    let hex = hasher.finalize().to_hex().to_string();
-    let mapped = format!("bn-b{}", &hex[..8]);
+    let hash = hasher.finalize();
+    let hex = hash.to_hex().to_string();
+
+    // terseid requires at least one digit in the hash portion.
+    // Use the same "bn-b" + 8 hex chars scheme, but if none of the 8 hex
+    // chars contain a digit, replace the last char with a digit derived
+    // from the hash to satisfy the terseid constraint.
+    let suffix = &hex[..8];
+    let mapped = if suffix.bytes().any(|b| b.is_ascii_digit()) {
+        format!("bn-b{suffix}")
+    } else {
+        let digit = hash.as_bytes()[0] % 10;
+        format!("bn-b{}{digit}", &suffix[..7])
+    };
+
     ItemId::parse(&mapped)
         .with_context(|| format!("failed to generate item id from source id '{source_id}'"))
 }
@@ -1168,6 +1181,21 @@ mod tests {
         let a = map_item_id("42").expect("id");
         let b = map_item_id("42").expect("id");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn item_id_mapping_handles_all_alpha_hex() {
+        // bd-3ni hashes to hex starting with "beaedaff" — all letters.
+        // The old code produced "bn-bbeaedaff" which has no digit and
+        // was rejected by terseid. Ensure this now succeeds.
+        let id = map_item_id("bd-3ni").expect("should produce valid id");
+        assert!(id.as_str().starts_with("bn-b"));
+        let hash_part = &id.as_str()[3..];
+        assert!(
+            hash_part.bytes().any(|b| b.is_ascii_digit()),
+            "mapped id must contain a digit: {}",
+            id
+        );
     }
 
     #[test]
