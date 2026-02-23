@@ -32,14 +32,17 @@ Run this when:
    - Be specific — reference docs, compiler output, or design intent
 
    **Defer** (good idea, but out of scope for this change):
-   - Create a tracking bead: `maw exec default -- br create --actor $AGENT --owner $AGENT "<title>" --label deferred`
-   - Reply: `maw exec $WS -- crit reply <thread-id> --agent $AGENT "Deferred to <bead-id> for follow-up"`
+   - Create a tracking bone: `maw exec default -- bn create --title "<title>" --tag deferred --kind task`
+   - Reply: `maw exec $WS -- crit reply <thread-id> --agent $AGENT "Deferred to <bone-id> for follow-up"`
 
 3. After handling all threads:
    a. Verify fixes compile: `maw exec $WS -- cargo check` (or equivalent for the project)
-   b. Re-request review: `maw exec $WS -- crit reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
+   b. Commit the fixes in your workspace:
+      - `maw exec $WS -- git add -A`
+      - `maw exec $WS -- git commit -m "fix: address review feedback on <review-id>"`
+   c. Re-request review: `maw exec $WS -- crit reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
    d. Announce (include workspace name so the reviewer can find the fixed code):
-      `bus send --agent $AGENT $BOTBOX_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (ws/$WS/)" -L review-response`
+       `bus send --agent $AGENT $BOTBOX_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (ws/$WS/)" -L review-response`
 
 ## After LGTM
 
@@ -47,9 +50,9 @@ When the reviewer approves:
 
 1. Verify approval: `maw exec $WS -- crit review <review-id>` — confirm LGTM vote, no blocks
 2. Mark review as merged: `maw exec $WS -- crit reviews mark-merged <review-id> --agent $AGENT`
-3. Continue with [finish](finish.md) to close the bead and merge the workspace
+3. Continue with [finish](finish.md) to close the bone and merge the workspace
 
-The actual code merge is handled by `maw ws merge` in the finish step (maw v0.22.0+ rebases onto main and squashes into a single commit) — do not run `jj squash` manually.
+The actual code merge is handled by `maw ws merge` in the finish step — do not run manual squash commands.
 
 ## Assumptions
 

@@ -4,7 +4,7 @@ Explore an unfamiliar codebase to build enough understanding for effective plann
 
 ## When to Scout
 
-- You're new to a codebase and need to create beads
+- You're new to a codebase and need to create bones
 - A spec references parts of the code you haven't seen
 - You're unsure where a change should go
 
@@ -55,7 +55,7 @@ After scouting, you should be able to answer:
 4. **How do I test it?** Where do tests live, how are they run?
 5. **Are there gotchas?** Special conventions, known issues, dragons?
 
-You don't need to document this formally — the knowledge enables better beads. If the codebase has unusual conventions, consider adding a comment to the parent bead or spec.
+You don't need to document this formally — the knowledge enables better bones. If the codebase has unusual conventions, consider adding a comment to the parent bone or spec.
 
 ## Example
 
@@ -68,4 +68,4 @@ Scout findings:
 - Config uses env vars loaded in `src/config.mjs`
 - No existing rate limiting — will need new middleware
 
-This enables planning: create config schema bead, create middleware bead, wire middleware bead, add tests bead.
+This enables planning: create config schema bone, create middleware bone, wire middleware bone, add tests bone.

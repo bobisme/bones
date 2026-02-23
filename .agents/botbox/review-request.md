@@ -21,16 +21,16 @@ The botbus hook system watches for @mentions. When you send a message containing
 
 1. Resolve agent identity: use `--agent` argument if provided, otherwise `$AGENT` env var. If neither is set, stop and instruct the user. Run `bus whoami --agent $AGENT` first to confirm; if it returns a name, use it.
 
-2. **Check the bead's risk label** to determine review routing:
-   - Get bead details: `maw exec default -- br show <bead-id>`
-   - Look for `risk:low`, `risk:high`, or `risk:critical` in labels
-   - No risk label = `risk:medium` (standard review)
+2. **Check the bone's risk tag** to determine review routing:
+   - Get bone details: `maw exec default -- bn show <bone-id>`
+   - Look for `risk:low`, `risk:high`, or `risk:critical` in tags
+   - No risk tag = `risk:medium` (standard review)
 
 3. **Risk-based review routing**:
 
    **risk:low** — Skip review entirely:
    - Do NOT create a crit review
-   - Add self-review comment: `maw exec default -- br comments add --actor $AGENT --author $AGENT <bead-id> "Self-review: <brief what I verified>"`
+   - Add self-review comment: `maw exec default -- bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
    - Proceed directly to finish (skip remaining steps)
 
    **risk:medium** (default) — Standard review:
@@ -44,7 +44,7 @@ The botbus hook system watches for @mentions. When you send a message containing
    **risk:critical** — Security review + human approval:
    - MUST request security reviewer
    - Create crit review (see step 4)
-   - Post to bus requesting human approval: `bus send --agent $AGENT $BOTBOX_PROJECT "risk:critical review for <bead-id>: requires human approval before merge. Review: <review-id> @<approver>" -L review-request`
+   - Post to bus requesting human approval: `bus send --agent $AGENT $BOTBOX_PROJECT "risk:critical review for <bone-id>: requires human approval before merge. Review: <review-id> @<approver>" -L review-request`
    - List of approvers from `.botbox.json` → `project.criticalApprovers`
    - If no `criticalApprovers` configured, use project lead or fallback: `@$BOTBOX_PROJECT-lead`
 
@@ -64,9 +64,9 @@ The botbus hook system watches for @mentions. When you send a message containing
 
    The reviewer name MUST match the project pattern: `<project>-<role>` (e.g., `myproject-security`, `botbus-security`). Do NOT use generic names like `security-reviewer` — those won't match any hooks.
 
-5. **Post review details to the bead** for crash recovery:
+5. **Post review details to the bone** for crash recovery:
    ```bash
-   maw exec default -- br comments add --actor $AGENT --author $AGENT <bead-id> "Review created: <review-id> in workspace <ws-name> (ws/<ws-name>)"
+   maw exec default -- bn bone comment add <bone-id> "Review created: <review-id> in workspace <ws-name> (ws/<ws-name>)"
    ```
    Include: review ID and workspace name. This lets another agent find the review and workspace if the session crashes.
 

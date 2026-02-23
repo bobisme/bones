@@ -1,31 +1,31 @@
 # Missions
 
-End-to-end guide for mission-based work — coordinated multi-agent tasks with shared context. A mission is a parent bead that decomposes into child beads, dispatches parallel workers, monitors progress, and synthesizes results.
+End-to-end guide for mission-based work — coordinated multi-agent tasks with shared context. A mission is a parent bone that decomposes into child bones, dispatches parallel workers, monitors progress, and synthesizes results.
 
 ## When to Use Missions
 
 Use missions (execution level 4) for tasks that:
-- Need decomposition into multiple related beads
+- Need decomposition into multiple related bones
 - Benefit from shared context (outcome, constraints, stop criteria)
 - Can parallelize across workers but need coordination
 
-For simpler work: level 2 (single bead, sequential) or level 3 (parallel dispatch, independent beads). If the task fits in one reviewable change, skip missions entirely and use the [worker-loop](worker-loop.md).
+For simpler work: level 2 (single bone, sequential) or level 3 (parallel dispatch, independent bones). If the task fits in one reviewable change, skip missions entirely and use the [worker-loop](worker-loop.md).
 
 ## Mission Lifecycle
 
-### 1. Create the Mission Bead
+### 1. Create the Mission Bone
 
-Create a bead with the `mission` label and a structured description:
+Create a bone with the `mission` tag and a structured description:
 
 ```bash
-maw exec default -- br create --actor $AGENT --owner $AGENT \
-  --title="Add OAuth login support" \
-  --labels mission \
-  --type=task --priority=2 \
-  --description="Outcome: Users can log in via OAuth providers (Google, GitHub).
+maw exec default -- bn create \
+  --title "Add OAuth login support" \
+  --tag mission \
+  --kind task \
+  --description "Outcome: Users can log in via OAuth providers (Google, GitHub).
 Success metric: OAuth login flow works end-to-end in integration tests.
-Constraints: No new runtime dependencies; use existing HTTP client. Max 6 child beads.
-Stop criteria: Core login flow works; provider-specific edge cases can be follow-up beads."
+Constraints: No new runtime dependencies; use existing HTTP client. Max 6 child bones.
+Stop criteria: Core login flow works; provider-specific edge cases can be follow-up bones."
 ```
 
 **Description fields (all required):**
@@ -36,40 +36,40 @@ Stop criteria: Core login flow works; provider-specific edge cases can be follow
 
 ### 2. Decompose into Children
 
-Create child beads for each unit of work. Each child gets a `mission:<mission-id>` label and a parent dependency:
+Create child bones for each unit of work. Each child gets a `mission:<mission-id>` tag and a parent dependency:
 
 ```bash
-# Create child bead
-maw exec default -- br create --actor $AGENT --owner $AGENT \
-  --title="Add OAuth callback handler" \
-  --labels "mission:bd-abc" \
-  --type=task --priority=2 \
-  --description="Handle OAuth provider callbacks, exchange code for token. Acceptance: callback endpoint returns 200 with valid session."
+# Create child bone
+maw exec default -- bn create \
+  --title "Add OAuth callback handler" \
+  --tag "mission:bd-abc" \
+  --kind task \
+  --description "Handle OAuth provider callbacks, exchange code for token. Acceptance: callback endpoint returns 200 with valid session."
 
 # Wire parent dependency
-maw exec default -- br dep add --actor $AGENT <child-id> <mission-id>
+maw exec default -- bn triage dep add <mission-id> --blocks <child-id>
 
 # Wire inter-child dependencies if needed
-maw exec default -- br dep add --actor $AGENT <later-child> <earlier-child>
+maw exec default -- bn triage dep add <earlier-child> --blocks <later-child>
 ```
 
 **Rules:**
-- Every child has both a `mission:<id>` label and a parent dependency on the mission bead
+- Every child has both a `mission:<id>` tag and a parent dependency on the mission bone
 - A child belongs to at most one mission
 - Maximum children per mission: `agents.dev.missions.maxChildren` (default 12)
-- Assign risk labels per child (see [planning](planning.md) for risk level guidelines)
+- Assign risk tags per child (see [planning](planning.md) for risk level guidelines)
 - Look for parallelism — don't chain children linearly when they can run concurrently
 
 Verify the dependency graph:
 
 ```bash
-maw exec default -- br dep tree <mission-id>
+maw exec default -- bn triage graph
 ```
 
 Announce the plan:
 
 ```bash
-bus send --agent $AGENT $BOTBOX_PROJECT "Mission <mission-id>: <title> — created N child beads" -L task-claim
+bus send --agent $AGENT $BOTBOX_PROJECT "Mission <mission-id>: <title> — created N child bones" -L task-claim
 ```
 
 ### 3. Dispatch Workers
@@ -82,21 +82,21 @@ WORKER=$(bus generate-name)
 maw ws create --random  # → e.g., frost-castle
 
 # Stake claims
-bus claims stake --agent $AGENT "bead://$BOTBOX_PROJECT/<child-id>" -m "<child-id>"
+bus claims stake --agent $AGENT "bone://$BOTBOX_PROJECT/<child-id>" -m "<child-id>"
 bus claims stake --agent $AGENT "workspace://$BOTBOX_PROJECT/frost-castle" -m "<child-id>"
 
-# Add mission context comment to child bead
-maw exec default -- br comments add --actor $AGENT --author $AGENT <child-id> \
+# Add mission context comment to child bone
+maw exec default -- bn bone comment add <child-id> \
   "Mission context: <mission-id> — <outcome>. Siblings: <sibling-ids>. Workspace: frost-castle"
 
 # Spawn worker with mission env vars
 botty spawn --pass-env --timeout 600 $WORKER \
   botbox run worker-loop \
-  --env "BOTBOX_BEAD=<child-id>" \
+  --env "BOTBOX_BONE=<child-id>" \
   --env "BOTBOX_WORKSPACE=frost-castle" \
   --env "BOTBOX_MISSION=<mission-id>" \
   --env "BOTBOX_MISSION_OUTCOME=Users can log in via OAuth providers" \
-  --env "BOTBOX_SIBLINGS=bd-001 (Add OAuth config) [owner:none, status:open]\nbd-002 (Add callback handler) [owner:storm-raven, status:in_progress]" \
+  --env "BOTBOX_SIBLINGS=bd-001 (Add OAuth config) [owner:none, state:open]\nbd-002 (Add callback handler) [owner:storm-raven, state:doing]" \
   --env "BOTBOX_FILE_HINTS=bd-001: likely edits src/config.rs\nbd-002: likely edits src/auth/callback.rs"
 ```
 
@@ -108,11 +108,11 @@ Run checkpoints every `agents.dev.missions.checkpointIntervalSec` seconds (defau
 
 Each checkpoint:
 
-1. **Count children by status:**
+1. **Count children by state:**
    ```bash
-   maw exec default -- br list -l "mission:<mission-id>" --json
+   maw exec default -- bn list --tag "mission:<mission-id>" --format json
    ```
-   Tally: N open, M in_progress, K closed, J blocked.
+   Tally: N open, M doing, K done.
 
 2. **Check alive workers:**
    ```bash
@@ -125,50 +125,47 @@ Each checkpoint:
    bus history $BOTBOX_PROJECT -n 20 -L task-done --since <last-checkpoint-time>
    ```
 
-4. **Detect dead workers:** If a worker is not in `botty list` but its bead is still `in_progress`, trigger crash recovery (see below).
+4. **Detect dead workers:** If a worker is not in `botty list` but its bone is still `doing`, trigger crash recovery (see below).
 
 5. **Dispatch queued children:** If a worker slot opened and unblocked children remain, dispatch a new worker.
 
 6. **Post checkpoint summary:**
    ```bash
-   bus send --agent $AGENT $BOTBOX_PROJECT "Mission <mission-id> checkpoint: K/N done, J blocked, M active" -L feedback
+   bus send --agent $AGENT $BOTBOX_PROJECT "Mission <mission-id> checkpoint: K/N done, M active" -L feedback
    ```
 
-Exit the checkpoint loop when all children are closed, or no workers are alive and all remaining beads are blocked.
+Exit the checkpoint loop when all children are done, or no workers are alive and all remaining bones are stuck.
 
 ### 5. Handle Failures
 
 **One-retry-then-block policy** for crashed workers:
 
-1. Worker dies (not in `botty list`, bead still `in_progress`) with no `RETRY:1` marker in comments:
+1. Worker dies (not in `botty list`, bone still `doing`) with no `RETRY:1` marker in comments:
    - Comment: `"Worker <name> died. RETRY:1 — reassigning."`
    - Check if workspace still exists; create new one if destroyed
    - Re-dispatch with a new worker name
 
 2. Worker dies again (`RETRY:1` marker already exists):
-   - Comment: `"Worker died again after retry. Blocking bead."`
-   - `maw exec default -- br update --actor $AGENT <child-id> --status=blocked`
+   - Comment: `"Worker died again after retry. Marking done with failure."`
    - Destroy workspace if it exists: `maw ws destroy <ws>`
-   - Release claims: `bus claims release --agent $AGENT "bead://$BOTBOX_PROJECT/<child-id>"`
-   - Announce: `bus send --agent $AGENT $BOTBOX_PROJECT "Bead <child-id> blocked: worker died twice" -L task-blocked`
-
-**Blocked children:** If all remaining children are blocked, investigate. Check bead comments for details, consider rescoping or splitting the blocked work.
+   - Release claims: `bus claims release --agent $AGENT "bone://$BOTBOX_PROJECT/<child-id>"`
+   - Announce: `bus send --agent $AGENT $BOTBOX_PROJECT "Bone <child-id> failed: worker died twice" -L task-blocked`
 
 ### 6. Close the Mission
 
-When all children are closed:
+When all children are done:
 
-1. **Verify:** `maw exec default -- br list -l "mission:<mission-id>"` — all should be closed.
+1. **Verify:** `maw exec default -- bn list --tag "mission:<mission-id>"` — all should be done.
 
-2. **Write synthesis log** as a bead comment:
+2. **Write synthesis log** as a bone comment:
    ```bash
-   maw exec default -- br comments add --actor $AGENT --author $AGENT <mission-id> \
-     "Mission complete.\n\nChildren: N total, all closed.\nKey decisions: <what changed during execution>\nWhat worked: <patterns that succeeded>\nWhat to avoid: <patterns that failed>\nKey artifacts: <files/modules created or modified>"
+   maw exec default -- bn bone comment add <mission-id> \
+     "Mission complete.\n\nChildren: N total, all done.\nKey decisions: <what changed during execution>\nWhat worked: <patterns that succeeded>\nWhat to avoid: <patterns that failed>\nKey artifacts: <files/modules created or modified>"
    ```
 
-3. **Close the mission bead:**
+3. **Close the mission bone:**
    ```bash
-   maw exec default -- br close --actor $AGENT <mission-id> --reason="All children completed"
+   maw exec default -- bn done <mission-id> --reason "All children completed"
    ```
 
 4. **Announce:**
@@ -176,9 +173,9 @@ When all children are closed:
    bus send --agent $AGENT $BOTBOX_PROJECT "Mission <mission-id> complete: <title> — N children, all done" -L task-done
    ```
 
-## Risk Labels in Missions
+## Risk Tags in Missions
 
-Each child bead gets its own risk label independently. The mission bead itself does not have a risk label — risk is assessed per child.
+Each child bone gets its own risk tag independently. The mission bone itself does not have a risk tag — risk is assessed per child.
 
 - **risk:low** children skip review and merge directly after self-review
 - **risk:medium** (default) children go through standard crit review
@@ -187,7 +184,7 @@ Each child bead gets its own risk label independently. The mission bead itself d
 
 The dev-loop does not override child risk levels. If a child is `risk:critical`, the mission pauses on that child until human approval is received.
 
-See [planning](planning.md) for how to assign risk labels.
+See [planning](planning.md) for how to assign risk tags.
 
 ## Coordination Labels
 
@@ -231,7 +228,7 @@ Mission settings in `.botbox.json` under `agents.dev.missions`:
 |-----|---------|---------|
 | `enabled` | `false` | Enable mission dispatch (safe rollout — must opt in) |
 | `maxWorkers` | `4` | Maximum concurrent worker agents per mission |
-| `maxChildren` | `12` | Maximum child beads per mission |
+| `maxChildren` | `12` | Maximum child bones per mission |
 | `checkpointIntervalSec` | `30` | Seconds between checkpoint polls |
 
 ## Environment Variables
@@ -240,13 +237,13 @@ Workers receive mission context via environment variables set by the dev-loop at
 
 | Variable | Set by | Read by | Value |
 |----------|--------|---------|-------|
-| `BOTBOX_MISSION` | dev-loop | agent-loop | Mission bead ID (e.g., `bd-abc`) |
-| `BOTBOX_BEAD` | dev-loop | agent-loop | Assigned child bead ID — skip triage, work this bead |
+| `BOTBOX_MISSION` | dev-loop | agent-loop | Mission bone ID (e.g., `bd-abc`) |
+| `BOTBOX_BONE` | dev-loop | agent-loop | Assigned child bone ID — skip triage, work this bone |
 | `BOTBOX_WORKSPACE` | dev-loop | agent-loop | Pre-created workspace name — skip workspace creation |
 | `BOTBOX_MISSION_OUTCOME` | dev-loop | agent-loop | Outcome line from mission description — shared context |
-| `BOTBOX_SIBLINGS` | dev-loop | agent-loop | One line per sibling: `<id> (<title>) [owner:<name>, status:<status>]` |
+| `BOTBOX_SIBLINGS` | dev-loop | agent-loop | One line per sibling: `<id> (<title>) [owner:<name>, state:<state>]` |
 | `BOTBOX_FILE_HINTS` | dev-loop | agent-loop | Advisory file ownership: `<id>: likely edits <files>` per line |
 
-When `BOTBOX_BEAD` and `BOTBOX_WORKSPACE` are set, agent-loop skips triage and starts working immediately on the assigned bead in the given workspace.
+When `BOTBOX_BONE` and `BOTBOX_WORKSPACE` are set, agent-loop skips triage and starts working immediately on the assigned bone in the given workspace.
 
-When `BOTBOX_MISSION` is set, agent-loop reads the mission bead for shared context and includes `mission:<id>` labels on bus messages.
+When `BOTBOX_MISSION` is set, agent-loop reads the mission bone for shared context and includes `mission:<id>` labels on bus messages.

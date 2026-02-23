@@ -91,40 +91,41 @@ This project uses a **bare repo** layout. Source files live in workspaces under 
 ```
 project-root/          ← bare repo (no source files here)
 ├── ws/
-│   ├── default/       ← main working copy (AGENTS.md, .beads/, src/, etc.)
-│   ├── frost-castle/  ← agent workspace (isolated jj commit)
+│   ├── default/       ← main working copy (AGENTS.md, .bones/, src/, etc.)
+│   ├── frost-castle/  ← agent workspace (isolated Git worktree)
 │   └── amber-reef/    ← another agent workspace
-├── .jj/               ← jj repo data
+├── .manifold/         ← maw metadata/artifacts
 ├── .git/              ← git data (core.bare=true)
 ├── AGENTS.md          ← stub redirecting to ws/default/AGENTS.md
 └── CLAUDE.md          ← symlink → AGENTS.md
 ```
 
 **Key rules:**
-- `ws/default/` is the main workspace — beads, config, and project files live here
+- `ws/default/` is the main workspace — bones, config, and project files live here
 - **Never merge or destroy the default workspace.** It is where other branches merge INTO, not something you merge.
-- Agent workspaces (`ws/<name>/`) are isolated jj commits for concurrent work
+- Agent workspaces (`ws/<name>/`) are isolated Git worktrees managed by maw
 - Use `maw exec <ws> -- <command>` to run commands in a workspace context
-- Use `maw exec default -- br|bv ...` for beads commands (always in default workspace)
+- Use `maw exec default -- bn ...` for bones commands (always in default workspace)
 - Use `maw exec <ws> -- crit ...` for review commands (always in the review's workspace)
-- Never run `br`, `bv`, `crit`, or `jj` directly — always go through `maw exec`
+- Never run `bn` or `crit` directly — always go through `maw exec`
+- Do not run `jj`; this workflow is Git + maw.
 
-### Beads Quick Reference
+### Bones Quick Reference
 
 | Operation | Command |
 |-----------|---------|
-| View ready work | `maw exec default -- br ready` |
-| Show bead | `maw exec default -- br show <id>` |
-| Create | `maw exec default -- br create --actor $AGENT --owner $AGENT --title="..." --type=task --priority=2` |
-| Start work | `maw exec default -- br update --actor $AGENT <id> --status=in_progress --owner=$AGENT` |
-| Add comment | `maw exec default -- br comments add --actor $AGENT --author $AGENT <id> "message"` |
-| Close | `maw exec default -- br close --actor $AGENT <id>` |
-| Add dependency | `maw exec default -- br dep add --actor $AGENT <blocked> <blocker>` |
-| Sync | `maw exec default -- br sync --flush-only` |
-| Triage (scores) | `maw exec default -- bv --robot-triage` |
-| Next bead | `maw exec default -- bv --robot-next` |
+| View next work | `maw exec default -- bn next` |
+| Show bone | `maw exec default -- bn show <id>` |
+| Create | `maw exec default -- bn create --title "..." --kind task` |
+| Start work | `maw exec default -- bn do <id>` |
+| Add comment | `maw exec default -- bn bone comment add <id> "message"` |
+| Close | `maw exec default -- bn done <id>` |
+| Add dependency | `maw exec default -- bn triage dep add <blocker> --blocks <blocked>` |
+| Triage (scores) | `maw exec default -- bn triage` |
+| Next bone | `maw exec default -- bn next` |
+| Search | `maw exec default -- bn search <query>` |
 
-**Required flags**: `--actor $AGENT` on mutations, `--author $AGENT` on comments.
+Identity resolved from `$AGENT` env. No flags needed in agent loops.
 
 ### Workspace Quick Reference
 
@@ -134,24 +135,16 @@ project-root/          ← bare repo (no source files here)
 | List workspaces | `maw ws list` |
 | Merge to main | `maw ws merge <name> --destroy` |
 | Destroy (no merge) | `maw ws destroy <name>` |
-| Run jj in workspace | `maw exec <name> -- jj <jj-args...>` |
+| Run command in workspace | `maw exec <name> -- <command>` |
+| View workspace history | `maw ws history <name>` |
+| Sync stale workspace | `maw ws sync <name>` |
+| Inspect merge conflicts | `maw ws conflicts <name>` |
+| Undo local workspace changes | `maw ws undo <name>` |
 
-**Avoiding divergent commits**: Each workspace owns ONE commit. Only modify your own.
-
-| Safe | Dangerous |
-|------|-----------|
-| `maw ws merge <agent-ws> --destroy` | `maw ws merge default --destroy` (NEVER) |
-| `jj describe` (your working copy) | `jj describe main -m "..."` |
-| `maw exec <your-ws> -- jj describe -m "..."` | `jj describe <other-change-id>` |
-
-If you see `(divergent)` in `jj log`:
-```bash
-jj abandon <change-id>/0   # keep one, abandon the divergent copy
-```
-
-**Working copy snapshots**: jj auto-snapshots your working copy before most operations (`jj new`, `jj rebase`, etc.). Edits go into the **current** commit automatically. To put changes in a **new** commit, run `jj new` first, then edit files.
-
-**Always pass `-m`**: Commands like `jj commit`, `jj squash`, and `jj describe` open an editor by default. Agents cannot interact with editors, so always pass `-m "message"` explicitly.
+**Workspace safety:**
+- Never merge or destroy `default`.
+- Prefer `maw ws merge <name> --check` before `maw ws merge <name> --destroy`.
+- Commit workspace changes with `maw exec <name> -- git add -A` and `maw exec <name> -- git commit -m "..."`.
 
 ### Protocol Quick Reference
 
@@ -160,21 +153,21 @@ Use these commands at protocol transitions to check state and get exact guidance
 | Step | Command | Who | Purpose |
 |------|---------|-----|---------|
 | Resume | `botbox protocol resume --agent $AGENT` | Worker | Detect in-progress work from previous session |
-| Start | `botbox protocol start <bead-id> --agent $AGENT` | Worker | Verify bead is ready, get start commands |
-| Review | `botbox protocol review <bead-id> --agent $AGENT` | Worker | Verify work is complete, get review commands |
-| Finish | `botbox protocol finish <bead-id> --agent $AGENT` | Worker | Verify review approved, get close/cleanup commands |
+| Start | `botbox protocol start <bone-id> --agent $AGENT` | Worker | Verify bone is ready, get start commands |
+| Review | `botbox protocol review <bone-id> --agent $AGENT` | Worker | Verify work is complete, get review commands |
+| Finish | `botbox protocol finish <bone-id> --agent $AGENT` | Worker | Verify review approved, get close/cleanup commands |
 | Merge | `botbox protocol merge <workspace> --agent $AGENT` | Lead | Check preconditions, detect conflicts, get merge steps |
 | Cleanup | `botbox protocol cleanup --agent $AGENT` | Worker | Check for held resources to release |
 
 All commands support JSON output with `--format json` for parsing. If a command is unavailable or fails (exit code 1), fall back to manual steps documented in [start](.agents/botbox/start.md), [review-request](.agents/botbox/review-request.md), and [finish](.agents/botbox/finish.md).
 
-### Beads Conventions
+### Bones Conventions
 
-- Create a bead before starting work. Update status: `open` → `in_progress` → `closed`.
+- Create a bone before starting work. Update state: `open` → `doing` → `done`.
 - Post progress comments during work for crash recovery.
 - **Run checks before requesting review**: `just check` (or your project's build/test command). Fix any failures before proceeding.
-- After finishing a bead, follow [finish.md](.agents/botbox/finish.md). **Workers: do NOT push** — the lead handles merges and pushes.
-- **Install locally** after releasing: `just install`
+- After finishing a bone, follow [finish.md](.agents/botbox/finish.md). **Workers: do NOT push** — the lead handles merges and pushes.
+- **Install locally** after releasing: `maw exec default -- just install`
 
 ### Identity
 
@@ -183,10 +176,10 @@ For manual sessions, use `<project>-dev` (e.g., `myapp-dev`).
 
 ### Claims
 
-When working on a bead, stake claims to prevent conflicts:
+When working on a bone, stake claims to prevent conflicts:
 
 ```bash
-bus claims stake --agent $AGENT "bead://<project>/<id>" -m "<id>"
+bus claims stake --agent $AGENT "bone://<project>/<id>" -m "<id>"
 bus claims stake --agent $AGENT "workspace://<project>/<ws>" -m "<id>"
 bus claims release --agent $AGENT --all  # when done
 ```
@@ -216,7 +209,7 @@ Agents communicate via bus channels. You don't need to be expert on everything �
 
 **Conversations**: After sending a question, use `bus wait -c <channel> --mention -t <seconds>` to block until the other agent replies. This enables back-and-forth conversations across channels.
 
-**Project experts**: Each `<project>-dev` is the expert on their project. When stuck on a companion tool (bus, maw, crit, botty, br), post a question to its project channel instead of guessing.
+**Project experts**: Each `<project>-dev` is the expert on their project. When stuck on a companion tool (bus, maw, crit, botty, bn), post a question to its project channel instead of guessing.
 
 ### Cross-Project Communication
 
@@ -224,10 +217,10 @@ Agents communicate via bus channels. You don't need to be expert on everything �
 
 1. Find the project: `bus history projects -n 50` (the #projects channel has project registry entries)
 2. Post question or feedback: `bus send --agent $AGENT <project> "..." -L feedback`
-3. For bugs, create beads in their repo first
-4. **Always create a local tracking bead** so you check back later:
+3. For bugs, create bones in their repo first
+4. **Always create a local tracking bone** so you check back later:
    ```bash
-   maw exec default -- br create --actor $AGENT --owner $AGENT --title="[tracking] <summary>" --labels tracking --type=task --priority=3
+   maw exec default -- bn create --title "[tracking] <summary>" --tag tracking --kind task
    ```
 
 See [cross-channel.md](.agents/botbox/cross-channel.md) for the full workflow.
@@ -247,17 +240,17 @@ Use `cass search "error or problem"` to find how similar issues were solved in p
 ### Workflow Docs
 
 
-- [Find work from inbox and beads](.agents/botbox/triage.md)
+- [Find work from inbox and bones](.agents/botbox/triage.md)
 
-- [Claim bead, create workspace, announce](.agents/botbox/start.md)
+- [Claim bone, create workspace, announce](.agents/botbox/start.md)
 
-- [Change bead status (open/in_progress/blocked/done)](.agents/botbox/update.md)
+- [Change bone state (open/doing/done)](.agents/botbox/update.md)
 
-- [Close bead, merge workspace, release claims, sync](.agents/botbox/finish.md)
+- [Close bone, merge workspace, release claims](.agents/botbox/finish.md)
 
 - [Full triage-work-finish lifecycle](.agents/botbox/worker-loop.md)
 
-- [Turn specs/PRDs into actionable beads](.agents/botbox/planning.md)
+- [Turn specs/PRDs into actionable bones](.agents/botbox/planning.md)
 
 - [Explore unfamiliar code before planning](.agents/botbox/scout.md)
 

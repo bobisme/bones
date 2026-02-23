@@ -16,7 +16,7 @@ Create at `./notes/proposals/<slug>.md`:
 # Proposal: <Title>
 
 **Status**: PROPOSAL
-**Bead**: bd-xxx
+**Bone**: bd-xxx
 **Author**: <agent-name>
 **Date**: YYYY-MM-DD
 
@@ -53,7 +53,7 @@ Other approaches and why they weren't chosen.
 
 ## Implementation Plan
 
-High-level breakdown of work (becomes child beads if accepted):
+High-level breakdown of work (becomes child bones if accepted):
 1. First deliverable
 2. Second deliverable
 3. ...
@@ -61,35 +61,34 @@ High-level breakdown of work (becomes child beads if accepted):
 
 ## Creating a Proposal
 
-1. Create bead: `maw exec default -- br create --actor $AGENT --owner $AGENT --title="Proposal: <title>" --labels proposal --type=task --priority=4`
+1. Create bone: `maw exec default -- bn create --title "Proposal: <title>" --tag proposal --kind task`
 2. Create doc at `./notes/proposals/<slug>.md` using template above
-3. Update bead description to reference the doc: `maw exec default -- br update --actor $AGENT <id> --description="See notes/proposals/<slug>.md"`
+3. Update bone description to reference the doc
 
 ## Validating a Proposal
 
 1. Change status header in doc to `**Status**: VALIDATING`
 2. Investigate open questions (explore code, prototype, discuss)
 3. Move answered questions from "Open Questions" to "Answered Questions" section
-4. Add comment to bead with findings: `maw exec default -- br comments add --actor $AGENT --author $AGENT <id> "Validated X, answer is Y"`
+4. Add comment to bone with findings: `maw exec default -- bn bone comment add <id> "Validated X, answer is Y"`
 
 ## Accepting a Proposal
 
 1. Change status header in doc to `**Status**: ACCEPTED`
-2. Remove proposal label: `maw exec default -- br label rm --actor $AGENT -l proposal <id>`
-3. Create implementation beads using the "Implementation Plan" section
-4. Wire dependencies: `maw exec default -- br dep add --actor $AGENT <child-id> <proposal-id>`
-5. Close proposal bead: `maw exec default -- br close --actor $AGENT <id> --reason "Accepted - implementation beads created"`
+2. Create implementation bones using the "Implementation Plan" section
+3. Wire dependencies: `maw exec default -- bn triage dep add <proposal-id> --blocks <child-id>`
+4. Close proposal bone: `maw exec default -- bn done <id> --reason "Accepted - implementation bones created"`
 
 ## Rejecting a Proposal
 
 1. Change status header in doc to `**Status**: REJECTED`
 2. Add "## Rejection Reason" section explaining why
-3. Close proposal bead: `maw exec default -- br close --actor $AGENT <id> --reason "Rejected - <brief reason>"`
+3. Close proposal bone: `maw exec default -- bn done <id> --reason "Rejected - <brief reason>"`
 
 ## Lifecycle Summary
 
-| Stage | Bead Label | Status Header | Description |
-|-------|------------|---------------|-------------|
+| Stage | Bone Tag | Status Header | Description |
+|-------|----------|---------------|-------------|
 | **PROPOSAL** | `proposal` | `**Status**: PROPOSAL` | Initial idea captured, design doc drafted |
 | **VALIDATING** | `proposal` | `**Status**: VALIDATING` | Open questions being investigated |
 | **ACCEPTED** | removed | `**Status**: ACCEPTED` | Design approved, ready for implementation |
@@ -99,8 +98,8 @@ High-level breakdown of work (becomes child beads if accepted):
 
 ```bash
 # List all open proposals
-maw exec default -- br list --label proposal
+maw exec default -- bn list --tag proposal
 
-# Show a specific proposal bead
-maw exec default -- br show <id>
+# Show a specific proposal bone
+maw exec default -- bn show <id>
 ```

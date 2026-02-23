@@ -65,13 +65,13 @@ At the end of your work, output exactly one of these completion signals:
    - ReDoS: complex regexes with user input?
 
    d. RISK-AWARE REVIEW:
-      Before reviewing, check the bead's risk label:
-      - Run: maw exec default -- br show <bead-id>
-      - Look for `risk:high` or `risk:critical` labels in the output
+      Before reviewing, check the bone's risk tag:
+      - Run: maw exec default -- bn show <bone-id>
+      - Look for `risk:high` or `risk:critical` tags in the output
 
-      If the bead has `risk:high` or `risk:critical`, the FAILURE-MODE CHECKLIST is REQUIRED in addition to the security checklist above.
+      If the bone has `risk:high` or `risk:critical`, the FAILURE-MODE CHECKLIST is REQUIRED in addition to the security checklist above.
 
-      **FAILURE-MODE CHECKLIST** (required for risk:high and risk:critical beads):
+      **FAILURE-MODE CHECKLIST** (required for risk:high and risk:critical bones):
       Each of these questions MUST be addressed in separate crit comments:
 
       1. **What could fail in production?**
@@ -106,9 +106,9 @@ At the end of your work, output exactly one of these completion signals:
       Use: maw exec $WS -- crit comment <id> "SEVERITY: <feedback>" --file <path> --line <line-or-range>
 
    f. Vote:
-      - For `risk:critical` beads: ALWAYS BLOCK, regardless of code quality.
+      - For `risk:critical` bones: ALWAYS BLOCK, regardless of code quality.
         Add comment: "risk:critical requires human approval before merge"
-      - For other beads: maw exec $WS -- crit block <id> --reason "..." if ANY security issues exist (CRITICAL, HIGH, or MEDIUM)
+      - For other bones: maw exec $WS -- crit block <id> --reason "..." if ANY security issues exist (CRITICAL, HIGH, or MEDIUM)
       - maw exec $WS -- crit lgtm <id> only if no security concerns found AND not risk:critical
 
 4. ANNOUNCE:
@@ -116,7 +116,7 @@ At the end of your work, output exactly one of these completion signals:
 
 5. RE-REVIEW (if a review-response message or thread response indicates the author addressed feedback):
    The author's fixes are in their workspace, not the main branch.
-   a. Find the workspace: check the PENDING WORK section, review-response bus message, or bead comments for workspace name.
+   a. Find the workspace: check the PENDING WORK section, review-response bus message, or bone comments for workspace name.
    b. Re-read the review: maw exec $WS -- crit review <review-id>
       Look at each thread — which are resolved vs still open? What did the author reply?
    c. Read the actual fixed code from the workspace path (e.g., ws/$WS/src/...) — verify security fixes thoroughly, attackers will probe edge cases.

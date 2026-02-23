@@ -26,16 +26,16 @@ At the end of your work, output exactly one of these completion signals:
    b. Read the full source files changed in the diff — use absolute paths (ws/$WS/...)
    c. Check project config (e.g., Cargo.toml, package.json) for dependencies and settings
    d. RISK-AWARE REVIEW:
-      Before reviewing, check the bead's risk label:
-      - Run: maw exec default -- br show <bead-id>
-      - Look for `risk:high` or `risk:critical` labels
+      Before reviewing, check the bone's risk tag:
+      - Run: maw exec default -- bn show <bone-id>
+      - Look for `risk:high` or `risk:critical` tags
 
-      If the bead has `risk:high`, verify that a security reviewer has addressed the failure-mode checklist:
+      If the bone has `risk:high`, verify that a security reviewer has addressed the failure-mode checklist:
       - Check for crit comments covering: production failure scenarios, detection methods,
         rollback strategy, dependency risks, and uncertain assumptions
       - If the failure-mode analysis is missing or incomplete, BLOCK and request security review
 
-      If the bead has `risk:critical`, ALWAYS BLOCK with comment:
+      If the bone has `risk:critical`, ALWAYS BLOCK with comment:
       "risk:critical requires human approval before merge"
    e. Run static analysis if applicable: maw exec $WS -- cargo clippy, maw exec $WS -- oxlint — cite warnings in comments
    f. Cross-file consistency: compare similar functions across files for uniform patterns.
@@ -50,8 +50,8 @@ At the end of your work, output exactly one of these completion signals:
       - INFO: Suggestions, style preferences, minor improvements
       Use: maw exec $WS -- crit comment <id> "SEVERITY: <feedback>" --file <path> --line <line-or-range>
    i. Vote:
-      - For `risk:critical` beads: ALWAYS BLOCK with comment "risk:critical requires human approval before merge"
-      - For other beads: maw exec $WS -- crit block <id> --reason "..." if any CRITICAL or HIGH issues exist
+      - For `risk:critical` bones: ALWAYS BLOCK with comment "risk:critical requires human approval before merge"
+      - For other bones: maw exec $WS -- crit block <id> --reason "..." if any CRITICAL or HIGH issues exist
       - maw exec $WS -- crit lgtm <id> if no CRITICAL or HIGH issues AND not risk:critical
 
 4. ANNOUNCE:
@@ -59,7 +59,7 @@ At the end of your work, output exactly one of these completion signals:
 
 5. RE-REVIEW (if a review-response message or thread response indicates the author addressed feedback):
    The author's fixes are in their workspace, not the main branch.
-   a. Find the workspace: check the PENDING WORK section, review-response bus message, or bead comments for workspace name.
+   a. Find the workspace: check the PENDING WORK section, review-response bus message, or bone comments for workspace name.
    b. Re-read the review: maw exec $WS -- crit review <review-id>
       Look at each thread — which are resolved vs still open? What did the author reply?
    c. Read the actual fixed code from the workspace path (e.g., ws/$WS/src/...) — don't trust replies alone.

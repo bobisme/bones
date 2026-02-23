@@ -8,13 +8,13 @@ Structure commands as `<tool> <nouns> <verb>`:
 
 ```bash
 # Good - plural nouns, verb at end
-br issues list
-br issues create
+bn list
+bn create
 crit reviews request
 maw workspaces create
 
 # Acceptable exceptions for common operations
-br ready          # shorthand for frequent queries
+bn next           # shorthand for frequent queries
 tool doctor       # utility commands
 tool version      # meta commands
 ```
@@ -78,7 +78,7 @@ cr-kex3  bd-2qa  fix inbox orphan detection  PENDING  botcrit-dev
 cr-v486  bd-1nf  fix stale workspace check   MERGED   botcrit-dev
 
 # Bad text output
-Review cr-kex3 was created by botcrit-dev for bead bd-2qa.
+Review cr-kex3 was created by botcrit-dev for bone bd-2qa.
 Title: "fix inbox orphan detection". Status: PENDING.
 ```
 
