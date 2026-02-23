@@ -266,9 +266,18 @@ pub fn build_dup_candidates(
         .collect();
 
     for (item_id, composite_score) in fused {
-        let lexical_rank = lexical_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
-        let semantic_rank = semantic_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
-        let structural_rank = structural_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let lexical_rank = lexical_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let semantic_rank = semantic_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let structural_rank = structural_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
 
         let risk = classify_risk(*composite_score, config);
 

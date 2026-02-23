@@ -529,14 +529,15 @@ where
             }
 
             match parse_line(&line) {
-                Ok(ParsedLine::Event(event)) => {
-                    match migrate_event(*event, self.shard_version) {
-                        Ok(migrated) => return Some(Ok(migrated)),
-                        Err(e) => {
-                            return Some(Err((self.line_no, ParseError::VersionMismatch(e.to_string()))));
-                        }
+                Ok(ParsedLine::Event(event)) => match migrate_event(*event, self.shard_version) {
+                    Ok(migrated) => return Some(Ok(migrated)),
+                    Err(e) => {
+                        return Some(Err((
+                            self.line_no,
+                            ParseError::VersionMismatch(e.to_string()),
+                        )));
                     }
-                }
+                },
                 Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => continue,
                 Err(ParseError::InvalidEventType(raw)) => {
                     warn!(

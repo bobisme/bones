@@ -61,7 +61,11 @@ fn urgent_item_always_scores_highest() {
     let score_a = composite_score(&a, &weights);
     let score_b = composite_score(&b, &weights);
 
-    assert_eq!(score_a, f64::INFINITY, "urgent item must return f64::INFINITY");
+    assert_eq!(
+        score_a,
+        f64::INFINITY,
+        "urgent item must return f64::INFINITY"
+    );
     assert!(
         score_a > score_b,
         "Urgent item A ({score_a}) must score above non-urgent hub B ({score_b})"

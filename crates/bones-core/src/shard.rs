@@ -815,7 +815,10 @@ impl ShardLineIterator {
         // Fast-forward shards using metadata
         while self.current_shard_idx < self.shards.len() {
             let (year, month) = self.shards[self.current_shard_idx];
-            let shard_path = self.bones_dir.join("events").join(ShardManager::shard_filename(year, month));
+            let shard_path = self
+                .bones_dir
+                .join("events")
+                .join(ShardManager::shard_filename(year, month));
             if let Ok(meta) = fs::metadata(shard_path) {
                 let shard_len = meta.len() as usize;
                 if self.cumulative_offset + shard_len <= offset {
@@ -849,7 +852,10 @@ impl Iterator for ShardLineIterator {
                 }
 
                 let (year, month) = self.shards[self.current_shard_idx];
-                let shard_path = self.bones_dir.join("events").join(ShardManager::shard_filename(year, month));
+                let shard_path = self
+                    .bones_dir
+                    .join("events")
+                    .join(ShardManager::shard_filename(year, month));
                 let mut file = match fs::File::open(shard_path) {
                     Ok(f) => f,
                     Err(e) => return Some(Err(e)),
@@ -859,7 +865,10 @@ impl Iterator for ShardLineIterator {
                 let mut cumulative_before = 0;
                 for i in 0..self.current_shard_idx {
                     let (y, m) = self.shards[i];
-                    let p = self.bones_dir.join("events").join(ShardManager::shard_filename(y, m));
+                    let p = self
+                        .bones_dir
+                        .join("events")
+                        .join(ShardManager::shard_filename(y, m));
                     if let Ok(meta) = fs::metadata(p) {
                         cumulative_before += meta.len() as usize;
                     }

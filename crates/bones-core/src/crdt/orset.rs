@@ -342,52 +342,50 @@ pub fn ops_from_events(
                     }
                 }
             }
-            OrSetField::BlockedBy => {
-                match event.event_type {
-                    EventType::Link => {
-                        if let EventData::Link(data) = &event.data {
-                            if data.link_type == "blocks" || data.link_type == "blocked_by" {
-                                let value = data.target.to_string();
-                                tag_map.insert(tag.clone(), event.event_hash.clone());
-                                let op = OrSetOp::Add(value.clone(), tag.clone());
-                                current_set.add(value, tag.clone());
-                                ops.push(op);
-                            }
+            OrSetField::BlockedBy => match event.event_type {
+                EventType::Link => {
+                    if let EventData::Link(data) = &event.data {
+                        if data.link_type == "blocks" || data.link_type == "blocked_by" {
+                            let value = data.target.to_string();
+                            tag_map.insert(tag.clone(), event.event_hash.clone());
+                            let op = OrSetOp::Add(value.clone(), tag.clone());
+                            current_set.add(value, tag.clone());
+                            ops.push(op);
                         }
                     }
-                    EventType::Unlink => {
-                        if let EventData::Unlink(data) = &event.data {
-                            let is_blocked_by = data
-                                .link_type
-                                .as_ref()
-                                .is_none_or(|lt| lt == "blocks" || lt == "blocked_by");
-                            if is_blocked_by {
-                                let value = data.target.to_string();
-                                let candidate_tags = current_set.active_tags(&value);
-                                let observed_tags: Vec<Timestamp> = candidate_tags
-                                    .into_iter()
-                                    .filter(|t| {
-                                        if let Some(dag_ref) = dag {
-                                            if let Some(tag_hash) = tag_map.get(t) {
-                                                dag_ref.is_ancestor(tag_hash, &event.event_hash)
-                                            } else {
-                                                true
-                                            }
+                }
+                EventType::Unlink => {
+                    if let EventData::Unlink(data) = &event.data {
+                        let is_blocked_by = data
+                            .link_type
+                            .as_ref()
+                            .is_none_or(|lt| lt == "blocks" || lt == "blocked_by");
+                        if is_blocked_by {
+                            let value = data.target.to_string();
+                            let candidate_tags = current_set.active_tags(&value);
+                            let observed_tags: Vec<Timestamp> = candidate_tags
+                                .into_iter()
+                                .filter(|t| {
+                                    if let Some(dag_ref) = dag {
+                                        if let Some(tag_hash) = tag_map.get(t) {
+                                            dag_ref.is_ancestor(tag_hash, &event.event_hash)
                                         } else {
                                             true
                                         }
-                                    })
-                                    .cloned()
-                                    .collect();
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .cloned()
+                                .collect();
 
-                                current_set.remove_specific(&value, &observed_tags);
-                                ops.push(OrSetOp::Remove(value, observed_tags));
-                            }
+                            current_set.remove_specific(&value, &observed_tags);
+                            ops.push(OrSetOp::Remove(value, observed_tags));
                         }
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             OrSetField::RelatedTo => match event.event_type {
                 EventType::Link => {
                     if let EventData::Link(data) = &event.data {
@@ -997,12 +995,7 @@ mod tests {
         };
 
         // Pass base_state so it knows what to remove.
-        let ops = ops_from_events(
-            &[event],
-            &OrSetField::Assignees,
-            Some(&base_state),
-            None,
-        );
+        let ops = ops_from_events(&[event], &OrSetField::Assignees, Some(&base_state), None);
 
         // Apply ops to base state
         let mut result = base_state.clone();
@@ -1031,7 +1024,7 @@ mod tests {
         let mut dag = EventDag::new();
         // We mock the DAG structure without full events for the DAG check
         // insert() requires full Event, so we construct minimal events.
-        
+
         let make_evt = |hash: &str, parents: Vec<&str>| Event {
             wall_ts_us: 0,
             agent: "a".into(),
@@ -1040,7 +1033,15 @@ mod tests {
             event_type: EventType::Create, // dummy
             item_id: crate::model::item_id::ItemId::new_unchecked("bn"),
             data: EventData::Create(crate::event::data::CreateData {
-                title: "".into(), kind: crate::model::item::Kind::Task, size: None, urgency: crate::model::item::Urgency::Default, labels: vec![], parent: None, causation: None, description: None, extra: BTreeMap::new()
+                title: "".into(),
+                kind: crate::model::item::Kind::Task,
+                size: None,
+                urgency: crate::model::item::Urgency::Default,
+                labels: vec![],
+                parent: None,
+                causation: None,
+                description: None,
+                extra: BTreeMap::new(),
             }),
             event_hash: hash.into(),
         };
@@ -1098,6 +1099,9 @@ mod tests {
         }
 
         // Alice should be present because Remove didn't see Add
-        assert!(set.contains(&"alice".into()), "Concurrent Add should survive Remove");
+        assert!(
+            set.contains(&"alice".into()),
+            "Concurrent Add should survive Remove"
+        );
     }
 }

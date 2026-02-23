@@ -153,8 +153,7 @@ fn emit_event(
 
         assign_next_itc(project_root, &mut event)?;
 
-        let line =
-            write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
+        let line = write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
 
         shard_mgr
             .append_raw(year, month, &line)

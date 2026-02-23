@@ -135,9 +135,18 @@ fn hybrid_search_inner(
 
     let mut out = Vec::with_capacity(fused.len().min(limit));
     for (item_id, score) in fused.into_iter().take(limit) {
-        let lexical_rank = lexical_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
-        let semantic_rank = semantic_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
-        let structural_rank = structural_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let lexical_rank = lexical_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let semantic_rank = semantic_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let structural_rank = structural_map
+            .get(item_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
 
         // Avoid returning graph-only expansions that have no textual relevance.
         if lexical_rank == usize::MAX && semantic_rank == usize::MAX {
@@ -255,7 +264,9 @@ fn derive_structural_ranked(
                 continue;
             }
 
-            let Ok(score) = structural_similarity_with_map(seed, &candidate, db, graph, Some(&node_map)) else {
+            let Ok(score) =
+                structural_similarity_with_map(seed, &candidate, db, graph, Some(&node_map))
+            else {
                 continue;
             };
 

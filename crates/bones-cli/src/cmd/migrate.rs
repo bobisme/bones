@@ -297,11 +297,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             data: EventData::Create(create),
             event_hash: String::new(),
         };
-        append_event(
-            project_root,
-            &shard_manager,
-            &mut create_event,
-        )?;
+        append_event(project_root, &shard_manager, &mut create_event)?;
         previous_hash.insert(item_id.to_string(), create_event.event_hash.clone());
         report.projection_events += 1;
 
@@ -327,11 +323,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(
-                project_root,
-                &shard_manager,
-                &mut assign_event,
-            )?;
+            append_event(project_root, &shard_manager, &mut assign_event)?;
             previous_hash.insert(item_id.to_string(), assign_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -385,11 +377,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                     }),
                     event_hash: String::new(),
                 };
-                append_event(
-                    project_root,
-                    &shard_manager,
-                    &mut comment_event,
-                )?;
+                append_event(project_root, &shard_manager, &mut comment_event)?;
                 previous_hash.insert(item_id.to_string(), comment_event.event_hash.clone());
                 report.comments_imported += 1;
                 report.projection_events += 1;

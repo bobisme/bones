@@ -269,41 +269,47 @@ fn emit_compensating_event(
                 // Acquire lock for atomic timestamp and append
                 let _lock = match ShardLock::acquire(&lock_path, Duration::from_secs(5)) {
                     Ok(l) => l,
-                    Err(e) => return UndoEventResult {
-                        original_hash: original.event_hash.clone(),
-                        original_type: original.event_type.as_str().to_string(),
-                        compensating_hash: None,
-                        compensating_type: Some(comp_type),
-                        skipped: true,
-                        skip_reason: Some(format!("failed to acquire lock: {e}")),
-                        dry_run: false,
-                    },
+                    Err(e) => {
+                        return UndoEventResult {
+                            original_hash: original.event_hash.clone(),
+                            original_type: original.event_type.as_str().to_string(),
+                            compensating_hash: None,
+                            compensating_type: Some(comp_type),
+                            skipped: true,
+                            skip_reason: Some(format!("failed to acquire lock: {e}")),
+                            dry_run: false,
+                        };
+                    }
                 };
 
                 let (year, month) = match shard_mgr.rotate_if_needed() {
                     Ok(pair) => pair,
-                    Err(e) => return UndoEventResult {
-                        original_hash: original.event_hash.clone(),
-                        original_type: original.event_type.as_str().to_string(),
-                        compensating_hash: None,
-                        compensating_type: Some(comp_type),
-                        skipped: true,
-                        skip_reason: Some(format!("failed to rotate shards: {e}")),
-                        dry_run: false,
-                    },
+                    Err(e) => {
+                        return UndoEventResult {
+                            original_hash: original.event_hash.clone(),
+                            original_type: original.event_type.as_str().to_string(),
+                            compensating_hash: None,
+                            compensating_type: Some(comp_type),
+                            skipped: true,
+                            skip_reason: Some(format!("failed to rotate shards: {e}")),
+                            dry_run: false,
+                        };
+                    }
                 };
 
                 match shard_mgr.next_timestamp() {
                     Ok(ts) => comp_event.wall_ts_us = ts,
-                    Err(e) => return UndoEventResult {
-                        original_hash: original.event_hash.clone(),
-                        original_type: original.event_type.as_str().to_string(),
-                        compensating_hash: None,
-                        compensating_type: Some(comp_type),
-                        skipped: true,
-                        skip_reason: Some(format!("failed to get timestamp: {e}")),
-                        dry_run: false,
-                    },
+                    Err(e) => {
+                        return UndoEventResult {
+                            original_hash: original.event_hash.clone(),
+                            original_type: original.event_type.as_str().to_string(),
+                            compensating_hash: None,
+                            compensating_type: Some(comp_type),
+                            skipped: true,
+                            skip_reason: Some(format!("failed to get timestamp: {e}")),
+                            dry_run: false,
+                        };
+                    }
                 }
 
                 if let Err(e) = assign_next_itc(project_root, &mut comp_event) {
@@ -427,8 +433,6 @@ pub fn run_undo(
     let conn = db::open_projection(&db_path)?;
     let _ = project::ensure_tracking_table(&conn);
     let shard_mgr = ShardManager::new(&bones_dir);
-
-
 
     // ---------------------------------------------------------------------------
     // Mode 1: undo by event hash

@@ -27,9 +27,9 @@
 //! When any check fails, [`incremental_apply`] falls back to a full rebuild
 //! automatically, returning the reason in [`ApplyReport::full_rebuild_reason`].
 
+use std::io;
 use std::path::Path;
 use std::time::Instant;
-use std::io;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -185,7 +185,8 @@ pub fn incremental_apply(
     let projector = project::Projector::new(&conn);
 
     while let Some(line_res) = line_iter.next() {
-        let (abs_offset, line): (usize, String) = line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
+        let (abs_offset, line): (usize, String) =
+            line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;
         total_byte_len = abs_offset + line.len();
 
@@ -201,12 +202,13 @@ pub fn incremental_apply(
             Ok(crate::event::parser::ParsedLine::Event(event)) => {
                 let event = crate::event::migrate_event(*event, shard_version)
                     .map_err(|e| anyhow::anyhow!("migration failed: {e}"))?;
-                
+
                 current_last_hash = Some(event.event_hash.clone());
                 current_batch.push(event);
 
                 if current_batch.len() >= 1000 {
-                    let stats = projector.project_batch(&current_batch)
+                    let stats = projector
+                        .project_batch(&current_batch)
                         .context("project batch during incremental apply")?;
                     total_projected += stats.projected;
                     total_duplicates += stats.duplicates;
@@ -214,7 +216,10 @@ pub fn incremental_apply(
                     current_batch.clear();
                 }
             }
-            Ok(crate::event::parser::ParsedLine::Comment(_) | crate::event::parser::ParsedLine::Blank) => {}
+            Ok(
+                crate::event::parser::ParsedLine::Comment(_)
+                | crate::event::parser::ParsedLine::Blank,
+            ) => {}
             Err(crate::event::parser::ParseError::InvalidEventType(raw)) => {
                 tracing::warn!(line = line_no, event_type = %raw, "skipping unknown event type");
             }
@@ -224,7 +229,8 @@ pub fn incremental_apply(
 
     // Final batch
     if !current_batch.is_empty() {
-        let stats = projector.project_batch(&current_batch)
+        let stats = projector
+            .project_batch(&current_batch)
             .context("project final batch during incremental apply")?;
         total_projected += stats.projected;
         total_duplicates += stats.duplicates;

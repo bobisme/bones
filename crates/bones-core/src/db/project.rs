@@ -446,10 +446,9 @@ impl<'conn> Projector<'conn> {
                     let mut stmt = self.conn.prepare(
                         "SELECT label FROM item_labels WHERE item_id = ?1 ORDER BY label",
                     )?;
-                    let label_rows = stmt
-                        .query_map(params![event.item_id.as_str()], |row| {
-                            row.get::<_, String>(0)
-                        })?;
+                    let label_rows = stmt.query_map(params![event.item_id.as_str()], |row| {
+                        row.get::<_, String>(0)
+                    })?;
 
                     let mut label_strings = Vec::new();
                     for label_res in label_rows {
@@ -545,7 +544,11 @@ impl<'conn> Projector<'conn> {
         self.ensure_item_exists(event)?;
 
         let is_redacted = self.is_event_redacted(&event.event_hash)?;
-        let body = if is_redacted { "[redacted]" } else { &data.body };
+        let body = if is_redacted {
+            "[redacted]"
+        } else {
+            &data.body
+        };
 
         self.conn
             .execute(

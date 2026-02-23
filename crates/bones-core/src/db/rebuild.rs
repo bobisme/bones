@@ -9,8 +9,8 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::db::{open_projection, project};
-use crate::shard::ShardManager;
 use crate::event::Event;
+use crate::shard::ShardManager;
 use std::io;
 
 // ---------------------------------------------------------------------------
@@ -95,7 +95,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let mut shard_line_iter = shard_mgr.replay_lines()?.peekable();
 
     while let Some(line_res) = shard_line_iter.next() {
-        let (offset, line): (usize, String) = line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
+        let (offset, line): (usize, String) =
+            line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;
         total_byte_len = offset + line.len();
 
@@ -110,19 +111,23 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
             Ok(crate::event::parser::ParsedLine::Event(event)) => {
                 let event = crate::event::migrate_event(*event, shard_version)
                     .map_err(|e| anyhow::anyhow!("migration failed at line {line_no}: {e}"))?;
-                
+
                 last_event_hash = Some(event.event_hash.clone());
                 current_batch.push(event);
 
                 if current_batch.len() >= 1000 {
-                    let stats = projector.project_batch(&current_batch)
+                    let stats = projector
+                        .project_batch(&current_batch)
                         .context("project batch during rebuild")?;
                     total_projected += stats.projected;
                     total_duplicates += stats.duplicates;
                     current_batch.clear();
                 }
             }
-            Ok(crate::event::parser::ParsedLine::Comment(_) | crate::event::parser::ParsedLine::Blank) => {}
+            Ok(
+                crate::event::parser::ParsedLine::Comment(_)
+                | crate::event::parser::ParsedLine::Blank,
+            ) => {}
             Err(crate::event::parser::ParseError::InvalidEventType(raw)) => {
                 tracing::warn!(line = line_no, event_type = %raw, "skipping unknown event type");
             }
@@ -132,7 +137,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
 
     // Final batch
     if !current_batch.is_empty() {
-        let stats = projector.project_batch(&current_batch)
+        let stats = projector
+            .project_batch(&current_batch)
             .context("project final batch during rebuild")?;
         total_projected += stats.projected;
         total_duplicates += stats.duplicates;
