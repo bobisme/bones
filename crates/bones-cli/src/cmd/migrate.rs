@@ -190,7 +190,58 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
         projection_events: 0,
     };
 
+    let mut inferred_parent_by_source: HashMap<String, String> = HashMap::new();
+    for dep in &source.dependencies {
+        if is_parent_child_link(&dep.link_type) {
+            inferred_parent_by_source
+                .entry(dep.source_id.clone())
+                .or_insert_with(|| dep.target_id.clone());
+        }
+    }
+
+    let mut effective_parent_by_source: HashMap<String, String> = HashMap::new();
     for issue in &source.issues {
+        if let Some(parent) = issue
+            .parent_source_id
+            .clone()
+            .or_else(|| inferred_parent_by_source.get(&issue.source_id).cloned())
+        {
+            effective_parent_by_source.insert(issue.source_id.clone(), parent);
+        }
+    }
+
+    let mut remaining: HashSet<String> =
+        source.issues.iter().map(|i| i.source_id.clone()).collect();
+    let mut ordered_issues: Vec<&SourceIssue> = Vec::with_capacity(source.issues.len());
+    while !remaining.is_empty() {
+        let mut progressed = false;
+        for issue in &source.issues {
+            if !remaining.contains(&issue.source_id) {
+                continue;
+            }
+
+            let parent_ready = effective_parent_by_source
+                .get(&issue.source_id)
+                .map(|parent| !remaining.contains(parent))
+                .unwrap_or(true);
+
+            if parent_ready {
+                remaining.remove(&issue.source_id);
+                ordered_issues.push(issue);
+                progressed = true;
+            }
+        }
+
+        if !progressed {
+            for issue in &source.issues {
+                if remaining.remove(&issue.source_id) {
+                    ordered_issues.push(issue);
+                }
+            }
+        }
+    }
+
+    for issue in ordered_issues {
         let item_id = id_map
             .get(&issue.source_id)
             .cloned()
@@ -198,7 +249,17 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
 
         let (kind, mut labels, state, urgency) = map_issue_fields(issue);
 
-        if let Some(parent) = issue.parent_source_id.as_ref() {
+        let inferred_parent = inferred_parent_by_source.get(&issue.source_id).cloned();
+        let effective_parent_source_id = effective_parent_by_source.get(&issue.source_id).cloned();
+
+        if let (Some(explicit), Some(inferred)) =
+            (issue.parent_source_id.as_ref(), inferred_parent.as_ref())
+            && explicit != inferred
+        {
+            labels.push("migration:parent-conflict".to_string());
+        }
+
+        if let Some(parent) = effective_parent_source_id.as_ref() {
             if !id_map.contains_key(parent) {
                 labels.push("migration:missing-parent".to_string());
             }
@@ -210,8 +271,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             size: None,
             urgency,
             labels,
-            parent: issue
-                .parent_source_id
+            parent: effective_parent_source_id
                 .as_ref()
                 .and_then(|p| id_map.get(p))
                 .map(ToString::to_string),
@@ -343,6 +403,10 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
     }
 
     for dep in &source.dependencies {
+        if is_parent_child_link(&dep.link_type) {
+            continue;
+        }
+
         let Some(source_item_id) = id_map.get(&dep.source_id).cloned() else {
             continue;
         };
@@ -496,10 +560,10 @@ fn map_issue_fields(issue: &SourceIssue) -> (Kind, Vec<String>, State, Urgency) 
     };
 
     let priority = issue.priority.trim().to_ascii_uppercase();
-    let urgency = if priority == "URGENT" || priority == "P0" {
+    let urgency = if priority == "P0" {
         Urgency::Urgent
     } else if let Ok(value) = priority.parse::<i64>() {
-        if value <= 1 {
+        if value <= 0 {
             Urgency::Urgent
         } else {
             Urgency::Default
@@ -508,7 +572,7 @@ fn map_issue_fields(issue: &SourceIssue) -> (Kind, Vec<String>, State, Urgency) 
         .strip_prefix('P')
         .and_then(|raw| raw.parse::<i64>().ok())
     {
-        if value <= 0 {
+        if value == 0 {
             Urgency::Urgent
         } else {
             Urgency::Default
@@ -518,6 +582,13 @@ fn map_issue_fields(issue: &SourceIssue) -> (Kind, Vec<String>, State, Urgency) 
     };
 
     (kind, labels, state, urgency)
+}
+
+fn is_parent_child_link(kind: &str) -> bool {
+    matches!(
+        kind.to_ascii_lowercase().as_str(),
+        "parent-child" | "parent_child" | "parentchild"
+    )
 }
 
 fn normalize_link_type(kind: &str) -> String {
@@ -1063,6 +1134,41 @@ mod tests {
     }
 
     #[test]
+    fn map_priority_marks_only_p0_as_urgent() {
+        let mut issue = SourceIssue {
+            source_id: "1".to_string(),
+            title: "x".to_string(),
+            description: None,
+            extra_fields: vec![],
+            issue_type: "task".to_string(),
+            status: "open".to_string(),
+            priority: "P0".to_string(),
+            labels: vec![],
+            assignee: None,
+            actor: None,
+            created_us: 0,
+            updated_us: 0,
+            closed_us: None,
+            parent_source_id: None,
+        };
+
+        let (_, _, _, urgency_p0) = map_issue_fields(&issue);
+        assert_eq!(urgency_p0, Urgency::Urgent);
+
+        issue.priority = "P1".to_string();
+        let (_, _, _, urgency_p1) = map_issue_fields(&issue);
+        assert_eq!(urgency_p1, Urgency::Default);
+
+        issue.priority = "0".to_string();
+        let (_, _, _, urgency_zero) = map_issue_fields(&issue);
+        assert_eq!(urgency_zero, Urgency::Urgent);
+
+        issue.priority = "1".to_string();
+        let (_, _, _, urgency_one) = map_issue_fields(&issue);
+        assert_eq!(urgency_one, Urgency::Default);
+    }
+
+    #[test]
     fn item_id_mapping_is_stable() {
         let a = map_item_id("42").expect("id");
         let b = map_item_id("42").expect("id");
@@ -1108,6 +1214,14 @@ mod tests {
     }
 
     #[test]
+    fn parent_child_dependency_is_detected() {
+        assert!(is_parent_child_link("parent-child"));
+        assert!(is_parent_child_link("PARENT_CHILD"));
+        assert!(is_parent_child_link("ParentChild"));
+        assert!(!is_parent_child_link("blocks"));
+    }
+
+    #[test]
     fn migrate_moves_legacy_root_gitattributes_entry_into_bones_dir() {
         let temp = TempDir::new().expect("tempdir");
         let root = temp.path();
@@ -1141,5 +1255,54 @@ mod tests {
             std::fs::read_to_string(root.join(".gitattributes")).expect("read root .gitattributes");
         assert!(!root_attrs.contains(".bones/events merge=union"));
         assert!(root_attrs.contains("*.png binary"));
+    }
+
+    #[test]
+    fn migrate_uses_parent_child_dependency_as_hierarchy() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join(".bones")).expect("create .bones");
+
+        let source = root.join("beads.jsonl");
+        std::fs::write(
+            &source,
+            concat!(
+                "{\"id\":\"task-1\",\"title\":\"Child\",\"dependencies\":[{\"target_id\":\"epic-1\",\"type\":\"parent-child\"}]}\n",
+                "{\"id\":\"epic-1\",\"title\":\"Parent\",\"type\":\"epic\"}\n"
+            ),
+        )
+        .expect("seed jsonl source");
+
+        let args = MigrateArgs {
+            beads_db: None,
+            beads_jsonl: Some(source),
+        };
+
+        run_migrate(&args, OutputMode::Text, root).expect("migration should succeed");
+
+        let parent_id = map_item_id("epic-1").expect("mapped parent id").to_string();
+        let child_id = map_item_id("task-1").expect("mapped child id").to_string();
+
+        let conn = Connection::open(root.join(".bones/bones.db")).expect("open projection");
+        let db_parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_id FROM items WHERE item_id = ?1",
+                [child_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("query child parent");
+        assert_eq!(db_parent.as_deref(), Some(parent_id.as_str()));
+
+        let dep_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM item_dependencies WHERE item_id = ?1",
+                [child_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("query child dependencies");
+        assert_eq!(
+            dep_count, 0,
+            "parent-child should not be imported as blocks"
+        );
     }
 }
