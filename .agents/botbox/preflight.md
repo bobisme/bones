@@ -8,7 +8,7 @@ Validate toolchain and environment before multi-agent work.
 
 ## Steps
 
-1. Resolve agent identity: use `--agent` argument if provided, otherwise `$AGENT` env var. If neither is set, adopt `<project>-dev` (e.g., `botbox-dev`). Agents spawned by `agent-loop.sh` receive a random name automatically.
+1. Resolve agent identity: use `--agent` argument if provided, otherwise `$AGENT` env var. If neither is set, adopt `<project>-dev` (e.g., `botbox-dev`). Agents spawned by `botbox run worker-loop` receive a random name automatically.
 2. `bus whoami --agent $AGENT` — confirms identity, generates a name if not set.
 3. `bus status`
 4. `maw exec default -- bn show --help`

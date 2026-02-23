@@ -80,7 +80,15 @@ See `docs/contributor-guide.md` for:
 <!-- botbox:managed-start -->
 ## Botbox Workflow
 
-**New here?** Read [worker-loop.md](.agents/botbox/worker-loop.md) first — it covers the complete triage → start → work → finish cycle.
+### How to Make Changes
+
+1. **Create a bone** to track your work: `maw exec default -- bn create --title "..." --description "..."`
+2. **Create a workspace** for your changes: `maw ws create --random` — this gives you `ws/<name>/`
+3. **Edit files in your workspace** (`ws/<name>/`), never in `ws/default/`
+4. **Merge when done**: `maw ws merge <name> --destroy`
+5. **Close the bone**: `maw exec default -- bn done <id>`
+
+Do not create git branches manually — `maw ws create` handles branching for you. See [worker-loop.md](.agents/botbox/worker-loop.md) for the full triage → start → work → finish cycle.
 
 **All tools have `--help`** with usage examples. When unsure, run `<tool> --help` or `<tool> <command> --help`.
 
