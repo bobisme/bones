@@ -388,7 +388,36 @@ fn run_graph_item(
     Ok(())
 }
 
-/// Show the full project dependency graph summary.
+/// Collect all directed edges as `(source_id, target_id)` pairs, sorted.
+fn collect_edges(raw: &RawGraph) -> Vec<(String, String)> {
+    let mut edges: Vec<(String, String)> = raw
+        .graph
+        .edge_indices()
+        .filter_map(|eidx| {
+            let (src, tgt) = raw.graph.edge_endpoints(eidx)?;
+            let src_id = raw.graph.node_weight(src)?.clone();
+            let tgt_id = raw.graph.node_weight(tgt)?.clone();
+            Some((src_id, tgt_id))
+        })
+        .collect();
+    edges.sort();
+    edges
+}
+
+/// Truncate a string to `max_len` characters, adding "..." if truncated.
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+/// Show the full project directed dependency graph.
+///
+/// Renders all open items organized into topological layers with explicit
+/// dependency arrows. Items that are done/archived are excluded from the
+/// visual graph but still counted in the stats header.
 fn run_graph_summary(
     raw: &RawGraph,
     conn: &rusqlite::Connection,
@@ -401,90 +430,178 @@ fn run_graph_summary(
     // Find cycles
     let cycles = find_all_cycles(&raw.graph);
 
-    // Top items by out-degree (most blocker = bottlenecks)
-    let mut by_in_degree: Vec<(String, usize)> = raw
-        .graph
-        .node_indices()
-        .map(|idx| {
-            let id = raw.graph.node_weight(idx).cloned().unwrap_or_default();
-            let in_deg = raw
-                .graph
-                .neighbors_directed(idx, petgraph::Direction::Incoming)
-                .count();
-            (id, in_deg)
-        })
-        .filter(|(_, d)| *d > 0)
-        .collect();
-    by_in_degree.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    let bottlenecks: Vec<_> = by_in_degree.into_iter().take(5).collect();
+    // Collect all edges
+    let edges = collect_edges(raw);
 
-    // Top items by out-degree (most items blocked = high-value targets)
-    let mut by_out_degree: Vec<(String, usize)> = raw
-        .graph
-        .node_indices()
-        .map(|idx| {
-            let id = raw.graph.node_weight(idx).cloned().unwrap_or_default();
-            let out_deg = raw
-                .graph
-                .neighbors_directed(idx, petgraph::Direction::Outgoing)
-                .count();
-            (id, out_deg)
+    // Build the set of IDs that participate in at least one edge
+    let mut connected_ids: HashSet<String> = HashSet::new();
+    for (src, tgt) in &edges {
+        connected_ids.insert(src.clone());
+        connected_ids.insert(tgt.clone());
+    }
+
+    // Load metadata for all nodes
+    let all_ids: Vec<String> = raw.graph.node_weights().cloned().collect();
+    let meta = load_item_meta(conn, all_ids.into_iter());
+
+    // Filter to only open/doing items (not done/archived) for display
+    let open_connected: HashSet<String> = connected_ids
+        .iter()
+        .filter(|id| {
+            meta.get(*id)
+                .map(|m| m.state != "done" && m.state != "archived")
+                .unwrap_or(true) // include unknown items
         })
-        .filter(|(_, d)| *d > 0)
+        .cloned()
         .collect();
-    by_out_degree.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    let high_value: Vec<_> = by_out_degree.into_iter().take(5).collect();
+
+    // Filter edges to only those touching at least one open item
+    let open_edges: Vec<&(String, String)> = edges
+        .iter()
+        .filter(|(src, tgt)| open_connected.contains(src) || open_connected.contains(tgt))
+        .collect();
+
+    // Compute topological layers using the diagnostics module
+    use bones_triage::graph::diagnostics::topological_layers;
+    let layers = topological_layers(&raw.graph, None);
+
+    // Filter layers to only open connected items
+    let filtered_layers: Vec<Vec<String>> = layers
+        .iter()
+        .map(|layer| {
+            layer
+                .iter()
+                .filter(|id| open_connected.contains(*id))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .filter(|layer| !layer.is_empty())
+        .collect();
 
     if output.is_json() {
+        let mut nodes: Vec<serde_json::Value> = open_connected
+            .iter()
+            .map(|id| {
+                let m = meta.get(id);
+                json!({
+                    "id": id,
+                    "title": m.map(|m| m.title.as_str()).unwrap_or(""),
+                    "state": m.map(|m| m.state.as_str()).unwrap_or(""),
+                })
+            })
+            .collect();
+        nodes.sort_by(|a, b| {
+            a.get("id")
+                .and_then(|v| v.as_str())
+                .cmp(&b.get("id").and_then(|v| v.as_str()))
+        });
+
+        let edge_vals: Vec<serde_json::Value> = open_edges
+            .iter()
+            .map(|(src, tgt)| json!({"from": src, "to": tgt}))
+            .collect();
+
+        let layer_vals: Vec<Vec<&str>> = filtered_layers
+            .iter()
+            .map(|layer| layer.iter().map(String::as_str).collect())
+            .collect();
+
         let val = json!({
             "items": stats.node_count,
             "blocking_edges": stats.edge_count,
             "connected_components": stats.weakly_connected_component_count,
             "cycles": stats.cycle_count,
             "cycle_members": cycles,
-            "bottlenecks": bottlenecks.iter().map(|(id, deg)| json!({"id": id, "blocked_by_count": deg})).collect::<Vec<_>>(),
-            "high_value": high_value.iter().map(|(id, deg)| json!({"id": id, "blocks_count": deg})).collect::<Vec<_>>(),
             "density": stats.density,
+            "nodes": nodes,
+            "edges": edge_vals,
+            "layers": layer_vals,
         });
         render(output, &val, |_, _| Ok(()))?;
         return Ok(());
     }
 
-    // Human output
+    // Human output: directed dependency graph
     let mut out = String::new();
-    let _ = writeln!(out, "Project dependency graph");
-    let _ = writeln!(out, "  items:                {}", stats.node_count);
-    let _ = writeln!(out, "  blocking edges:       {}", stats.edge_count);
     let _ = writeln!(
         out,
-        "  connected components: {}",
-        stats.weakly_connected_component_count
+        "Dependency graph  ({} items, {} edges, {} components)",
+        stats.node_count, stats.edge_count, stats.weakly_connected_component_count
     );
-    let _ = writeln!(out, "  cycles:               {}", stats.cycle_count);
 
     if !cycles.is_empty() {
-        let _ = writeln!(out, "\n  ⚠ cycles detected:");
+        let _ = writeln!(out);
+        let _ = writeln!(out, "  ⚠ cycles:");
         for cycle in &cycles {
             let _ = writeln!(out, "    {}", cycle.join(" → "));
         }
     }
 
-    if !bottlenecks.is_empty() {
-        let _ = writeln!(out, "\n  bottlenecks (most blocked-by):");
-        for (id, deg) in &bottlenecks {
-            let _ = writeln!(out, "    {id} ({deg} incoming)");
+    if open_edges.is_empty() {
+        let _ = writeln!(out, "\n  (no blocking dependencies among open items)");
+        print!("{out}");
+        return Ok(());
+    }
+
+    // Render layered graph
+    let _ = writeln!(out);
+    for (layer_idx, layer) in filtered_layers.iter().enumerate() {
+        let _ = writeln!(out, "  layer {}:", layer_idx);
+        for id in layer {
+            let state_mark = meta.get(id).map(|m| m.display_state()).unwrap_or(" ");
+            let title = meta
+                .get(id)
+                .map(|m| truncate(&m.title, 50))
+                .unwrap_or_default();
+
+            // Show outgoing edges inline
+            let mut targets: Vec<&str> = open_edges
+                .iter()
+                .filter(|(src, _)| src == id)
+                .map(|(_, tgt)| tgt.as_str())
+                .collect();
+            targets.sort();
+
+            if targets.is_empty() {
+                let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
+            } else {
+                let arrow_str = targets.join(", ");
+                let _ = writeln!(
+                    out,
+                    "    [{state_mark}] {id} -- {title}  --> {arrow_str}"
+                );
+            }
         }
     }
 
-    if !high_value.is_empty() {
-        let _ = writeln!(out, "\n  high-value targets (unblocks most):");
-        for (id, deg) in &high_value {
-            let _ = writeln!(out, "    {id} (blocks {deg})");
+    // Also list any open connected items not in any layer (should be rare,
+    // happens with isolated cycles not reached by topological sort)
+    let layered_ids: HashSet<String> = filtered_layers
+        .iter()
+        .flat_map(|layer| layer.iter().cloned())
+        .collect();
+    let mut unlayered: Vec<&String> = open_connected
+        .iter()
+        .filter(|id| !layered_ids.contains(*id))
+        .collect();
+    unlayered.sort();
+    if !unlayered.is_empty() {
+        let _ = writeln!(out, "  unlayered (cycle members):");
+        for id in &unlayered {
+            let state_mark = meta.get(*id).map(|m| m.display_state()).unwrap_or(" ");
+            let title = meta
+                .get(*id)
+                .map(|m| truncate(&m.title, 50))
+                .unwrap_or_default();
+            let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
         }
     }
 
-    if stats.edge_count == 0 {
-        let _ = writeln!(out, "\n  (no blocking dependencies defined)");
+    // Edge list for completeness
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  edges:");
+    for (src, tgt) in &open_edges {
+        let _ = writeln!(out, "    {src} --> {tgt}");
     }
 
     print!("{out}");
@@ -660,6 +777,86 @@ mod tests {
         // Just check it doesn't panic/error
         let result = run_graph_summary(&raw, &conn, &args, OutputMode::Human);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn graph_summary_shows_directed_graph() {
+        use bones_core::db::migrations;
+        use rusqlite::{params, Connection};
+
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        migrations::migrate(&mut conn).expect("migrate");
+
+        for id in ["bn-001", "bn-002", "bn-003"] {
+            conn.execute(
+                "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, created_at_us, updated_at_us)
+                 VALUES (?1, ?1, 'task', 'open', 'default', 0, 1000, 1000)",
+                params![id],
+            )
+            .expect("insert item");
+        }
+
+        conn.execute(
+            "INSERT INTO item_dependencies (item_id, depends_on_item_id, link_type, created_at_us)
+             VALUES ('bn-002', 'bn-001', 'blocks', 1000)",
+            [],
+        )
+        .expect("insert dep");
+        conn.execute(
+            "INSERT INTO item_dependencies (item_id, depends_on_item_id, link_type, created_at_us)
+             VALUES ('bn-003', 'bn-002', 'blocks', 1000)",
+            [],
+        )
+        .expect("insert dep");
+
+        let raw = RawGraph::from_sqlite(&conn).expect("build graph");
+        let args = GraphArgs {
+            id: None,
+            down: false,
+            up: false,
+            depth: None,
+        };
+
+        let result = run_graph_summary(&raw, &conn, &args, OutputMode::Human);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn graph_summary_collect_edges_helper() {
+        use petgraph::graph::DiGraph;
+        use std::collections::HashMap as HM;
+
+        let mut graph = DiGraph::<String, ()>::new();
+        let a = graph.add_node("bn-aaa".into());
+        let b = graph.add_node("bn-bbb".into());
+        graph.add_edge(a, b, ());
+
+        let mut node_map = HM::new();
+        node_map.insert("bn-aaa".into(), a);
+        node_map.insert("bn-bbb".into(), b);
+
+        let raw = RawGraph {
+            graph,
+            node_map,
+            content_hash: "blake3:test".into(),
+        };
+
+        let edges = collect_edges(&raw);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0], ("bn-aaa".to_string(), "bn-bbb".to_string()));
+    }
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        let long = "a".repeat(60);
+        let result = truncate(&long, 50);
+        assert!(result.len() <= 50);
+        assert!(result.ends_with("..."));
     }
 
     /// Full integration: set up project, add deps, render graph.

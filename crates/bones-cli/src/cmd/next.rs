@@ -1,13 +1,15 @@
 use std::io::Write;
 use std::path::Path;
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde::Serialize;
 
 use bones_core::db::query::{self, ItemFilter, SortOrder};
+use bones_core::model::item::Urgency;
 use bones_triage::graph::RawGraph;
 use bones_triage::schedule::{
     WhittleConfig, assign_fallback, check_indexability, compute_whittle_indices,
+    find_urgent_chain_front,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -15,12 +17,27 @@ use std::collections::{HashMap, HashSet};
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
 use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 
+/// Scheduling mode for multi-agent assignments.
+#[derive(Clone, Copy, Debug, Default, ValueEnum, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScheduleMode {
+    /// Standard balanced scheduling (Whittle index / fallback).
+    #[default]
+    Balanced,
+    /// Seed first slots with urgent-chain prerequisites, then fill with balanced.
+    UrgentChain,
+}
+
 /// Arguments for `bn next`.
 #[derive(Args, Debug)]
 pub struct NextArgs {
     /// Number of parallel assignment slots to return.
     #[arg(value_name = "count", default_value_t = 1)]
     pub count: usize,
+
+    /// Scheduling mode for multi-slot assignments.
+    #[arg(long, value_enum, default_value_t = ScheduleMode::Balanced)]
+    pub mode: ScheduleMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +50,7 @@ struct NextPick {
 
 #[derive(Debug, Serialize)]
 struct NextAssignments {
+    mode: ScheduleMode,
     assignments: Vec<NextAssignment>,
 }
 
@@ -108,9 +126,12 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         );
     }
 
-    let assignments = multi_agent_assignments(&conn, &snapshot, agent_slots)?;
+    let assignments = multi_agent_assignments(&conn, &snapshot, agent_slots, args.mode)?;
 
-    let payload = NextAssignments { assignments };
+    let payload = NextAssignments {
+        mode: args.mode,
+        assignments,
+    };
     render_mode(
         output,
         &payload,
@@ -123,6 +144,7 @@ fn multi_agent_assignments(
     conn: &rusqlite::Connection,
     snapshot: &crate::cmd::triage_support::TriageSnapshot,
     agent_slots: usize,
+    mode: ScheduleMode,
 ) -> anyhow::Result<Vec<NextAssignment>> {
     let ranked_by_id: HashMap<&str, &RankedItem> = snapshot
         .unblocked_ranked
@@ -156,6 +178,50 @@ fn multi_agent_assignments(
 
     let graph = RawGraph::from_sqlite(conn)
         .map_err(|e| anyhow::anyhow!("failed to load dependency graph for scheduling: {e}"))?;
+
+    // --- Urgent-chain seeding (only in UrgentChain mode) ---
+    let mut assignments: Vec<NextAssignment> = Vec::new();
+    let mut assigned_ids: HashSet<String> = HashSet::new();
+
+    if matches!(mode, ScheduleMode::UrgentChain) {
+        let urgent_ids: HashSet<&str> = snapshot
+            .ranked
+            .iter()
+            .filter(|item| item.urgency == Urgency::Urgent)
+            .map(|item| item.id.as_str())
+            .collect();
+
+        let chain_result =
+            find_urgent_chain_front(&graph.graph, &scores, &unblocked_ids, &urgent_ids);
+
+        if chain_result.has_urgent_chain {
+            for chain_id in &chain_result.chain_front {
+                if assignments.len() >= agent_slots {
+                    break;
+                }
+                let Some(base) = ranked_by_id.get(chain_id.as_str()) else {
+                    continue;
+                };
+                assignments.push(NextAssignment {
+                    agent_slot: assignments.len() + 1,
+                    id: base.id.clone(),
+                    title: base.title.clone(),
+                    score: base.score,
+                    explanation: format!(
+                        "{} (urgent-chain: prerequisite of blocked urgent item)",
+                        base.explanation
+                    ),
+                });
+                assigned_ids.insert(base.id.clone());
+            }
+        }
+    }
+
+    if assignments.len() >= agent_slots {
+        return Ok(assignments);
+    }
+
+    // --- Standard scheduling for remaining slots ---
     let indexability = check_indexability(&graph.graph);
 
     if indexability.indexable {
@@ -167,9 +233,11 @@ fn multi_agent_assignments(
             &WhittleConfig::default(),
         );
 
-        let mut assignments = Vec::new();
         for item in whittle {
             if !unblocked_ids.contains(item.item_id.as_str()) {
+                continue;
+            }
+            if assigned_ids.contains(&item.item_id) {
                 continue;
             }
             let Some(base) = ranked_by_id.get(item.item_id.as_str()) else {
@@ -182,6 +250,7 @@ fn multi_agent_assignments(
                 score: base.score,
                 explanation: format!("{} (whittle={:.4})", base.explanation, item.index),
             });
+            assigned_ids.insert(base.id.clone());
             if assignments.len() >= agent_slots {
                 return Ok(assignments);
             }
@@ -195,21 +264,25 @@ fn multi_agent_assignments(
         .collect();
     let fallback = assign_fallback(&fallback_items, agent_slots, &scores, &[]);
 
-    let assignments = fallback
-        .into_iter()
-        .filter_map(|assignment| {
-            ranked_by_id
-                .get(assignment.item_id.as_str())
-                .map(|item| NextAssignment {
-                    agent_slot: assignment.agent_idx + 1,
-                    id: item.id.clone(),
-                    title: item.title.clone(),
-                    score: item.score,
-                    explanation: format!("{} (fallback-scheduler)", item.explanation),
-                })
-        })
-        .take(agent_slots)
-        .collect();
+    for assignment in fallback {
+        if assigned_ids.contains(&assignment.item_id) {
+            continue;
+        }
+        let Some(item) = ranked_by_id.get(assignment.item_id.as_str()) else {
+            continue;
+        };
+        assignments.push(NextAssignment {
+            agent_slot: assignments.len() + 1,
+            id: item.id.clone(),
+            title: item.title.clone(),
+            score: item.score,
+            explanation: format!("{} (fallback-scheduler)", item.explanation),
+        });
+        assigned_ids.insert(item.id.clone());
+        if assignments.len() >= agent_slots {
+            break;
+        }
+    }
 
     Ok(assignments)
 }

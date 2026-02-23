@@ -26,9 +26,10 @@ struct TriageRow {
 
 /// Execute `bn triage`.
 ///
-/// Produces four sections:
+/// Produces five sections:
 /// - Top Picks
-/// - Blockers
+/// - Actionable Blockers (ready items that unblock others)
+/// - Blocked Hubs (blocked items that also unblock others)
 /// - Quick Wins
 /// - Cycles
 pub fn run_triage(
@@ -56,18 +57,31 @@ pub fn run_triage(
 
     let top_picks: Vec<&RankedItem> = snapshot.unblocked_ranked.iter().take(5).collect();
 
-    let mut blockers: Vec<&RankedItem> = snapshot
+    let mut actionable_blockers: Vec<&RankedItem> = snapshot
         .ranked
         .iter()
-        .filter(|item| item.unblocks_active > 0)
+        .filter(|item| item.blocked_by_active == 0 && item.unblocks_active > 0)
         .collect();
-    blockers.sort_by(|a, b| {
+    actionable_blockers.sort_by(|a, b| {
         b.unblocks_active
             .cmp(&a.unblocks_active)
             .then_with(|| b.score.total_cmp(&a.score))
             .then_with(|| a.id.cmp(&b.id))
     });
-    blockers.truncate(5);
+    actionable_blockers.truncate(5);
+
+    let mut blocked_hubs: Vec<&RankedItem> = snapshot
+        .ranked
+        .iter()
+        .filter(|item| item.unblocks_active > 0 && item.blocked_by_active > 0)
+        .collect();
+    blocked_hubs.sort_by(|a, b| {
+        b.unblocks_active
+            .cmp(&a.unblocks_active)
+            .then_with(|| b.score.total_cmp(&a.score))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    blocked_hubs.truncate(5);
 
     let mut quick_wins: Vec<&RankedItem> = snapshot
         .unblocked_ranked
@@ -95,7 +109,8 @@ pub fn run_triage(
 
     let rows = build_rows(
         &top_picks,
-        &blockers,
+        &actionable_blockers,
+        &blocked_hubs,
         &quick_wins,
         &cycles,
         &title_map,
@@ -105,14 +120,15 @@ pub fn run_triage(
     render_mode(
         output,
         &rows,
-        |_, w| render_triage_text(w, &top_picks, &blockers, &quick_wins, &cycles),
-        |_, w| render_triage_human(w, &top_picks, &blockers, &quick_wins, &cycles),
+        |_, w| render_triage_text(w, &top_picks, &actionable_blockers, &blocked_hubs, &quick_wins, &cycles),
+        |_, w| render_triage_human(w, &top_picks, &actionable_blockers, &blocked_hubs, &quick_wins, &cycles),
     )
 }
 
 fn build_rows(
     top_picks: &[&RankedItem],
-    blockers: &[&RankedItem],
+    actionable_blockers: &[&RankedItem],
+    blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
     title_map: &HashMap<String, String>,
@@ -121,7 +137,8 @@ fn build_rows(
     let mut rows = Vec::new();
 
     push_rows(&mut rows, top_picks, "top_pick");
-    push_rows(&mut rows, blockers, "blocker");
+    push_rows(&mut rows, actionable_blockers, "actionable_blocker");
+    push_rows(&mut rows, blocked_hubs, "blocked_hub");
     push_rows(&mut rows, quick_wins, "quick_win");
 
     for cycle in cycles {
@@ -155,14 +172,17 @@ fn push_rows(rows: &mut Vec<TriageRow>, section_rows: &[&RankedItem], section: &
 fn render_triage_human(
     w: &mut dyn Write,
     top_picks: &[&RankedItem],
-    blockers: &[&RankedItem],
+    actionable_blockers: &[&RankedItem],
+    blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
 ) -> std::io::Result<()> {
     pretty_section(w, "Triage report")?;
     render_ranked_section(w, "Top Picks", top_picks)?;
     writeln!(w)?;
-    render_blocker_section(w, blockers)?;
+    render_actionable_blocker_section(w, actionable_blockers)?;
+    writeln!(w)?;
+    render_hub_section(w, blocked_hubs)?;
     writeln!(w)?;
     render_ranked_section(w, "Quick Wins", quick_wins)?;
     writeln!(w)?;
@@ -207,26 +227,56 @@ fn render_ranked_section(
     Ok(())
 }
 
-fn render_blocker_section(w: &mut dyn Write, blockers: &[&RankedItem]) -> std::io::Result<()> {
-    pretty_section(w, "Blockers")?;
+fn render_actionable_blocker_section(
+    w: &mut dyn Write,
+    items: &[&RankedItem],
+) -> std::io::Result<()> {
+    pretty_section(w, "Actionable Blockers")?;
 
-    if blockers.is_empty() {
+    if items.is_empty() {
         writeln!(w, "(none)")?;
         return Ok(());
     }
 
-    let rows: Vec<Vec<String>> = blockers
+    let rows: Vec<Vec<String>> = items
         .iter()
         .map(|item| {
             vec![
                 item.id.clone(),
-                item.unblocks_active.to_string(),
+                format!("ready; unblocks {}", item.unblocks_active),
                 format_score(item.score),
                 item.title.clone(),
             ]
         })
         .collect();
-    pretty_table(w, &["ID", "BLOCKS", "SCORE", "TITLE"], &rows)?;
+    pretty_table(w, &["ID", "STATUS", "SCORE", "TITLE"], &rows)?;
+
+    Ok(())
+}
+
+fn render_hub_section(w: &mut dyn Write, items: &[&RankedItem]) -> std::io::Result<()> {
+    pretty_section(w, "Blocked Hubs")?;
+
+    if items.is_empty() {
+        writeln!(w, "(none)")?;
+        return Ok(());
+    }
+
+    let rows: Vec<Vec<String>> = items
+        .iter()
+        .map(|item| {
+            vec![
+                item.id.clone(),
+                format!(
+                    "blocked by {}; unblocks {}",
+                    item.blocked_by_active, item.unblocks_active
+                ),
+                format_score(item.score),
+                item.title.clone(),
+            ]
+        })
+        .collect();
+    pretty_table(w, &["ID", "STATUS", "SCORE", "TITLE"], &rows)?;
 
     Ok(())
 }
@@ -234,11 +284,12 @@ fn render_blocker_section(w: &mut dyn Write, blockers: &[&RankedItem]) -> std::i
 fn render_triage_text(
     w: &mut dyn Write,
     top_picks: &[&RankedItem],
-    blockers: &[&RankedItem],
+    actionable_blockers: &[&RankedItem],
+    blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     cycles: &[Vec<String>],
 ) -> std::io::Result<()> {
-    writeln!(w, "SECTION\tID\tBLOCKS\tSCORE\tTITLE")?;
+    writeln!(w, "SECTION\tID\tSTATUS\tSCORE\tTITLE")?;
     for item in top_picks {
         writeln!(
             w,
@@ -248,11 +299,22 @@ fn render_triage_text(
             item.title.replace('\t', " ")
         )?;
     }
-    for item in blockers {
+    for item in actionable_blockers {
         writeln!(
             w,
-            "blocker\t{}\t{}\t{}\t{}",
+            "actionable_blocker\t{}\tready; unblocks {}\t{}\t{}",
             item.id,
+            item.unblocks_active,
+            format_score(item.score),
+            item.title.replace('\t', " ")
+        )?;
+    }
+    for item in blocked_hubs {
+        writeln!(
+            w,
+            "blocked_hub\t{}\tblocked by {}; unblocks {}\t{}\t{}",
+            item.id,
+            item.blocked_by_active,
             item.unblocks_active,
             format_score(item.score),
             item.title.replace('\t', " ")
@@ -278,7 +340,12 @@ fn render_triage_text(
             cycle.join(" -> ").replace('\t', " ")
         )?;
     }
-    if top_picks.is_empty() && blockers.is_empty() && quick_wins.is_empty() && cycles.is_empty() {
+    if top_picks.is_empty()
+        && actionable_blockers.is_empty()
+        && blocked_hubs.is_empty()
+        && quick_wins.is_empty()
+        && cycles.is_empty()
+    {
         writeln!(w, "advice  no-triage-items")?;
     }
     Ok(())
@@ -317,6 +384,20 @@ mod tests {
         }
     }
 
+    fn ranked_hub(id: &str, title: &str, score: f64) -> RankedItem {
+        RankedItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            size: Some("s".to_string()),
+            urgency: Urgency::Default,
+            score,
+            explanation: "test".to_string(),
+            blocked_by_active: 2,
+            unblocks_active: 3,
+            updated_at_us: 0,
+        }
+    }
+
     #[test]
     fn small_size_classifier_matches_expected_values() {
         assert!(is_small_size(Some("xxs")));
@@ -329,17 +410,20 @@ mod tests {
     #[test]
     fn build_rows_emits_expected_sections() {
         let top = vec![ranked("bn-top", "Top", 0.9)];
-        let blocker = vec![ranked("bn-block", "Block", 0.8)];
+        let actionable = vec![ranked("bn-block", "Block", 0.8)];
+        let hub = vec![ranked_hub("bn-hub", "Hub", 0.6)];
         let quick = vec![ranked("bn-quick", "Quick", 0.7)];
         let cycles = vec![vec!["bn-c1".to_string(), "bn-c2".to_string()]];
 
         let top_refs: Vec<&RankedItem> = top.iter().collect();
-        let blocker_refs: Vec<&RankedItem> = blocker.iter().collect();
+        let actionable_refs: Vec<&RankedItem> = actionable.iter().collect();
+        let hub_refs: Vec<&RankedItem> = hub.iter().collect();
         let quick_refs: Vec<&RankedItem> = quick.iter().collect();
 
         let title_map = HashMap::from([
             ("bn-top".to_string(), "Top".to_string()),
             ("bn-block".to_string(), "Block".to_string()),
+            ("bn-hub".to_string(), "Hub".to_string()),
             ("bn-quick".to_string(), "Quick".to_string()),
             ("bn-c1".to_string(), "Cycle One".to_string()),
             ("bn-c2".to_string(), "Cycle Two".to_string()),
@@ -347,6 +431,7 @@ mod tests {
         let score_map = HashMap::from([
             ("bn-top".to_string(), 0.9),
             ("bn-block".to_string(), 0.8),
+            ("bn-hub".to_string(), 0.6),
             ("bn-quick".to_string(), 0.7),
             ("bn-c1".to_string(), 0.1),
             ("bn-c2".to_string(), 0.2),
@@ -354,7 +439,8 @@ mod tests {
 
         let rows = build_rows(
             &top_refs,
-            &blocker_refs,
+            &actionable_refs,
+            &hub_refs,
             &quick_refs,
             &cycles,
             &title_map,
@@ -362,7 +448,8 @@ mod tests {
         );
 
         assert!(rows.iter().any(|row| row.section == "top_pick"));
-        assert!(rows.iter().any(|row| row.section == "blocker"));
+        assert!(rows.iter().any(|row| row.section == "actionable_blocker"));
+        assert!(rows.iter().any(|row| row.section == "blocked_hub"));
         assert!(rows.iter().any(|row| row.section == "quick_win"));
         assert!(rows.iter().any(|row| row.section == "cycle"));
     }
@@ -370,21 +457,98 @@ mod tests {
     #[test]
     fn render_triage_text_includes_table_headers() {
         let top = vec![ranked("bn-top", "Top item", 0.9)];
-        let blockers = vec![ranked("bn-block", "Block item", 0.8)];
+        let actionable = vec![ranked("bn-act", "Actionable item", 0.8)];
+        let hubs = vec![ranked_hub("bn-hub", "Hub item", 0.6)];
         let quick = vec![ranked("bn-quick", "Quick item", 0.7)];
-        let cycles = vec![vec!["bn-top".to_string(), "bn-block".to_string()]];
+        let cycles = vec![vec!["bn-top".to_string(), "bn-act".to_string()]];
 
         let top_refs: Vec<&RankedItem> = top.iter().collect();
-        let blocker_refs: Vec<&RankedItem> = blockers.iter().collect();
+        let actionable_refs: Vec<&RankedItem> = actionable.iter().collect();
+        let hub_refs: Vec<&RankedItem> = hubs.iter().collect();
         let quick_refs: Vec<&RankedItem> = quick.iter().collect();
 
         let mut buf = Vec::new();
-        render_triage_text(&mut buf, &top_refs, &blocker_refs, &quick_refs, &cycles)
-            .expect("render triage text");
+        render_triage_text(
+            &mut buf,
+            &top_refs,
+            &actionable_refs,
+            &hub_refs,
+            &quick_refs,
+            &cycles,
+        )
+        .expect("render triage text");
         let out = String::from_utf8(buf).expect("utf8");
 
-        assert!(out.contains("SECTION\tID\tBLOCKS\tSCORE\tTITLE"));
+        assert!(out.contains("SECTION\tID\tSTATUS\tSCORE\tTITLE"));
         assert!(out.contains("CYCLES\tINDEX\tPATH"));
         assert!(out.contains("top_pick\tbn-top\t-\t0.9000\tTop item"));
+    }
+
+    #[test]
+    fn actionable_blockers_separated_from_blocked_hubs() {
+        let actionable_item = ranked("bn-act", "Actionable", 0.9);
+        let hub_item = ranked_hub("bn-hub", "Hub", 0.7);
+
+        // Verify actionable blocker: blocked_by_active == 0, unblocks_active > 0
+        assert_eq!(actionable_item.blocked_by_active, 0);
+        assert!(actionable_item.unblocks_active > 0);
+
+        // Verify blocked hub: blocked_by_active > 0, unblocks_active > 0
+        assert!(hub_item.blocked_by_active > 0);
+        assert!(hub_item.unblocks_active > 0);
+
+        let actionable_vec = vec![actionable_item];
+        let hub_vec = vec![hub_item];
+        let empty: Vec<RankedItem> = vec![];
+
+        let actionable_refs: Vec<&RankedItem> = actionable_vec.iter().collect();
+        let hub_refs: Vec<&RankedItem> = hub_vec.iter().collect();
+        let empty_refs: Vec<&RankedItem> = empty.iter().collect();
+
+        let title_map = HashMap::from([
+            ("bn-act".to_string(), "Actionable".to_string()),
+            ("bn-hub".to_string(), "Hub".to_string()),
+        ]);
+        let score_map = HashMap::from([
+            ("bn-act".to_string(), 0.9),
+            ("bn-hub".to_string(), 0.7),
+        ]);
+
+        let rows = build_rows(
+            &empty_refs,
+            &actionable_refs,
+            &hub_refs,
+            &empty_refs,
+            &[],
+            &title_map,
+            &score_map,
+        );
+
+        let actionable_rows: Vec<_> =
+            rows.iter().filter(|r| r.section == "actionable_blocker").collect();
+        let hub_rows: Vec<_> = rows.iter().filter(|r| r.section == "blocked_hub").collect();
+
+        assert_eq!(actionable_rows.len(), 1);
+        assert_eq!(actionable_rows[0].id, "bn-act");
+        assert_eq!(hub_rows.len(), 1);
+        assert_eq!(hub_rows[0].id, "bn-hub");
+
+        // Verify human rendering includes both sections
+        let mut buf = Vec::new();
+        render_triage_human(
+            &mut buf,
+            &empty_refs,
+            &actionable_refs,
+            &hub_refs,
+            &empty_refs,
+            &[],
+        )
+        .expect("render human");
+        let out = String::from_utf8(buf).expect("utf8");
+
+        assert!(out.contains("Actionable Blockers"));
+        assert!(out.contains("Blocked Hubs"));
+        assert!(out.contains("ready; unblocks 1"));
+        assert!(out.contains("blocked by 2; unblocks 3"));
     }
 }

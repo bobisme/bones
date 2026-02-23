@@ -13,6 +13,7 @@ use bones_triage::schedule::{ScheduleRegime, check_indexability};
 use clap::Args;
 use serde::Serialize;
 
+use crate::cmd::triage_support::build_triage_snapshot;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 
@@ -114,7 +115,9 @@ pub fn run_plan(args: &PlanArgs, output: OutputMode, project_root: &Path) -> any
         let raw = RawGraph::from_sqlite(&conn)
             .map_err(|e| anyhow::anyhow!("failed to load dependency graph: {e}"))?;
         let scoped_graph = build_scoped_graph(&raw, &scoped_ids);
-        let layers = graph::topological_layers(&scoped_graph, None);
+        let mut layers = graph::topological_layers(&scoped_graph, None);
+        let score_map = build_score_map(&conn);
+        sort_layers_by_score(&mut layers, &score_map);
         let explanations = build_layer_explanations(&scoped_graph, &layers);
         let schedule_regime = derive_schedule_regime(&scoped_graph);
         (layers, explanations, Some(schedule_regime))
@@ -231,6 +234,41 @@ fn build_scoped_graph(raw: &RawGraph, scoped_ids: &BTreeSet<String>) -> graph::D
     }
 
     graph
+}
+
+/// Build a map of item_id -> composite triage score.
+/// Falls back to an empty map if triage snapshot computation fails.
+fn build_score_map(conn: &rusqlite::Connection) -> HashMap<String, f64> {
+    let now_us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as i64)
+        .unwrap_or(0);
+
+    match build_triage_snapshot(conn, now_us) {
+        Ok(snapshot) => snapshot
+            .ranked
+            .into_iter()
+            .map(|item| (item.id, item.score))
+            .collect(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Re-sort each layer by triage score descending, with ID ascending as tie-break.
+/// Items missing from the score map sort to the end.
+fn sort_layers_by_score(layers: &mut [Vec<String>], score_map: &HashMap<String, f64>) {
+    for layer in layers.iter_mut() {
+        layer.sort_by(|a, b| {
+            let sa = score_map.get(a);
+            let sb = score_map.get(b);
+            match (sa, sb) {
+                (Some(&sa), Some(&sb)) => sb.total_cmp(&sa).then_with(|| a.cmp(b)),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a.cmp(b),
+            }
+        });
+    }
 }
 
 fn render_plan_human(
@@ -368,6 +406,144 @@ mod tests {
         let rendered = String::from_utf8(out).expect("utf8");
         assert!(rendered.contains("Parallel execution plan"));
         assert!(rendered.contains("(no open items)"));
+    }
+
+    #[test]
+    fn intra_layer_score_ordering() {
+        // Items within the same layer should be sorted by score descending.
+        let mut layers = vec![vec![
+            "bn-low".to_string(),
+            "bn-high".to_string(),
+            "bn-mid".to_string(),
+        ]];
+        let scores: HashMap<String, f64> = HashMap::from([
+            ("bn-low".to_string(), 1.0),
+            ("bn-mid".to_string(), 5.0),
+            ("bn-high".to_string(), 10.0),
+        ]);
+
+        sort_layers_by_score(&mut layers, &scores);
+
+        assert_eq!(layers[0], vec!["bn-high", "bn-mid", "bn-low"]);
+    }
+
+    #[test]
+    fn tiebreak_determinism() {
+        // Items with equal scores should be ordered by ID ascending.
+        let mut layers = vec![vec![
+            "bn-charlie".to_string(),
+            "bn-alpha".to_string(),
+            "bn-bravo".to_string(),
+        ]];
+        let scores: HashMap<String, f64> = HashMap::from([
+            ("bn-alpha".to_string(), 5.0),
+            ("bn-bravo".to_string(), 5.0),
+            ("bn-charlie".to_string(), 5.0),
+        ]);
+
+        sort_layers_by_score(&mut layers, &scores);
+
+        assert_eq!(layers[0], vec!["bn-alpha", "bn-bravo", "bn-charlie"]);
+    }
+
+    #[test]
+    fn layer_membership_unchanged() {
+        // Sorting should not move items between layers.
+        let mut layers = vec![
+            vec!["bn-a".to_string(), "bn-b".to_string()],
+            vec!["bn-c".to_string(), "bn-d".to_string()],
+        ];
+        let scores: HashMap<String, f64> = HashMap::from([
+            ("bn-a".to_string(), 1.0),
+            ("bn-b".to_string(), 10.0),
+            ("bn-c".to_string(), 20.0),
+            ("bn-d".to_string(), 2.0),
+        ]);
+
+        sort_layers_by_score(&mut layers, &scores);
+
+        let layer0: BTreeSet<String> = layers[0].iter().cloned().collect();
+        let layer1: BTreeSet<String> = layers[1].iter().cloned().collect();
+        assert_eq!(
+            layer0,
+            BTreeSet::from(["bn-a".to_string(), "bn-b".to_string()])
+        );
+        assert_eq!(
+            layer1,
+            BTreeSet::from(["bn-c".to_string(), "bn-d".to_string()])
+        );
+    }
+
+    #[test]
+    fn missing_scores_sort_to_end() {
+        // Items not in the score map should appear after scored items.
+        let mut layers = vec![vec![
+            "bn-unknown".to_string(),
+            "bn-scored".to_string(),
+            "bn-also-unknown".to_string(),
+        ]];
+        let scores: HashMap<String, f64> =
+            HashMap::from([("bn-scored".to_string(), 5.0)]);
+
+        sort_layers_by_score(&mut layers, &scores);
+
+        assert_eq!(layers[0][0], "bn-scored");
+        // The two unknowns should be sorted by ID ascending at the end.
+        assert_eq!(layers[0][1], "bn-also-unknown");
+        assert_eq!(layers[0][2], "bn-unknown");
+    }
+
+    #[test]
+    fn urgent_ready_blocker_first_in_layer() {
+        // An urgent item with a high score should appear first in its layer.
+        let mut layers = vec![vec![
+            "bn-normal".to_string(),
+            "bn-urgent".to_string(),
+            "bn-low".to_string(),
+        ]];
+        let scores: HashMap<String, f64> = HashMap::from([
+            ("bn-normal".to_string(), 3.0),
+            ("bn-urgent".to_string(), 9.0),
+            ("bn-low".to_string(), 1.0),
+        ]);
+
+        sort_layers_by_score(&mut layers, &scores);
+
+        assert_eq!(layers[0][0], "bn-urgent");
+    }
+
+    #[test]
+    fn dependency_layers_preserved() {
+        // Sorting within layers must not alter the layer structure produced by
+        // topological_layers. Build a graph A -> B -> C, verify three layers,
+        // then sort - layer count and membership must remain.
+        let mut graph = graph::DiGraph::new();
+        let a = graph.add_node("bn-a".to_string());
+        let b = graph.add_node("bn-b".to_string());
+        let c = graph.add_node("bn-c".to_string());
+        graph.add_edge(a, b, ());
+        graph.add_edge(b, c, ());
+
+        let mut layers = graph::topological_layers(&graph, None);
+        assert_eq!(layers.len(), 3, "three-node chain should produce 3 layers");
+
+        let original_membership: Vec<BTreeSet<String>> = layers
+            .iter()
+            .map(|l| l.iter().cloned().collect())
+            .collect();
+
+        let scores: HashMap<String, f64> = HashMap::from([
+            ("bn-a".to_string(), 1.0),
+            ("bn-b".to_string(), 5.0),
+            ("bn-c".to_string(), 10.0),
+        ]);
+        sort_layers_by_score(&mut layers, &scores);
+
+        let sorted_membership: Vec<BTreeSet<String>> = layers
+            .iter()
+            .map(|l| l.iter().cloned().collect())
+            .collect();
+        assert_eq!(original_membership, sorted_membership);
     }
 
     #[test]

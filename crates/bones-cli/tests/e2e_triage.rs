@@ -374,7 +374,7 @@ fn triage_json_sections_are_known_values() {
     let json = run_json(dir.path(), &["triage"]);
     let rows = json.as_array().expect("triage --json must be an array");
 
-    let valid_sections = ["top_pick", "blocker", "quick_win", "cycle"];
+    let valid_sections = ["top_pick", "actionable_blocker", "blocked_hub", "quick_win", "cycle"];
     for row in rows {
         let section = row["section"].as_str().unwrap_or("");
         assert!(
@@ -394,7 +394,7 @@ fn triage_human_output_contains_sections() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Top Picks"))
-        .stdout(predicate::str::contains("Blockers"))
+        .stdout(predicate::str::contains("Actionable Blockers"))
         .stdout(predicate::str::contains("Quick Wins"))
         .stdout(predicate::str::contains("Cycles"));
 }

@@ -1244,15 +1244,16 @@ fn remove_char_at(value: &mut String, char_idx: usize) {
 
 fn with_cursor(value: &str, char_idx: usize) -> String {
     let mut out = String::new();
-    let mut inserted = false;
+    let mut replaced = false;
     for (idx, ch) in value.chars().enumerate() {
         if idx == char_idx {
             out.push('█');
-            inserted = true;
+            replaced = true;
+        } else {
+            out.push(ch);
         }
-        out.push(ch);
     }
-    if !inserted {
+    if !replaced {
         out.push('█');
     }
     out
@@ -2912,7 +2913,19 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     } else {
         modal.title.clone()
     };
-    frame.render_widget(Paragraph::new(title_text).block(title_block), chunks[0]);
+    // Scroll so cursor stays visible (1 inner row, width minus borders)
+    let title_inner_w = chunks[0].width.saturating_sub(2) as usize;
+    let title_col_offset = if modal.title_cursor >= title_inner_w {
+        (modal.title_cursor - title_inner_w + 1) as u16
+    } else {
+        0
+    };
+    frame.render_widget(
+        Paragraph::new(title_text)
+            .block(title_block)
+            .scroll((0, title_col_offset)),
+        chunks[0],
+    );
 
     let desc_focused = modal.focus == CreateField::Description;
     let desc_border = if desc_focused {
@@ -2937,19 +2950,34 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
             }
         })
         .collect();
+    // Scroll description so cursor row/col stay visible
+    let desc_inner_h = chunks[1].height.saturating_sub(2) as usize;
+    let desc_inner_w = chunks[1].width.saturating_sub(2) as usize;
+    let desc_row_offset = if desc_focused && modal.desc_row >= desc_inner_h {
+        (modal.desc_row - desc_inner_h + 1) as u16
+    } else {
+        0
+    };
+    let desc_col_offset = if desc_focused && modal.desc_col >= desc_inner_w {
+        (modal.desc_col - desc_inner_w + 1) as u16
+    } else {
+        0
+    };
     frame.render_widget(
-        Paragraph::new(desc_lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_set(border::ROUNDED)
-                .border_style(Style::default().fg(desc_border))
-                .title(desc_title)
-                .title_style(
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-        ),
+        Paragraph::new(desc_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .border_style(Style::default().fg(desc_border))
+                    .title(desc_title)
+                    .title_style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+            )
+            .scroll((desc_row_offset, desc_col_offset)),
         chunks[1],
     );
 
@@ -3097,14 +3125,29 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
             }
         })
         .collect();
+    // Scroll note so cursor row/col stay visible
+    let note_inner_h = chunks[1].height.saturating_sub(2) as usize;
+    let note_inner_w = chunks[1].width.saturating_sub(2) as usize;
+    let note_row_offset = if modal.row >= note_inner_h {
+        (modal.row - note_inner_h + 1) as u16
+    } else {
+        0
+    };
+    let note_col_offset = if modal.col >= note_inner_w {
+        (modal.col - note_inner_w + 1) as u16
+    } else {
+        0
+    };
     frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_set(border::ROUNDED)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Note "),
-        ),
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" Note "),
+            )
+            .scroll((note_row_offset, note_col_offset)),
         chunks[1],
     );
 
