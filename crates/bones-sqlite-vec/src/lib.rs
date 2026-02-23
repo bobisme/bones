@@ -4,14 +4,19 @@ const AUTO_ENABLE_ENV: &str = "BONES_SQLITE_VEC_AUTO";
 
 static REGISTRATION: OnceLock<Result<(), String>> = OnceLock::new();
 
+/// Register sqlite-vec as a process-wide `SQLite` auto extension.
+///
+/// # Errors
+///
+/// Returns an error when auto-registration is disabled via
+/// `BONES_SQLITE_VEC_AUTO` or when `sqlite3_auto_extension` fails.
 pub fn register_auto_extension() -> Result<(), String> {
     if matches!(
         std::env::var(AUTO_ENABLE_ENV).ok().as_deref(),
         Some("0" | "false" | "off")
     ) {
         return Err(format!(
-            "sqlite-vec auto-extension disabled by {}",
-            AUTO_ENABLE_ENV
+            "sqlite-vec auto-extension disabled by {AUTO_ENABLE_ENV}"
         ));
     }
 
