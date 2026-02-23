@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS items (
     search_labels TEXT NOT NULL DEFAULT '',
     created_at_us INTEGER NOT NULL,
     updated_at_us INTEGER NOT NULL,
-    CHECK (item_id LIKE 'bn-%')
+    CHECK (item_id GLOB '[a-z][a-z]-*' OR item_id GLOB '[a-z][a-z][a-z]-*')
 );
 
 CREATE TABLE IF NOT EXISTS item_labels (

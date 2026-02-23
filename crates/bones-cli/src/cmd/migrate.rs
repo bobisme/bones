@@ -521,20 +521,24 @@ fn append_event(
 }
 
 fn map_item_id(source_id: &str) -> Result<ItemId> {
-    if let Ok(existing) = ItemId::parse(source_id) {
-        return Ok(existing);
+    // If it's a valid terseid with a short prefix (2-3 chars), preserve it as-is.
+    // This handles bn-, bd-, and any custom prefix from beads_rust.
+    // We check prefix length to avoid false positives like "github-issue-42"
+    // which terseid would parse as prefix="github-issue" hash="42".
+    if let Ok(parsed) = terseid::parse_id(source_id) {
+        if parsed.prefix.len() <= 3 {
+            return Ok(ItemId::new_unchecked(source_id.trim().to_lowercase()));
+        }
     }
 
+    // Fallback for non-terseid source IDs: hash to generate a stable bn- ID.
     let mut hasher = Hasher::new();
     hasher.update(b"beads:");
     hasher.update(source_id.as_bytes());
     let hash = hasher.finalize();
     let hex = hash.to_hex().to_string();
 
-    // terseid requires at least one digit in the hash portion.
-    // Use the same "bn-b" + 8 hex chars scheme, but if none of the 8 hex
-    // chars contain a digit, replace the last char with a digit derived
-    // from the hash to satisfy the terseid constraint.
+    // terseid requires at least one digit in the hash portion (at 4+ chars).
     let suffix = &hex[..8];
     let mapped = if suffix.bytes().any(|b| b.is_ascii_digit()) {
         format!("bn-b{suffix}")
@@ -1184,18 +1188,24 @@ mod tests {
     }
 
     #[test]
-    fn item_id_mapping_handles_all_alpha_hex() {
-        // bd-3ni hashes to hex starting with "beaedaff" — all letters.
-        // The old code produced "bn-bbeaedaff" which has no digit and
-        // was rejected by terseid. Ensure this now succeeds.
+    fn item_id_mapping_preserves_bead_ids() {
+        // Bead IDs like bd-3ni are accepted directly, preserving provenance.
         let id = map_item_id("bd-3ni").expect("should produce valid id");
-        assert!(id.as_str().starts_with("bn-b"));
-        let hash_part = &id.as_str()[3..];
-        assert!(
-            hash_part.bytes().any(|b| b.is_ascii_digit()),
-            "mapped id must contain a digit: {}",
-            id
-        );
+        assert_eq!(id.as_str(), "bd-3ni");
+    }
+
+    #[test]
+    fn item_id_mapping_preserves_custom_prefix() {
+        // beads_rust supports custom prefixes — any valid terseid passes through.
+        let id = map_item_id("tk-a7x").expect("should produce valid id");
+        assert_eq!(id.as_str(), "tk-a7x");
+    }
+
+    #[test]
+    fn item_id_mapping_handles_non_terseid_source() {
+        // Non-terseid source IDs fall back to hash-based generation.
+        let id = map_item_id("github-issue-42").expect("should produce valid id");
+        assert!(id.as_str().starts_with("bn-"));
     }
 
     #[test]
@@ -1290,8 +1300,8 @@ mod tests {
         std::fs::write(
             &source,
             concat!(
-                "{\"id\":\"task-1\",\"title\":\"Child\",\"dependencies\":[{\"target_id\":\"epic-1\",\"type\":\"parent-child\"}]}\n",
-                "{\"id\":\"epic-1\",\"title\":\"Parent\",\"type\":\"epic\"}\n"
+                "{\"id\":\"bd-4kz\",\"title\":\"Child\",\"dependencies\":[{\"target_id\":\"bd-9mx\",\"type\":\"parent-child\"}]}\n",
+                "{\"id\":\"bd-9mx\",\"title\":\"Parent\",\"type\":\"epic\"}\n"
             ),
         )
         .expect("seed jsonl source");
@@ -1303,10 +1313,11 @@ mod tests {
 
         run_migrate(&args, OutputMode::Text, root).expect("migration should succeed");
 
-        let parent_id = map_item_id("epic-1").expect("mapped parent id").to_string();
-        let child_id = map_item_id("task-1").expect("mapped child id").to_string();
+        let parent_id = map_item_id("bd-9mx").expect("mapped parent id").to_string();
+        let child_id = map_item_id("bd-4kz").expect("mapped child id").to_string();
 
         let conn = Connection::open(root.join(".bones/bones.db")).expect("open projection");
+
         let db_parent: Option<String> = conn
             .query_row(
                 "SELECT parent_id FROM items WHERE item_id = ?1",

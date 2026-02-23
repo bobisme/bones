@@ -421,8 +421,9 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
         .map_err(|_| ParseError::InvalidEventType(fields[4].to_string()))?;
 
     // --- Field 6: item_id ---
-    let item_id =
-        ItemId::parse(fields[5]).map_err(|_| ParseError::InvalidItemId(fields[5].to_string()))?;
+    // Accept any valid terseid prefix (not just bn-) to support migrated IDs.
+    let item_id = ItemId::parse_any_prefix(fields[5])
+        .map_err(|_| ParseError::InvalidItemId(fields[5].to_string()))?;
 
     // --- Field 7: data (JSON) ---
     let data_json = fields[6];
@@ -956,7 +957,8 @@ mod tests {
 
     #[test]
     fn parse_invalid_item_id() {
-        let line = "1000\tagent\titc:A\t\titem.create\tnot-valid-id\t{}\tblake3:aaa";
+        // "noid" has no dash separator, so terseid rejects it
+        let line = "1000\tagent\titc:A\t\titem.create\tnoid\t{}\tblake3:aaa";
         let err = parse_line(line).expect_err("should fail");
         assert!(matches!(err, ParseError::InvalidItemId(_)));
     }

@@ -106,6 +106,22 @@ impl ItemId {
         Ok(Self(parsed.to_id_string()))
     }
 
+    /// Parse any valid terseid ID regardless of prefix.
+    ///
+    /// Used by the event parser and migration paths where IDs from external
+    /// systems (e.g. beads with custom prefixes) must be accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemIdError::InvalidFormat`] if the string is not a valid
+    /// terseid ID.
+    pub fn parse_any_prefix(raw: &str) -> Result<Self, ItemIdError> {
+        let normalized = raw.trim().to_lowercase();
+        let parsed =
+            parse_id(&normalized).map_err(|_| ItemIdError::InvalidFormat(raw.to_string()))?;
+        Ok(Self(parsed.to_id_string()))
+    }
+
     /// Return the raw ID string.
     #[must_use]
     pub fn as_str(&self) -> &str {

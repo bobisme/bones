@@ -440,6 +440,24 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_with_bd_prefix_events() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+
+        // Write events with bd- prefix (migrated bead IDs)
+        let create1 = make_create_event("bd-9mx", "Parent item", 1000);
+        let create2 = make_create_event("bd-4kz", "Child item", 1001);
+
+        append_event(&shard_mgr, &create1);
+        append_event(&shard_mgr, &create2);
+
+        let report = rebuild(&events_dir, &db_path).unwrap();
+        assert_eq!(report.event_count, 2, "should project 2 events with bd- prefix");
+        assert_eq!(report.item_count, 2, "should have 2 items with bd- prefix");
+    }
+
+    #[test]
     fn rebuild_performance_reasonable() {
         let (dir, shard_mgr) = setup_bones_dir();
         let db_path = dir.path().join("bones.db");
