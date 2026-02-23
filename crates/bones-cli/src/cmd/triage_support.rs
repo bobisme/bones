@@ -11,12 +11,12 @@ use bones_triage::metrics::pagerank::{
     pagerank_incremental,
 };
 use bones_triage::score::{CompositeWeights, MetricInputs, composite_score, normalize_metric};
-use petgraph::visit::EdgeRef;
+use petgraph::{Direction, visit::EdgeRef};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -24,6 +24,8 @@ use tracing::{debug, warn};
 
 const MICROS_PER_DAY: f64 = 86_400_000_000.0;
 const TOPOLOGY_BLEND_WEIGHT: f64 = 0.10;
+const URGENT_CHAIN_BLEND_WEIGHT: f64 = 0.35;
+const URGENT_CHAIN_DECAY: f64 = 0.60;
 const PAGERANK_CACHE_FILE: &str = "triage_pagerank.json";
 
 #[derive(Debug, Clone)]
@@ -81,6 +83,22 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         });
     }
 
+    let unresolved_blockers = load_unresolved_blocker_counts(conn)?;
+    let active_unblocks = load_active_unblocks_counts(conn)?;
+    let urgency_by_id: HashMap<String, Urgency> = active_items
+        .iter()
+        .map(|item| {
+            (
+                item.item_id.clone(),
+                item.urgency.parse::<Urgency>().unwrap_or(Urgency::Default),
+            )
+        })
+        .collect();
+    let urgent_chain_pressure =
+        compute_urgent_chain_pressure(&raw_graph, &urgency_by_id, &unresolved_blockers);
+    let direct_urgent_unblock_counts =
+        compute_direct_urgent_unblocks(&raw_graph, &urgency_by_id, &unresolved_blockers);
+
     let mut normalized = NormalizedGraph::from_raw(raw_graph);
     normalized.condensed = normalized.reduced.clone();
     let critical_path = compute_critical_path(&normalized);
@@ -131,9 +149,11 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
     let hub_norm = normalize_metric(&hub_raw);
     let auth_norm = normalize_metric(&auth_raw);
     let eigen_norm = normalize_metric(&eigen_raw);
-
-    let unresolved_blockers = load_unresolved_blocker_counts(conn)?;
-    let active_unblocks = load_active_unblocks_counts(conn)?;
+    let urgent_chain_raw: Vec<f64> = ids
+        .iter()
+        .map(|id| urgent_chain_pressure.get(id).copied().unwrap_or(0.0))
+        .collect();
+    let urgent_chain_norm = normalize_metric(&urgent_chain_raw);
     let weights = sampled_weights_from_feedback(seed_from_graph(normalized.content_hash()));
 
     let mut ranked: Vec<RankedItem> = active_items
@@ -159,19 +179,29 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             );
             let topology_signal = (hub_norm[idx] + auth_norm[idx] + eigen_norm[idx]) / 3.0;
             let score = if score.is_finite() {
-                score + (TOPOLOGY_BLEND_WEIGHT * topology_signal)
+                score
+                    + (TOPOLOGY_BLEND_WEIGHT * topology_signal)
+                    + (URGENT_CHAIN_BLEND_WEIGHT * urgent_chain_norm[idx])
             } else {
                 score
             };
 
             let blocked_by_active = unresolved_blockers.get(&item.item_id).copied().unwrap_or(0);
             let unblocks_active = active_unblocks.get(&item.item_id).copied().unwrap_or(0);
+            let urgent_unblocks_direct = direct_urgent_unblock_counts
+                .get(&item.item_id)
+                .copied()
+                .unwrap_or(0);
 
             let mut drivers = vec![
                 ("critical-path", weights.alpha * cp_norm[idx]),
                 ("pagerank", weights.beta * pr_norm[idx]),
                 ("betweenness", weights.gamma * bc_norm[idx]),
                 ("topology", TOPOLOGY_BLEND_WEIGHT * topology_signal),
+                (
+                    "urgent-chain",
+                    URGENT_CHAIN_BLEND_WEIGHT * urgent_chain_norm[idx],
+                ),
                 ("urgency", weights.delta * urgency_component(urgency)),
                 ("decay", weights.epsilon * decay_component(decay_days)),
             ];
@@ -183,6 +213,10 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             let explanation = if urgency == Urgency::Urgent {
                 format!(
                     "Urgent override is active. Secondary signals: {driver_a} and {driver_b}. PageRank: {pagerank_method}."
+                )
+            } else if blocked_by_active == 0 && urgent_unblocks_direct > 0 {
+                format!(
+                    "Driven by {driver_a} and {driver_b}. Prioritized because it unblocks {urgent_unblocks_direct} urgent dependency(ies). PageRank: {pagerank_method}."
                 )
             } else if blocked_by_active == 0 {
                 format!(
@@ -513,6 +547,110 @@ fn load_active_unblocks_counts(conn: &Connection) -> Result<HashMap<String, usiz
     Ok(map)
 }
 
+fn compute_urgent_chain_pressure(
+    raw_graph: &RawGraph,
+    urgency_by_id: &HashMap<String, Urgency>,
+    unresolved_blockers: &HashMap<String, usize>,
+) -> HashMap<String, f64> {
+    let mut pressure = HashMap::new();
+
+    for source_id in urgency_by_id.keys() {
+        let Some(source_idx) = raw_graph.node_index(source_id) else {
+            continue;
+        };
+
+        let mut visited = HashSet::new();
+        let mut queue: VecDeque<(petgraph::graph::NodeIndex, usize)> = raw_graph
+            .graph
+            .neighbors_directed(source_idx, Direction::Outgoing)
+            .map(|neighbor| (neighbor, 1))
+            .collect();
+
+        let mut source_pressure = 0.0;
+
+        while let Some((node, depth)) = queue.pop_front() {
+            if !visited.insert(node) {
+                continue;
+            }
+
+            if let Some(descendant_id) = raw_graph.item_id(node) {
+                let unresolved = unresolved_blockers.get(descendant_id).copied().unwrap_or(0);
+                if unresolved > 0 {
+                    let urgency = urgency_by_id
+                        .get(descendant_id)
+                        .copied()
+                        .unwrap_or(Urgency::Default);
+                    let seed = urgent_chain_seed(urgency);
+                    if seed > 0.0 {
+                        let attenuation = URGENT_CHAIN_DECAY.powi(depth.saturating_sub(1) as i32);
+                        source_pressure += seed * attenuation;
+                    }
+                }
+            }
+
+            for neighbor in raw_graph
+                .graph
+                .neighbors_directed(node, Direction::Outgoing)
+            {
+                if !visited.contains(&neighbor) {
+                    queue.push_back((neighbor, depth + 1));
+                }
+            }
+        }
+
+        pressure.insert(source_id.clone(), source_pressure);
+    }
+
+    pressure
+}
+
+fn compute_direct_urgent_unblocks(
+    raw_graph: &RawGraph,
+    urgency_by_id: &HashMap<String, Urgency>,
+    unresolved_blockers: &HashMap<String, usize>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+
+    for source_id in urgency_by_id.keys() {
+        let Some(source_idx) = raw_graph.node_index(source_id) else {
+            continue;
+        };
+
+        let mut count = 0usize;
+        for neighbor in raw_graph
+            .graph
+            .neighbors_directed(source_idx, Direction::Outgoing)
+        {
+            let Some(descendant_id) = raw_graph.item_id(neighbor) else {
+                continue;
+            };
+            let unresolved = unresolved_blockers.get(descendant_id).copied().unwrap_or(0);
+            if unresolved == 0 {
+                continue;
+            }
+
+            let urgency = urgency_by_id
+                .get(descendant_id)
+                .copied()
+                .unwrap_or(Urgency::Default);
+            if urgency == Urgency::Urgent {
+                count += 1;
+            }
+        }
+
+        counts.insert(source_id.clone(), count);
+    }
+
+    counts
+}
+
+fn urgent_chain_seed(urgency: Urgency) -> f64 {
+    match urgency {
+        Urgency::Urgent => 1.0,
+        Urgency::Default | Urgency::Punt => 0.0,
+    }
+}
+
 fn urgency_component(urgency: Urgency) -> f64 {
     match urgency {
         Urgency::Urgent => 1.0,
@@ -614,6 +752,122 @@ mod tests {
         assert_eq!(
             snapshot.ranked.first().map(|item| item.id.as_str()),
             Some("bn-urgent")
+        );
+    }
+
+    #[test]
+    fn urgent_chain_pressure_decays_with_distance() {
+        let conn = test_db();
+        insert_item(
+            &conn,
+            "bn-root",
+            "Root blocker",
+            "open",
+            "default",
+            None,
+            10,
+        );
+        insert_item(&conn, "bn-mid", "Mid blocker", "open", "default", None, 11);
+        insert_item(
+            &conn,
+            "bn-urgent",
+            "Urgent blocked",
+            "open",
+            "urgent",
+            None,
+            12,
+        );
+
+        insert_blocks_edge(&conn, "bn-root", "bn-mid");
+        insert_blocks_edge(&conn, "bn-mid", "bn-urgent");
+
+        let raw = RawGraph::from_sqlite(&conn).expect("raw graph");
+        let unresolved = load_unresolved_blocker_counts(&conn).expect("unresolved blockers");
+        let urgency_by_id = HashMap::from([
+            ("bn-root".to_string(), Urgency::Default),
+            ("bn-mid".to_string(), Urgency::Default),
+            ("bn-urgent".to_string(), Urgency::Urgent),
+        ]);
+
+        let pressure = compute_urgent_chain_pressure(&raw, &urgency_by_id, &unresolved);
+        let mid = pressure.get("bn-mid").copied().unwrap_or(0.0);
+        let root = pressure.get("bn-root").copied().unwrap_or(0.0);
+
+        assert!(
+            mid > root,
+            "direct urgent blocker should get stronger pressure"
+        );
+        assert!(root > 0.0, "ancestor should still receive decayed pressure");
+    }
+
+    #[test]
+    fn urgent_blocked_item_boosts_ready_blocker_priority() {
+        let conn = test_db();
+        insert_item(
+            &conn,
+            "bn-other",
+            "Other ready",
+            "open",
+            "default",
+            None,
+            100,
+        );
+        insert_item(
+            &conn,
+            "bn-blocker",
+            "Prerequisite",
+            "open",
+            "default",
+            None,
+            90,
+        );
+        insert_item(
+            &conn,
+            "bn-work",
+            "Downstream work",
+            "open",
+            "default",
+            None,
+            80,
+        );
+        insert_blocks_edge(&conn, "bn-blocker", "bn-work");
+
+        let baseline = build_triage_snapshot(&conn, 100).expect("baseline snapshot");
+        let baseline_score = baseline
+            .ranked
+            .iter()
+            .find(|item| item.id == "bn-blocker")
+            .map(|item| item.score)
+            .expect("baseline blocker score");
+
+        conn.execute(
+            "UPDATE items SET urgency = 'urgent' WHERE item_id = 'bn-work'",
+            [],
+        )
+        .expect("promote downstream work to urgent");
+
+        let boosted = build_triage_snapshot(&conn, 100).expect("boosted snapshot");
+        let boosted_blocker = boosted
+            .ranked
+            .iter()
+            .find(|item| item.id == "bn-blocker")
+            .expect("boosted blocker");
+
+        assert!(
+            boosted_blocker.score > baseline_score,
+            "expected blocker score to increase when blocked descendant is urgent"
+        );
+        assert_eq!(
+            boosted
+                .unblocked_ranked
+                .first()
+                .map(|item| item.id.as_str()),
+            Some("bn-blocker")
+        );
+        assert!(
+            boosted_blocker.explanation.contains("urgent dependency"),
+            "expected urgent-unblock explanation, got: {}",
+            boosted_blocker.explanation
         );
     }
 
