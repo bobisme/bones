@@ -42,12 +42,12 @@ impl Default for CompositeWeights<f64> {
 
 /// Compute composite priority score from normalized inputs.
 ///
-/// - Returns `f64::MAX` when urgency is `Urgent`.
+/// - Returns `f64::INFINITY` when urgency is `Urgent`.
 /// - Returns `f64::NEG_INFINITY` when urgency is `Punt`.
 #[must_use]
 pub fn composite_score(inputs: &MetricInputs, weights: &CompositeWeights) -> f64 {
     match inputs.urgency {
-        Urgency::Urgent => return f64::MAX,
+        Urgency::Urgent => return f64::INFINITY,
         Urgency::Punt => return f64::NEG_INFINITY,
         Urgency::Default => {}
     }
@@ -160,7 +160,7 @@ mod tests {
             &CompositeWeights::default(),
         );
 
-        assert_eq!(score, f64::MAX);
+        assert_eq!(score, f64::INFINITY);
     }
 
     #[test]

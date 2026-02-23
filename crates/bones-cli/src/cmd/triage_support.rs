@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use tracing::{debug, warn};
 
 const MICROS_PER_DAY: f64 = 86_400_000_000.0;
 const TOPOLOGY_BLEND_WEIGHT: f64 = 0.10;
@@ -238,6 +239,11 @@ fn compute_pagerank(conn: &Connection, normalized: &NormalizedGraph) -> PageRank
 
     if let Ok(Some(cache)) = load_pagerank_cache(&cache_path) {
         if cache.content_hash == normalized.content_hash() {
+            debug!(
+                nodes = normalized.condensed.node_count(),
+                edges = normalized.raw.edge_count(),
+                "PageRank cache hit (content hash match)"
+            );
             return PageRankResult {
                 scores: cache.scores,
                 iterations: 0,
@@ -249,6 +255,38 @@ fn compute_pagerank(conn: &Connection, normalized: &NormalizedGraph) -> PageRank
         let changes = diff_edge_changes(&cache.edges, &current_edges);
         if !changes.is_empty() {
             let result = pagerank_incremental(normalized, &cache.scores, &changes, &config);
+            match result.method {
+                PageRankMethod::Incremental => {
+                    debug!(
+                        nodes = normalized.condensed.node_count(),
+                        edges = normalized.raw.edge_count(),
+                        changes = changes.len(),
+                        iterations = result.iterations,
+                        converged = result.converged,
+                        "PageRank incremental update completed"
+                    );
+                }
+                PageRankMethod::IncrementalFallback => {
+                    warn!(
+                        nodes = normalized.condensed.node_count(),
+                        edges = normalized.raw.edge_count(),
+                        changes = changes.len(),
+                        iterations = result.iterations,
+                        converged = result.converged,
+                        "PageRank incremental fell back to full recompute"
+                    );
+                }
+                PageRankMethod::Full => {
+                    debug!(
+                        nodes = normalized.condensed.node_count(),
+                        edges = normalized.raw.edge_count(),
+                        changes = changes.len(),
+                        iterations = result.iterations,
+                        converged = result.converged,
+                        "PageRank incremental entrypoint returned full method"
+                    );
+                }
+            }
             let _ = save_pagerank_cache(
                 &cache_path,
                 &PageRankDiskCache {
@@ -263,6 +301,13 @@ fn compute_pagerank(conn: &Connection, normalized: &NormalizedGraph) -> PageRank
     }
 
     let result = pagerank(normalized, &config);
+    debug!(
+        nodes = normalized.condensed.node_count(),
+        edges = normalized.raw.edge_count(),
+        iterations = result.iterations,
+        converged = result.converged,
+        "PageRank full recompute completed"
+    );
     let _ = save_pagerank_cache(
         &cache_path,
         &PageRankDiskCache {

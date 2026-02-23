@@ -231,8 +231,10 @@ fn score_bounds(items: &[RankedItem]) -> (f64, f64) {
     let mut max_score = f64::NEG_INFINITY;
 
     for item in items {
-        min_score = min_score.min(item.score);
-        max_score = max_score.max(item.score);
+        if item.score.is_finite() {
+            min_score = min_score.min(item.score);
+            max_score = max_score.max(item.score);
+        }
     }
 
     if !min_score.is_finite() {

@@ -1,4 +1,4 @@
-//! PageRank with incremental (DF-PageRank) update and full-recompute fallback.
+//! PageRank with incremental (DF-PageRank-style) updates and guarded fallback.
 //!
 //! # Overview
 //!
@@ -16,15 +16,11 @@
 //!
 //! where `d` is the damping factor (default 0.85).
 //!
-//! # Incremental Update (DF-PageRank)
+//! # Incremental Update
 //!
-//! When few edges change, DF-PageRank (Desrosiers-Bhatt variant) recomputes
-//! only the affected nodes:
-//!
-//! 1. Identify "frontier" nodes: direct neighbors of changed edges.
-//! 2. Propagate rank deltas forward through the graph until convergence.
-//! 3. If the incremental result diverges from a spot-check, fall back to
-//!    full recompute.
+//! `pagerank_incremental` updates only a frontier/downstream closure and falls
+//! back to full recomputation when safety checks indicate global coupling or
+//! likely divergence.
 //!
 //! # Output
 //!
@@ -35,7 +31,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::{
     Direction,
-    visit::{IntoNodeIdentifiers, NodeIndexable},
+    visit::{EdgeRef, IntoNodeIdentifiers, NodeIndexable},
 };
 use tracing::{instrument, warn};
 
@@ -96,6 +92,16 @@ pub enum PageRankMethod {
     /// Incremental was attempted but fell back to full recompute.
     IncrementalFallback,
 }
+
+// ---------------------------------------------------------------------------
+// Incremental gating
+// ---------------------------------------------------------------------------
+
+// Empirical gate: incremental overhead tends to outweigh benefits on small graphs.
+const INCREMENTAL_MIN_NODES: usize = 300;
+const INCREMENTAL_MIN_EDGES: usize = 600;
+// If too many edges changed at once, full recompute is usually cheaper/safer.
+const INCREMENTAL_MAX_CHANGE_PCT: usize = 5;
 
 // ---------------------------------------------------------------------------
 // Full PageRank
@@ -219,11 +225,11 @@ pub enum EdgeChangeKind {
 
 /// Incrementally update PageRank after edge changes.
 ///
-/// Uses the DF-PageRank approach:
-/// 1. Identify frontier nodes (neighbors of changed edges).
-/// 2. Propagate rank deltas forward from frontier nodes.
-/// 3. After convergence, spot-check a sample of nodes against full recompute.
-/// 4. If spot-check fails (delta > tolerance * 10), fall back to full recompute.
+/// Strategy:
+/// 1. Build a frontier from changed edge endpoints.
+/// 2. Propagate to all downstream affected nodes.
+/// 3. Iterate only affected nodes while keeping unaffected inputs fixed.
+/// 4. Run cheap global safety checks; if unsafe, fall back to full recompute.
 ///
 /// # Arguments
 ///
@@ -234,69 +240,114 @@ pub enum EdgeChangeKind {
 ///
 /// # Returns
 ///
-/// A [`PageRankResult`] — method will be `Incremental` or `IncrementalFallback`.
+/// A [`PageRankResult`] with method set to `Incremental` or
+/// `IncrementalFallback`.
 #[must_use]
-#[instrument(skip(ng, previous, changes, config))]
+#[instrument(skip(ng, _previous, _changes, config))]
 pub fn pagerank_incremental(
     ng: &NormalizedGraph,
-    previous: &HashMap<String, f64>,
-    changes: &[EdgeChange],
+    _previous: &HashMap<String, f64>,
+    _changes: &[EdgeChange],
     config: &PageRankConfig,
 ) -> PageRankResult {
     let g = &ng.condensed;
     let n = g.node_count();
+    let edge_count = ng.raw.edge_count();
 
-    if n == 0 || changes.is_empty() {
-        // No changes — return previous scores as-is.
+    if n == 0 {
         return PageRankResult {
-            scores: previous.clone(),
+            scores: HashMap::new(),
+            iterations: 0,
+            converged: true,
+            method: PageRankMethod::Full,
+        };
+    }
+
+    if _changes.is_empty() {
+        if _previous.is_empty() {
+            return incremental_fallback(
+                ng,
+                config,
+                "DF-PageRank: empty changes without previous scores",
+            );
+        }
+        return PageRankResult {
+            scores: _previous.clone(),
             iterations: 0,
             converged: true,
             method: PageRankMethod::Incremental,
         };
     }
 
-    // Step 1: Identify frontier SCC nodes affected by changes.
-    let frontier = identify_frontier(ng, changes);
+    // Automatic gate: small graphs usually run faster with full recompute.
+    if n < INCREMENTAL_MIN_NODES && edge_count < INCREMENTAL_MIN_EDGES {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: graph below size gate, using full recompute",
+        );
+    }
 
+    // Automatic gate: large batch changes are effectively global updates.
+    let edge_count_nonzero = edge_count.max(1);
+    if _changes.len() * 100 > edge_count_nonzero * INCREMENTAL_MAX_CHANGE_PCT {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: change volume exceeds gate, using full recompute",
+        );
+    }
+
+    // Conservative guard: source dangling-status transitions induce global
+    // effects. Instead of immediate fallback, promote to global affected set.
+    let force_global_affected = has_possible_dangling_transition(ng, _changes);
+
+    let frontier = identify_frontier(ng, _changes);
     if frontier.is_empty() {
-        // No frontier nodes found (changes involve unknown items).
-        // Fall back to full recompute.
-        warn!("DF-PageRank: no frontier nodes found, falling back to full recompute");
-        let mut result = pagerank(ng, config);
-        result.method = PageRankMethod::IncrementalFallback;
-        return result;
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: no frontier nodes found, using full recompute",
+        );
     }
 
-    // If frontier is too large (> 50% of nodes), full recompute is cheaper.
-    if frontier.len() * 2 > n {
-        let mut result = pagerank(ng, config);
-        result.method = PageRankMethod::IncrementalFallback;
-        return result;
+    let mut affected = bfs_affected(ng, &frontier);
+    if force_global_affected {
+        affected = (0..n).collect();
+    }
+    if affected.is_empty() {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: empty affected set, using full recompute",
+        );
     }
 
-    // Step 2: Initialize ranks from previous scores.
+    // If affected is very large, full recompute is usually cheaper and safer.
+    if affected.len() * 5 > n * 4 {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: affected set exceeds 80%, using full recompute",
+        );
+    }
+
     let n_f64 = n as f64;
     let default_rank = 1.0 / n_f64;
+
     let mut ranks: Vec<f64> = (0..n)
         .map(|i| {
             let node = petgraph::graph::NodeIndex::new(i);
-            if let Some(scc) = g.node_weight(node) {
-                // Use the first member's previous score, or default.
-                scc.members
-                    .first()
-                    .and_then(|id| previous.get(id))
-                    .copied()
-                    .unwrap_or(default_rank)
-            } else {
-                default_rank
-            }
+            g.node_weight(node)
+                .and_then(|scc| scc.members.first())
+                .and_then(|id| _previous.get(id))
+                .copied()
+                .unwrap_or(default_rank)
         })
         .collect();
+    normalize_ranks(&mut ranks);
 
-    // Step 3: BFS propagation from frontier nodes.
-    let affected = bfs_affected(ng, &frontier);
-
+    let initial_dangling_sum = dangling_sum(g, &ranks);
     let base = (1.0 - config.damping) / n_f64;
     let mut new_ranks = ranks.clone();
     let mut iterations = 0;
@@ -305,12 +356,12 @@ pub fn pagerank_incremental(
     for _ in 0..config.max_iter {
         iterations += 1;
 
-        // Only recompute ranks for affected nodes.
+        let dangling_mass = config.damping * dangling_sum(g, &ranks) / n_f64;
+
         for &node_idx in &affected {
             let node = petgraph::graph::NodeIndex::new(node_idx);
-            let mut rank = base;
+            let mut rank = base + dangling_mass;
 
-            // Sum contributions from incoming neighbors.
             for pred in g.neighbors_directed(node, Direction::Incoming) {
                 let pred_idx = g.to_index(pred);
                 let out_degree = g.neighbors_directed(pred, Direction::Outgoing).count();
@@ -319,24 +370,14 @@ pub fn pagerank_incremental(
                 }
             }
 
-            // Handle dangling node contributions (simplified: add from all dangling nodes).
-            let dangling_sum: f64 = g
-                .node_identifiers()
-                .filter(|&n| g.neighbors_directed(n, Direction::Outgoing).count() == 0)
-                .map(|n| ranks[g.to_index(n)])
-                .sum();
-            rank += config.damping * dangling_sum / n_f64;
-
             new_ranks[node_idx] = rank;
         }
 
-        // Check convergence on affected nodes only.
         let delta: f64 = affected
             .iter()
             .map(|&i| (ranks[i] - new_ranks[i]).abs())
             .sum();
 
-        // Copy new_ranks back to ranks for affected nodes.
         for &i in &affected {
             ranks[i] = new_ranks[i];
         }
@@ -347,22 +388,24 @@ pub fn pagerank_incremental(
         }
     }
 
-    // Step 4: Stability check — compare against full recompute on a sample.
-    let full_result = pagerank(ng, config);
-    let max_divergence = check_divergence(&ranks, &full_result, ng);
-
-    if max_divergence > config.tolerance * 100.0 {
-        // Incremental diverged too much — use full recompute result.
-        warn!(
-            max_divergence,
-            "DF-PageRank stability check failed, using full recompute"
+    // Dangling-mass drift indicates global coupling that subset updates miss.
+    let final_dangling_sum = dangling_sum(g, &ranks);
+    if (final_dangling_sum - initial_dangling_sum).abs() > config.tolerance * 10.0 {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: dangling mass drift exceeded threshold, using full recompute",
         );
-        return PageRankResult {
-            scores: full_result.scores,
-            iterations: full_result.iterations,
-            converged: full_result.converged,
-            method: PageRankMethod::IncrementalFallback,
-        };
+    }
+
+    // One-step global residual check (cheap, O(E + N), no iterative full solve).
+    let residual = global_residual_max(ng, &ranks, config);
+    if residual > config.tolerance * 10.0 {
+        return incremental_fallback(
+            ng,
+            config,
+            "DF-PageRank: residual check failed, using full recompute",
+        );
     }
 
     let scores = distribute_scores(ng, &ranks);
@@ -426,34 +469,42 @@ fn distribute_scores(ng: &NormalizedGraph, ranks: &[f64]) -> HashMap<String, f64
     scores
 }
 
-/// Identify frontier SCC node indices affected by edge changes.
+fn incremental_fallback(
+    ng: &NormalizedGraph,
+    config: &PageRankConfig,
+    message: &str,
+) -> PageRankResult {
+    warn!("{message}");
+    let mut result = pagerank(ng, config);
+    result.method = PageRankMethod::IncrementalFallback;
+    result
+}
+
+/// Identify SCC frontier indices affected by edge changes.
 fn identify_frontier(ng: &NormalizedGraph, changes: &[EdgeChange]) -> HashSet<usize> {
     let g = &ng.condensed;
     let mut frontier = HashSet::new();
 
     for change in changes {
-        // Map item IDs to SCC node indices.
         if let Some(&from_scc) = ng.item_to_scc.get(&change.from) {
             frontier.insert(g.to_index(from_scc));
         }
+        // Needed for removals: `from -> to` may no longer exist in new graph,
+        // but `to` still receives changed incoming mass.
         if let Some(&to_scc) = ng.item_to_scc.get(&change.to) {
             frontier.insert(g.to_index(to_scc));
-            // Also include outgoing neighbors of target (rank flows forward).
-            for neighbor in g.neighbors_directed(to_scc, Direction::Outgoing) {
-                frontier.insert(g.to_index(neighbor));
-            }
         }
     }
 
     frontier
 }
 
-/// BFS from frontier nodes to find all downstream affected nodes.
+/// Collect downstream closure from frontier via outgoing BFS.
 fn bfs_affected(ng: &NormalizedGraph, frontier: &HashSet<usize>) -> Vec<usize> {
     let g = &ng.condensed;
-    let mut visited: HashSet<usize> = frontier.clone();
+    let mut visited = frontier.clone();
     let mut queue: VecDeque<usize> = frontier.iter().copied().collect();
-    let mut affected = Vec::new();
+    let mut affected = Vec::with_capacity(frontier.len());
 
     while let Some(idx) = queue.pop_front() {
         affected.push(idx);
@@ -469,30 +520,148 @@ fn bfs_affected(ng: &NormalizedGraph, frontier: &HashSet<usize>) -> Vec<usize> {
     affected
 }
 
-/// Check maximum divergence between incremental ranks and full recompute.
-fn check_divergence(
-    incremental_ranks: &[f64],
-    full_result: &PageRankResult,
-    ng: &NormalizedGraph,
-) -> f64 {
-    let g = &ng.condensed;
-    let mut max_div = 0.0_f64;
+/// Estimate whether any changed source may have toggled dangling status.
+fn has_possible_dangling_transition(ng: &NormalizedGraph, changes: &[EdgeChange]) -> bool {
+    let pair_counts_new = scc_pair_edge_counts(ng);
+    let mut pair_counts_old: HashMap<(usize, usize), isize> = pair_counts_new
+        .iter()
+        .map(|(pair, &count)| (*pair, count as isize))
+        .collect();
+    let mut touched_sources = HashSet::new();
 
-    for node in g.node_identifiers() {
-        let idx = g.to_index(node);
-        if let Some(scc) = g.node_weight(node) {
-            if let Some(&full_score) = scc
-                .members
-                .first()
-                .and_then(|id| full_result.scores.get(id))
-            {
-                let div = (incremental_ranks[idx] - full_score).abs();
-                max_div = max_div.max(div);
-            }
+    for change in changes {
+        let Some(&from_scc) = ng.item_to_scc.get(&change.from) else {
+            continue;
+        };
+        let Some(&to_scc) = ng.item_to_scc.get(&change.to) else {
+            continue;
+        };
+
+        let from_idx = ng.condensed.to_index(from_scc);
+        let to_idx = ng.condensed.to_index(to_scc);
+
+        // Intra-SCC edges do not contribute to condensed out-degree.
+        if from_idx == to_idx {
+            continue;
+        }
+
+        touched_sources.insert(from_idx);
+        let entry = pair_counts_old.entry((from_idx, to_idx)).or_insert(0);
+        match change.kind {
+            EdgeChangeKind::Added => *entry -= 1,
+            EdgeChangeKind::Removed => *entry += 1,
         }
     }
 
-    max_div
+    for source in touched_sources {
+        let new_out = pair_counts_new
+            .iter()
+            .filter(|((from, _), count)| *from == source && **count > 0)
+            .count();
+        let old_out = pair_counts_old
+            .iter()
+            .filter(|((from, _), count)| *from == source && **count > 0)
+            .count();
+
+        if (new_out == 0) != (old_out == 0) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Count item-level edges grouped by condensed SCC source/target pair.
+fn scc_pair_edge_counts(ng: &NormalizedGraph) -> HashMap<(usize, usize), usize> {
+    let mut counts = HashMap::new();
+
+    for edge in ng.raw.graph.edge_references() {
+        let Some(from_item) = ng.raw.graph.node_weight(edge.source()) else {
+            continue;
+        };
+        let Some(to_item) = ng.raw.graph.node_weight(edge.target()) else {
+            continue;
+        };
+        let Some(&from_scc) = ng.item_to_scc.get(from_item) else {
+            continue;
+        };
+        let Some(&to_scc) = ng.item_to_scc.get(to_item) else {
+            continue;
+        };
+
+        let from_idx = ng.condensed.to_index(from_scc);
+        let to_idx = ng.condensed.to_index(to_scc);
+
+        // Condensed out-degree ignores intra-SCC edges.
+        if from_idx == to_idx {
+            continue;
+        }
+
+        *counts.entry((from_idx, to_idx)).or_insert(0) += 1;
+    }
+
+    counts
+}
+
+fn dangling_sum(
+    g: &petgraph::graph::DiGraph<crate::graph::normalize::SccNode, ()>,
+    ranks: &[f64],
+) -> f64 {
+    g.node_identifiers()
+        .filter(|&n| g.neighbors_directed(n, Direction::Outgoing).count() == 0)
+        .map(|n| ranks[g.to_index(n)])
+        .sum()
+}
+
+fn normalize_ranks(ranks: &mut [f64]) {
+    let sum: f64 = ranks.iter().sum();
+    if !sum.is_finite() || sum <= 0.0 {
+        let n = ranks.len() as f64;
+        if n > 0.0 {
+            let uniform = 1.0 / n;
+            for r in ranks {
+                *r = uniform;
+            }
+        }
+        return;
+    }
+
+    for r in ranks {
+        *r /= sum;
+    }
+}
+
+/// One global power-iteration step residual against current ranks.
+fn global_residual_max(ng: &NormalizedGraph, ranks: &[f64], config: &PageRankConfig) -> f64 {
+    let g = &ng.condensed;
+    let n = g.node_count();
+    if n == 0 {
+        return 0.0;
+    }
+
+    let n_f64 = n as f64;
+    let base = (1.0 - config.damping) / n_f64;
+    let dangling_mass = config.damping * dangling_sum(g, ranks) / n_f64;
+    let mut probe = vec![base + dangling_mass; n];
+
+    for node in g.node_identifiers() {
+        let idx = g.to_index(node);
+        let out_degree = g.neighbors_directed(node, Direction::Outgoing).count();
+        if out_degree == 0 {
+            continue;
+        }
+        let share = config.damping * ranks[idx] / out_degree as f64;
+        for neighbor in g.neighbors_directed(node, Direction::Outgoing) {
+            let nidx = g.to_index(neighbor);
+            probe[nidx] += share;
+        }
+    }
+
+    probe
+        .iter()
+        .zip(ranks.iter())
+        .map(|(new, old)| (new - old).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +716,39 @@ mod tests {
             let ia = node_map[*a];
             let ib = node_map[*b];
             graph.add_edge(ia, ib, ());
+        }
+
+        let raw = RawGraph {
+            graph,
+            node_map,
+            content_hash: "blake3:test".to_string(),
+        };
+
+        NormalizedGraph::from_raw(raw)
+    }
+
+    fn make_chain_normalized(n: usize, extras: &[(usize, usize)]) -> NormalizedGraph {
+        let mut graph = DiGraph::<String, ()>::new();
+        let mut node_map = HashMap::new();
+
+        for i in 0..n {
+            let id = format!("n{i}");
+            let idx = graph.add_node(id.clone());
+            node_map.insert(id, idx);
+        }
+
+        for i in 0..n.saturating_sub(1) {
+            let a = node_map[&format!("n{i}")];
+            let b = node_map[&format!("n{}", i + 1)];
+            graph.add_edge(a, b, ());
+        }
+
+        for (from, to) in extras {
+            let a = node_map[&format!("n{from}")];
+            let b = node_map[&format!("n{to}")];
+            if !graph.contains_edge(a, b) {
+                graph.add_edge(a, b, ());
+            }
         }
 
         let raw = RawGraph {
@@ -857,6 +1059,70 @@ mod tests {
 
         let result = pagerank_incremental(&ng, &prev, &changes, &default_config());
         assert_eq!(result.method, PageRankMethod::IncrementalFallback);
+    }
+
+    #[test]
+    fn incremental_small_graph_gate_falls_back() {
+        let ng_old = make_chain_normalized(20, &[]);
+        let prev = pagerank(&ng_old, &default_config());
+
+        let ng_new = make_chain_normalized(20, &[(0, 10)]);
+        let changes = vec![EdgeChange {
+            from: "n0".to_string(),
+            to: "n10".to_string(),
+            kind: EdgeChangeKind::Added,
+        }];
+
+        let result = pagerank_incremental(&ng_new, &prev.scores, &changes, &default_config());
+        assert_eq!(result.method, PageRankMethod::IncrementalFallback);
+    }
+
+    #[test]
+    fn incremental_change_volume_gate_falls_back() {
+        let ng_old = make_chain_normalized(350, &[]);
+        let prev = pagerank(&ng_old, &default_config());
+
+        let extras: Vec<(usize, usize)> = (0..30).map(|i| (i, i + 2)).collect();
+        let ng_new = make_chain_normalized(350, &extras);
+        let changes: Vec<EdgeChange> = extras
+            .iter()
+            .map(|(from, to)| EdgeChange {
+                from: format!("n{from}"),
+                to: format!("n{to}"),
+                kind: EdgeChangeKind::Added,
+            })
+            .collect();
+
+        let result = pagerank_incremental(&ng_new, &prev.scores, &changes, &default_config());
+        assert_eq!(result.method, PageRankMethod::IncrementalFallback);
+    }
+
+    #[test]
+    fn dangling_transition_heuristic_ignores_parallel_member_addition() {
+        // SCC {A, B} already has outgoing mass to C via A -> C.
+        // Adding B -> C should not imply dangling-status transition.
+        let ng_new = make_normalized(&[("A", "B"), ("B", "A"), ("A", "C"), ("B", "C")]);
+        let changes = vec![EdgeChange {
+            from: "B".to_string(),
+            to: "C".to_string(),
+            kind: EdgeChangeKind::Added,
+        }];
+
+        assert!(!has_possible_dangling_transition(&ng_new, &changes));
+    }
+
+    #[test]
+    fn dangling_transition_heuristic_detects_first_outgoing_edge() {
+        // SCC {A, B} had no outgoing edges before; adding one should be treated
+        // as a possible dangling-status transition.
+        let ng_new = make_normalized(&[("A", "B"), ("B", "A"), ("B", "C")]);
+        let changes = vec![EdgeChange {
+            from: "B".to_string(),
+            to: "C".to_string(),
+            kind: EdgeChangeKind::Added,
+        }];
+
+        assert!(has_possible_dangling_transition(&ng_new, &changes));
     }
 
     // -----------------------------------------------------------------------

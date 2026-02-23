@@ -32,8 +32,8 @@ impl SpectralSparsifier {
             let v = node_map[&edge.target()];
             if u != v {
                 // Symmetrized
-                adjacency[(u, v)] = 1.0;
-                adjacency[(v, u)] = 1.0;
+                adjacency[(u, v)] += 1.0;
+                adjacency[(v, u)] += 1.0;
                 edges.push((u, v));
             }
         }

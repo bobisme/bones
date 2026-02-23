@@ -851,8 +851,9 @@ fn incremental_sum_preserved_after_mutation() {
 // Instead we:
 //   1. Measure time for 50 full recomputes on random graphs.
 //   2. Measure time for 50 incremental updates on the same graphs.
-//   3. Print the ratio and assert it is finite and positive.
-//   4. Assert ratio > 0 (incremental should be at least plausibly a valid option).
+//   3. Print method distribution (Incremental / IncrementalFallback / Full).
+//   4. Print the ratio and assert it is finite and positive.
+//   5. Assert ratio > 0 (incremental should be at least plausibly a valid option).
 //
 // In practice, incremental often runs faster when graphs are large, because
 // it only propagates through the frontier.  However on small graphs the
@@ -906,8 +907,16 @@ fn performance_incremental_vs_full_timing() {
     // Time incremental updates on mutated graphs.
     let t_inc_start = Instant::now();
     let mut inc_results_count = 0usize;
+    let mut method_incremental = 0usize;
+    let mut method_fallback = 0usize;
+    let mut method_full = 0usize;
     for (i, (mutated, changes)) in mutated_graphs.iter().enumerate() {
-        let _ = pagerank_incremental(mutated, &full_scores[i], changes, &config);
+        let result = pagerank_incremental(mutated, &full_scores[i], changes, &config);
+        match result.method {
+            PageRankMethod::Incremental => method_incremental += 1,
+            PageRankMethod::IncrementalFallback => method_fallback += 1,
+            PageRankMethod::Full => method_full += 1,
+        }
         inc_results_count += 1;
     }
     let t_inc = t_inc_start.elapsed();
@@ -930,9 +939,12 @@ fn performance_incremental_vs_full_timing() {
 
     println!(
         "Performance ({N} graphs, {nodes} nodes, {edges} edges each):\n  \
+         Methods: incremental={method_incremental}, fallback={method_fallback}, full={method_full} \
+         (fallback_rate={:.1}%)\n  \
          Full recompute: {full_us}µs total ({:.1}µs/graph)\n  \
          Incremental:    {inc_us}µs total ({:.1}µs/graph)\n  \
          Ratio (full/inc): {ratio:.2}x",
+        100.0 * method_fallback as f64 / N as f64,
         full_us as f64 / N as f64,
         inc_us as f64 / N as f64,
         nodes = params.nodes,

@@ -9,7 +9,7 @@ where
     let n = graph.node_count();
     let m = graph.edge_count();
 
-    if n > 500 || m > 2000 {
+    if n > 2000 || m > 5000 {
         return Err(anyhow::anyhow!(
             "Graph too large for homology calculation (nodes={}, edges={})",
             n,
@@ -63,7 +63,7 @@ where
         return Ok((betti_0, dim_ker_d1));
     }
 
-    if t > 5000 {
+    if t > 50000 {
         return Err(anyhow::anyhow!(
             "Too many triangles for homology calculation ({})",
             t
