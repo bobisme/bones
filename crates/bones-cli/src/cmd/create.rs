@@ -4,6 +4,7 @@
 //! shard, projects it into the SQLite database, and outputs the result.
 
 use crate::agent;
+use crate::cmd::dup::build_fts_query;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
@@ -334,48 +335,55 @@ pub fn run_create(
                     petgraph::graph::DiGraph::new()
                 });
 
-            // Run duplicate detection
-            match find_duplicates_with_model(
-                &args.title,
-                &conn,
-                &dependency_graph,
-                &search_config,
-                semantic_model.as_ref(),
-                10,
-            ) {
-                Ok(candidates) => {
-                    if !candidates.is_empty() {
-                        // Convert to DuplicateMatch for output
-                        for candidate in &candidates {
-                            duplicate_matches.push(DuplicateMatch {
-                                item_id: candidate.item_id.clone(),
-                                score: candidate.composite_score,
-                                classification: format!("{:?}", candidate.risk),
-                            });
-                        }
+            let duplicate_query = build_fts_query(&args.title, description.as_deref());
+            if !duplicate_query.is_empty() {
+                // Run duplicate detection
+                match find_duplicates_with_model(
+                    &duplicate_query,
+                    &conn,
+                    &dependency_graph,
+                    &search_config,
+                    semantic_model.as_ref(),
+                    10,
+                ) {
+                    Ok(candidates) => {
+                        if !candidates.is_empty() {
+                            // Convert to DuplicateMatch for output
+                            for candidate in &candidates {
+                                duplicate_matches.push(DuplicateMatch {
+                                    item_id: candidate.item_id.clone(),
+                                    score: candidate.composite_score,
+                                    classification: format!("{:?}", candidate.risk),
+                                });
+                            }
 
-                        // In interactive mode, warn user
-                        if output == OutputMode::Human {
-                            eprintln!(
-                                "⚠ Warning: {} potential duplicate(s) found",
-                                candidates.len()
-                            );
-                            for (i, cand) in candidates.iter().enumerate().take(3) {
+                            // In interactive mode, warn user
+                            if output == OutputMode::Human {
                                 eprintln!(
-                                    "  {}. {} (score: {:.2}, {})",
-                                    i + 1,
-                                    cand.item_id,
-                                    cand.composite_score,
-                                    format!("{:?}", cand.risk)
+                                    "⚠ Warning: {} potential duplicate(s) found",
+                                    candidates.len()
                                 );
+                                for (i, cand) in candidates.iter().enumerate().take(3) {
+                                    eprintln!(
+                                        "  {}. {} (score: {:.2}, {})",
+                                        i + 1,
+                                        cand.item_id,
+                                        cand.composite_score,
+                                        format!("{:?}", cand.risk)
+                                    );
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        // Log error but don't block creation
+                        tracing::warn!("duplicate check failed: {}", e);
+                    }
                 }
-                Err(e) => {
-                    // Log error but don't block creation
-                    tracing::warn!("duplicate check failed: {}", e);
-                }
+            } else {
+                tracing::debug!(
+                    "duplicate check skipped: no usable lexical tokens from title/description"
+                );
             }
         }
     }
