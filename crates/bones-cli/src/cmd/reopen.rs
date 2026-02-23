@@ -113,10 +113,6 @@ fn run_reopen_single(
         State::Done | State::Archived => {}
     }
 
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
     let mut extra = BTreeMap::new();
     extra.insert("reopen".to_string(), serde_json::Value::Bool(true));
 
@@ -127,7 +123,7 @@ fn run_reopen_single(
     };
 
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -137,14 +133,29 @@ fn run_reopen_single(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    let line = writer::write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+        assign_next_itc(project_root, &mut event)?;
+
+        let line = writer::write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
 
     let projector = project::Projector::new(conn);
     if let Err(e) = projector.project_event(&event) {

@@ -482,6 +482,76 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
     })))
 }
 
+/// Streaming event parser.
+///
+/// Wraps an iterator of lines and yields successfully parsed events,
+/// handling version detection and migrations automatically.
+pub struct EventParser<I> {
+    lines: I,
+    version_checked: bool,
+    shard_version: u32,
+    line_no: usize,
+}
+
+impl<I> EventParser<I>
+where
+    I: Iterator<Item = String>,
+{
+    /// Create a new streaming parser from a line iterator.
+    pub fn new(lines: I) -> Self {
+        Self {
+            lines,
+            version_checked: false,
+            shard_version: CURRENT_VERSION,
+            line_no: 0,
+        }
+    }
+}
+
+impl<I> Iterator for EventParser<I>
+where
+    I: Iterator<Item = String>,
+{
+    type Item = Result<Event, (usize, ParseError)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let line = self.lines.next()?;
+            self.line_no += 1;
+
+            if !self.version_checked && line.trim_start().starts_with(HEADER_PREFIX) {
+                self.version_checked = true;
+                match detect_version(&line) {
+                    Ok(v) => self.shard_version = v,
+                    Err(msg) => return Some(Err((self.line_no, ParseError::VersionMismatch(msg)))),
+                }
+                continue;
+            }
+
+            match parse_line(&line) {
+                Ok(ParsedLine::Event(event)) => {
+                    match migrate_event(*event, self.shard_version) {
+                        Ok(migrated) => return Some(Ok(migrated)),
+                        Err(e) => {
+                            return Some(Err((self.line_no, ParseError::VersionMismatch(e.to_string()))));
+                        }
+                    }
+                }
+                Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => continue,
+                Err(ParseError::InvalidEventType(raw)) => {
+                    warn!(
+                        line = self.line_no,
+                        event_type = %raw,
+                        "skipping line with unknown event type (forward-compatibility)"
+                    );
+                    continue;
+                }
+                Err(e) => return Some(Err((self.line_no, e))),
+            }
+        }
+    }
+}
+
 /// Parse multiple TSJSON lines, skipping comments and blanks.
 ///
 /// Returns a `Vec` of successfully parsed events. Stops at the first error,
@@ -500,45 +570,9 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
 /// (excluding unknown event types, which are warned and skipped).
 /// Line numbers are 1-indexed.
 pub fn parse_lines(input: &str) -> Result<Vec<Event>, (usize, ParseError)> {
-    let mut events = Vec::new();
-    let mut version_checked = false;
-    let mut shard_version = CURRENT_VERSION;
-
-    for (i, line) in input.lines().enumerate() {
-        let line_no = i + 1;
-
-        // Version check: the first comment line that matches the header
-        // pattern triggers version validation.
-        if !version_checked && line.trim_start().starts_with(HEADER_PREFIX) {
-            version_checked = true;
-            match detect_version(line) {
-                Ok(v) => shard_version = v,
-                Err(msg) => return Err((line_no, ParseError::VersionMismatch(msg))),
-            }
-            continue; // header line itself is not an event
-        }
-
-        match parse_line(line) {
-            Ok(ParsedLine::Event(event)) => {
-                let event = migrate_event(*event, shard_version)
-                    .map_err(|e| (line_no, ParseError::VersionMismatch(e.to_string())))?;
-                events.push(event);
-            }
-            Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => {}
-            // Forward-compatible: unknown event types are skipped with a
-            // warning.  This allows newer event types to be added without
-            // breaking older readers (no format version bump needed).
-            Err(ParseError::InvalidEventType(raw)) => {
-                warn!(
-                    line = line_no,
-                    event_type = %raw,
-                    "skipping line with unknown event type (forward-compatibility)"
-                );
-            }
-            Err(e) => return Err((line_no, e)),
-        }
-    }
-    Ok(events)
+    let lines = input.lines().map(String::from);
+    let parser = EventParser::new(lines);
+    parser.collect()
 }
 
 // ---------------------------------------------------------------------------

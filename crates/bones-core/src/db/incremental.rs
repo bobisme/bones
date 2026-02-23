@@ -29,12 +29,13 @@
 
 use std::path::Path;
 use std::time::Instant;
+use std::io;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use crate::db::{migrations, project, query, rebuild};
-use crate::event::parser::parse_lines;
+use crate::event::Event;
 use crate::shard::ShardManager;
 
 // ---------------------------------------------------------------------------
@@ -127,9 +128,7 @@ pub fn incremental_apply(
         return do_full_rebuild(events_dir, db_path, start, &reason);
     }
 
-    // Read shard content starting from the cursor position.
-    // Sealed shards that end before `byte_offset` are stat(2)'d but not
-    // read, bounding memory use to new/unseen events.
+    // 6. Read and replay new events in streaming batches
     let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
     let shards = shard_mgr
@@ -139,14 +138,8 @@ pub fn incremental_apply(
 
     let offset = usize::try_from(byte_offset).unwrap_or(0);
 
-    let (new_content, content_len) = shard_mgr
-        .replay_from_offset(offset)
-        .map_err(|e| anyhow::anyhow!("replay shards from offset: {e}"))?;
-
     // Validate cursor hash: it must appear in the tail of already-processed
-    // content (the 512 bytes just before the cursor offset).  Since we only
-    // loaded content *after* the cursor, we read a small window from the
-    // shard directly.
+    // content (the 512 bytes just before the cursor offset).
     if let Some(ref hash) = last_hash {
         let tail_ok = validate_cursor_hash_at_offset(&shard_mgr, offset, hash).unwrap_or(false);
         if !tail_ok {
@@ -160,33 +153,16 @@ pub fn incremental_apply(
         }
     }
 
+    let mut line_iter = shard_mgr
+        .replay_lines_from_offset(offset)
+        .map_err(|e| anyhow::anyhow!("open shard line iterator: {e}"))?
+        .peekable();
+
     // If there's no new content, we're up to date
-    if new_content.is_empty() {
+    if line_iter.peek().is_none() {
         return Ok(ApplyReport {
             events_applied: 0,
-            shards_scanned: shards_scanned,
-            full_rebuild_triggered: false,
-            full_rebuild_reason: None,
-            elapsed: start.elapsed(),
-        });
-    }
-
-    // `new_content` already starts at the cursor position.
-
-    // Parse only the new events
-    let events = parse_lines(&new_content).map_err(|(line_num, e)| {
-        anyhow::anyhow!("parse error at line {line_num} (offset {offset}): {e}")
-    })?;
-
-    if events.is_empty() {
-        // Only comments/blanks after the cursor — still update offset
-        let new_offset = i64::try_from(content_len).unwrap_or(i64::MAX);
-        query::update_projection_cursor(&conn, new_offset, last_hash.as_deref())
-            .context("update projection cursor (no new events)")?;
-
-        return Ok(ApplyReport {
-            events_applied: 0,
-            shards_scanned: shards_scanned,
+            shards_scanned,
             full_rebuild_triggered: false,
             full_rebuild_reason: None,
             elapsed: start.elapsed(),
@@ -196,22 +172,74 @@ pub fn incremental_apply(
     // Ensure tracking table exists (needed for dedup)
     project::ensure_tracking_table(&conn).context("ensure projected_events tracking table")?;
 
-    // Project the new events
+    let mut version_checked = false;
+    let mut shard_version = crate::event::parser::CURRENT_VERSION;
+    let mut line_no = 0;
+    let mut total_projected = 0;
+    let mut total_duplicates = 0;
+    let mut total_errors = 0;
+    let mut current_last_hash = last_hash.clone();
+    let mut total_byte_len = offset;
+
+    let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
     let projector = project::Projector::new(&conn);
-    let stats = projector
-        .project_batch(&events)
-        .context("project new events during incremental apply")?;
+
+    while let Some(line_res) = line_iter.next() {
+        let (abs_offset, line): (usize, String) = line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
+        line_no += 1;
+        total_byte_len = abs_offset + line.len();
+
+        // Version check if we hit a header
+        if !version_checked && line.trim_start().starts_with("# bones event log v") {
+            version_checked = true;
+            shard_version = crate::event::parser::detect_version(&line)
+                .map_err(|msg| anyhow::anyhow!("version check failed: {msg}"))?;
+            continue;
+        }
+
+        match crate::event::parser::parse_line(&line) {
+            Ok(crate::event::parser::ParsedLine::Event(event)) => {
+                let event = crate::event::migrate_event(*event, shard_version)
+                    .map_err(|e| anyhow::anyhow!("migration failed: {e}"))?;
+                
+                current_last_hash = Some(event.event_hash.clone());
+                current_batch.push(event);
+
+                if current_batch.len() >= 1000 {
+                    let stats = projector.project_batch(&current_batch)
+                        .context("project batch during incremental apply")?;
+                    total_projected += stats.projected;
+                    total_duplicates += stats.duplicates;
+                    total_errors += stats.errors;
+                    current_batch.clear();
+                }
+            }
+            Ok(crate::event::parser::ParsedLine::Comment(_) | crate::event::parser::ParsedLine::Blank) => {}
+            Err(crate::event::parser::ParseError::InvalidEventType(raw)) => {
+                tracing::warn!(line = line_no, event_type = %raw, "skipping unknown event type");
+            }
+            Err(e) => anyhow::bail!("parse error at line {line_no} (offset {abs_offset}): {e}"),
+        }
+    }
+
+    // Final batch
+    if !current_batch.is_empty() {
+        let stats = projector.project_batch(&current_batch)
+            .context("project final batch during incremental apply")?;
+        total_projected += stats.projected;
+        total_duplicates += stats.duplicates;
+        total_errors += stats.errors;
+    }
 
     // Update cursor to the end of current content
-    let new_hash = events.last().map(|e| e.event_hash.as_str());
-    let new_offset = i64::try_from(content_len).unwrap_or(i64::MAX);
-    query::update_projection_cursor(&conn, new_offset, new_hash)
+    let new_offset = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
+    query::update_projection_cursor(&conn, new_offset, current_last_hash.as_deref())
         .context("update projection cursor after incremental apply")?;
 
     tracing::info!(
-        events_applied = stats.projected,
-        duplicates = stats.duplicates,
-        errors = stats.errors,
+        events_applied = total_projected,
+        duplicates = total_duplicates,
+        errors = total_errors,
         shards_scanned,
         byte_offset_from = byte_offset,
         byte_offset_to = new_offset,
@@ -220,8 +248,8 @@ pub fn incremental_apply(
     );
 
     Ok(ApplyReport {
-        events_applied: stats.projected,
-        shards_scanned: shards_scanned,
+        events_applied: total_projected,
+        shards_scanned,
         full_rebuild_triggered: false,
         full_rebuild_reason: None,
         elapsed: start.elapsed(),

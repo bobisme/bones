@@ -234,12 +234,8 @@ fn run_comment_add(
     let item_id = ItemId::new_unchecked(&resolved_id);
 
     let shard_mgr = ShardManager::new(&bones_dir);
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.clone(),
         itc: String::new(),
         parents: vec![],
@@ -252,14 +248,29 @@ fn run_comment_add(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    let line =
-        write_event(&mut event).map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+        assign_next_itc(project_root, &mut event)?;
+
+        let line = write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
 
     let _ = project::ensure_tracking_table(&conn);
     let projector = project::Projector::new(&conn);
@@ -272,7 +283,7 @@ fn run_comment_add(
         item_id: resolved_id,
         agent,
         body: args.body.clone(),
-        ts,
+        ts: event.wall_ts_us,
         event_hash: event.event_hash,
     };
 

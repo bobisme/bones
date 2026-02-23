@@ -224,10 +224,10 @@ fn emit_compensating_event(
     original: &Event,
     prior_events: &[&Event],
     agent: &str,
-    now: i64,
     dry_run: bool,
 ) -> UndoEventResult {
-    match compensating_event(original, prior_events, agent, now) {
+    // Generate compensating event with placeholder timestamp (0)
+    match compensating_event(original, prior_events, agent, 0) {
         Err(UndoError::GrowOnly(et)) => UndoEventResult {
             original_hash: original.event_hash.clone(),
             original_type: original.event_type.as_str().to_string(),
@@ -263,45 +263,89 @@ fn emit_compensating_event(
                 };
             }
 
-            if let Err(e) = assign_next_itc(project_root, &mut comp_event) {
-                return UndoEventResult {
-                    original_hash: original.event_hash.clone(),
-                    original_type: original.event_type.as_str().to_string(),
-                    compensating_hash: None,
-                    compensating_type: Some(comp_type),
-                    skipped: true,
-                    skip_reason: Some(format!("failed to assign ITC stamp: {e}")),
-                    dry_run: false,
+            {
+                use bones_core::lock::ShardLock;
+                let lock_path = shard_mgr.lock_path();
+                // Acquire lock for atomic timestamp and append
+                let _lock = match ShardLock::acquire(&lock_path, Duration::from_secs(5)) {
+                    Ok(l) => l,
+                    Err(e) => return UndoEventResult {
+                        original_hash: original.event_hash.clone(),
+                        original_type: original.event_type.as_str().to_string(),
+                        compensating_hash: None,
+                        compensating_type: Some(comp_type),
+                        skipped: true,
+                        skip_reason: Some(format!("failed to acquire lock: {e}")),
+                        dry_run: false,
+                    },
                 };
-            }
 
-            // Write the event to the shard
-            let line = match writer::write_event(&mut comp_event) {
-                Ok(l) => l,
-                Err(e) => {
+                let (year, month) = match shard_mgr.rotate_if_needed() {
+                    Ok(pair) => pair,
+                    Err(e) => return UndoEventResult {
+                        original_hash: original.event_hash.clone(),
+                        original_type: original.event_type.as_str().to_string(),
+                        compensating_hash: None,
+                        compensating_type: Some(comp_type),
+                        skipped: true,
+                        skip_reason: Some(format!("failed to rotate shards: {e}")),
+                        dry_run: false,
+                    },
+                };
+
+                match shard_mgr.next_timestamp() {
+                    Ok(ts) => comp_event.wall_ts_us = ts,
+                    Err(e) => return UndoEventResult {
+                        original_hash: original.event_hash.clone(),
+                        original_type: original.event_type.as_str().to_string(),
+                        compensating_hash: None,
+                        compensating_type: Some(comp_type),
+                        skipped: true,
+                        skip_reason: Some(format!("failed to get timestamp: {e}")),
+                        dry_run: false,
+                    },
+                }
+
+                if let Err(e) = assign_next_itc(project_root, &mut comp_event) {
                     return UndoEventResult {
                         original_hash: original.event_hash.clone(),
                         original_type: original.event_type.as_str().to_string(),
                         compensating_hash: None,
                         compensating_type: Some(comp_type),
                         skipped: true,
-                        skip_reason: Some(format!("failed to serialize event: {e}")),
+                        skip_reason: Some(format!("failed to assign ITC stamp: {e}")),
                         dry_run: false,
                     };
                 }
-            };
 
-            if let Err(e) = shard_mgr.append(&line, false, Duration::from_secs(5)) {
-                return UndoEventResult {
-                    original_hash: original.event_hash.clone(),
-                    original_type: original.event_type.as_str().to_string(),
-                    compensating_hash: None,
-                    compensating_type: Some(comp_type),
-                    skipped: true,
-                    skip_reason: Some(format!("failed to append event: {e}")),
-                    dry_run: false,
+                // Write the event to the shard
+                let line = match writer::write_event(&mut comp_event) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        return UndoEventResult {
+                            original_hash: original.event_hash.clone(),
+                            original_type: original.event_type.as_str().to_string(),
+                            compensating_hash: None,
+                            compensating_type: Some(comp_type),
+                            skipped: true,
+                            skip_reason: Some(format!("failed to serialize event: {e}")),
+                            dry_run: false,
+                        };
+                    }
                 };
-            }
+
+                if let Err(e) = shard_mgr.append_raw(year, month, &line) {
+                    return UndoEventResult {
+                        original_hash: original.event_hash.clone(),
+                        original_type: original.event_type.as_str().to_string(),
+                        compensating_hash: None,
+                        compensating_type: Some(comp_type),
+                        skipped: true,
+                        skip_reason: Some(format!("failed to append event: {e}")),
+                        dry_run: false,
+                    };
+                }
+            } // Lock released
 
             // Project the compensating event
             let projector = project::Projector::new(conn);
@@ -384,10 +428,7 @@ pub fn run_undo(
     let _ = project::ensure_tracking_table(&conn);
     let shard_mgr = ShardManager::new(&bones_dir);
 
-    // Acquire a timestamp for all compensating events (monotonic, same second is fine)
-    let now = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
 
     // ---------------------------------------------------------------------------
     // Mode 1: undo by event hash
@@ -417,7 +458,6 @@ pub fn run_undo(
             &target_event,
             &prior_refs,
             &agent,
-            now,
             args.dry_run,
         );
 
@@ -498,7 +538,6 @@ pub fn run_undo(
             original,
             &prior_refs,
             &agent,
-            now,
             args.dry_run,
         );
         results.push(result);

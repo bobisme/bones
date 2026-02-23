@@ -9,8 +9,9 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::db::{open_projection, project};
-use crate::event::parser::parse_lines;
 use crate::shard::ShardManager;
+use crate::event::Event;
+use std::io;
 
 // ---------------------------------------------------------------------------
 // RebuildReport
@@ -69,7 +70,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let conn = open_projection(db_path).context("create fresh projection database")?;
     project::ensure_tracking_table(&conn).context("create tracking table")?;
 
-    // 3. Read and replay all events
+    // 3. Read and replay all events in streaming batches
     let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
 
@@ -78,25 +79,68 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
         .map_err(|e| anyhow::anyhow!("list shards: {e}"))?;
     let shard_count = shards.len();
 
-    // Read all shard content
-    let content = shard_mgr
-        .replay()
-        .map_err(|e| anyhow::anyhow!("replay shards: {e}"))?;
+    // We need a custom loop because EventParser expects Iterator<Item = String>
+    // and returns Result<Event, ...>.
+    let mut version_checked = false;
+    let mut shard_version = crate::event::parser::CURRENT_VERSION;
+    let mut line_no = 0;
+    let mut total_projected = 0;
+    let mut total_duplicates = 0;
+    let mut last_event_hash = None;
+    let mut total_byte_len = 0;
 
-    // Parse events (parse_lines handles comments/blanks internally)
-    let events = parse_lines(&content)
-        .map_err(|(line_num, e)| anyhow::anyhow!("parse error at line {line_num}: {e}"))?;
-
-    // 4. Project all events
+    let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
     let projector = project::Projector::new(&conn);
-    let stats = projector
-        .project_batch(&events)
-        .context("project events during rebuild")?;
+
+    let mut shard_line_iter = shard_mgr.replay_lines()?.peekable();
+
+    while let Some(line_res) = shard_line_iter.next() {
+        let (offset, line): (usize, String) = line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
+        line_no += 1;
+        total_byte_len = offset + line.len();
+
+        if !version_checked && line.trim_start().starts_with("# bones event log v") {
+            version_checked = true;
+            shard_version = crate::event::parser::detect_version(&line)
+                .map_err(|msg| anyhow::anyhow!("version check failed at line {line_no}: {msg}"))?;
+            continue;
+        }
+
+        match crate::event::parser::parse_line(&line) {
+            Ok(crate::event::parser::ParsedLine::Event(event)) => {
+                let event = crate::event::migrate_event(*event, shard_version)
+                    .map_err(|e| anyhow::anyhow!("migration failed at line {line_no}: {e}"))?;
+                
+                last_event_hash = Some(event.event_hash.clone());
+                current_batch.push(event);
+
+                if current_batch.len() >= 1000 {
+                    let stats = projector.project_batch(&current_batch)
+                        .context("project batch during rebuild")?;
+                    total_projected += stats.projected;
+                    total_duplicates += stats.duplicates;
+                    current_batch.clear();
+                }
+            }
+            Ok(crate::event::parser::ParsedLine::Comment(_) | crate::event::parser::ParsedLine::Blank) => {}
+            Err(crate::event::parser::ParseError::InvalidEventType(raw)) => {
+                tracing::warn!(line = line_no, event_type = %raw, "skipping unknown event type");
+            }
+            Err(e) => anyhow::bail!("parse error at line {line_no}: {e}"),
+        }
+    }
+
+    // Final batch
+    if !current_batch.is_empty() {
+        let stats = projector.project_batch(&current_batch)
+            .context("project final batch during rebuild")?;
+        total_projected += stats.projected;
+        total_duplicates += stats.duplicates;
+    }
 
     // 5. Update projection cursor
-    let last_hash = events.last().map(|e| e.event_hash.as_str());
-    let byte_offset = i64::try_from(content.len()).unwrap_or(i64::MAX);
-    crate::db::query::update_projection_cursor(&conn, byte_offset, last_hash)
+    let byte_offset_i64 = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
+    crate::db::query::update_projection_cursor(&conn, byte_offset_i64, last_event_hash.as_deref())
         .context("update projection cursor after rebuild")?;
 
     // Count unique items
@@ -107,8 +151,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let elapsed = start.elapsed();
 
     tracing::info!(
-        event_count = stats.projected,
-        duplicates = stats.duplicates,
+        event_count = total_projected,
+        duplicates = total_duplicates,
         item_count,
         shard_count,
         elapsed_ms = elapsed.as_millis(),
@@ -116,7 +160,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     );
 
     Ok(RebuildReport {
-        event_count: stats.projected,
+        event_count: total_projected,
         item_count: usize::try_from(item_count).unwrap_or(0),
         elapsed,
         shard_count,

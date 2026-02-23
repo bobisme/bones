@@ -123,12 +123,9 @@ fn emit_event(
     data: EventData,
 ) -> anyhow::Result<String> {
     let shard_mgr = ShardManager::new(bones_dir);
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("timestamp error: {e}"))?;
 
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -139,13 +136,30 @@ fn emit_event(
     };
 
     let project_root = bones_dir.parent().unwrap_or(bones_dir);
-    assign_next_itc(project_root, &mut event)?;
 
-    let line = write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("write event: {e}"))?;
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
+
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("timestamp error: {e}"))?;
+
+        assign_next_itc(project_root, &mut event)?;
+
+        let line =
+            write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
+
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("write event: {e}"))?;
+    }
 
     // Best-effort projection
     let db_path = bones_dir.join("bones.db");

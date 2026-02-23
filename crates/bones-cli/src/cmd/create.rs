@@ -391,12 +391,7 @@ pub fn run_create(
         }
     });
 
-    // 13. Get monotonic timestamp
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
-    // 14. Build create event
+    // 13-16. Build event and append to shard (atomic timestamp+hash+write)
     let create_data = CreateData {
         title: args.title.clone(),
         kind,
@@ -410,26 +405,44 @@ pub fn run_create(
     };
 
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0, // Placeholder, set under lock
         agent: agent.clone(),
         itc: String::new(),
         parents: vec![],
         event_type: EventType::Create,
         item_id: item_id.clone(),
         data: EventData::Create(create_data),
-        event_hash: String::new(), // Will be computed by write_event
+        event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    // 15. Compute hash and serialize
-    let line = writer::write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+        // Rotate if needed
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-    // 16. Append to shard
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+        // Get monotonic timestamp
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+        // Assign ITC (local file op, safe under lock)
+        assign_next_itc(project_root, &mut event)?;
+
+        // Compute hash and serialize
+        let line = writer::write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        // Append raw (we hold the lock)
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
 
     // 17. Project into SQLite (best-effort — projection can be rebuilt)
     if let Ok(conn) = db::open_projection(&db_path) {

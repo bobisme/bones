@@ -159,7 +159,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
         .context("failed to migrate legacy root .gitattributes entry")?;
 
     let shard_manager = ShardManager::new(&bones_dir);
-    let active_shard = shard_manager
+    shard_manager
         .init()
         .context("failed to initialize .bones shard state")?;
 
@@ -300,7 +300,6 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
         append_event(
             project_root,
             &shard_manager,
-            active_shard,
             &mut create_event,
         )?;
         previous_hash.insert(item_id.to_string(), create_event.event_hash.clone());
@@ -331,7 +330,6 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             append_event(
                 project_root,
                 &shard_manager,
-                active_shard,
                 &mut assign_event,
             )?;
             previous_hash.insert(item_id.to_string(), assign_event.event_hash.clone());
@@ -363,7 +361,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(project_root, &shard_manager, active_shard, &mut move_event)?;
+            append_event(project_root, &shard_manager, &mut move_event)?;
             previous_hash.insert(item_id.to_string(), move_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -390,7 +388,6 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 append_event(
                     project_root,
                     &shard_manager,
-                    active_shard,
                     &mut comment_event,
                 )?;
                 previous_hash.insert(item_id.to_string(), comment_event.event_hash.clone());
@@ -441,7 +438,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             .unwrap_or(0);
         link_event.wall_ts_us = source_ts.saturating_add(1);
 
-        append_event(project_root, &shard_manager, active_shard, &mut link_event)?;
+        append_event(project_root, &shard_manager, &mut link_event)?;
         previous_hash.insert(source_item_id.to_string(), link_event.event_hash.clone());
         report.dependencies_imported += 1;
         report.projection_events += 1;
@@ -515,13 +512,23 @@ fn find_bones_dir(start: &Path) -> Option<PathBuf> {
 fn append_event(
     project_root: &Path,
     shard_manager: &ShardManager,
-    active_shard: (i32, u32),
     event: &mut Event,
 ) -> Result<()> {
+    use bones_core::lock::ShardLock;
+    use std::time::Duration;
+
+    let lock_path = shard_manager.lock_path();
+    let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+        .context("failed to acquire shard lock")?;
+
+    let (year, month) = shard_manager
+        .rotate_if_needed()
+        .context("failed to rotate shards")?;
+
     assign_next_itc(project_root, event)?;
     let line = write_event(event).context("failed to serialize migrated event")?;
     shard_manager
-        .append_raw(active_shard.0, active_shard.1, &line)
+        .append_raw(year, month, &line)
         .context("failed to append migrated event")
 }
 

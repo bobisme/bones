@@ -153,8 +153,8 @@ impl<T: Clone> LwwRegister<T> {
                 return (true, TieBreakStep::ItcCausal);
             }
             (true, true) => {
-                // They are equal (both leq each other) → self wins (idempotent)
-                return (true, TieBreakStep::Equal);
+                // They are equal (both leq each other).
+                // Fall through to tie-breaking to ensure convergence if other metadata differs.
             }
             (false, false) => {
                 // Concurrent — fall through to tie-breaking

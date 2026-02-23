@@ -27,7 +27,7 @@
 //! - **Associative**: merge(merge(A, B), C) = merge(A, merge(B, C))
 //! - **Idempotent**: merge(A, A) = A
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use super::merge::Merge;
@@ -89,6 +89,18 @@ impl<T: Hash + Eq + Clone> OrSet<T> {
         }
 
         active_tags
+    }
+
+    /// Remove specific tags for an element.
+    ///
+    /// Tombstones only the provided tags.
+    pub fn remove_specific(&mut self, value: &T, tags: &[Timestamp])
+    where
+        T: Eq + Hash,
+    {
+        for tag in tags {
+            self.tombstone.insert((value.clone(), tag.clone()));
+        }
     }
 
     /// Check if an element is present in the set.
@@ -210,8 +222,30 @@ pub enum OrSetField {
 ///
 /// Each event's unique identity (event_hash + wall_ts + agent) is mapped to
 /// a [`Timestamp`] for use as the OR-Set tag.
-pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<String>> {
-    let mut current_set: OrSet<String> = OrSet::new();
+///
+/// # DAG Visibility
+///
+/// If `dag` is provided, `Remove` operations will only target tags that are
+/// causally visible (ancestors) to the removing event. This is crucial for
+/// handling concurrent edits in `merged` replays.
+///
+/// If `base_state` is provided, the set is initialized with it. Tags present
+/// in `base_state` are assumed to be visible to all events (ancestors).
+pub fn ops_from_events(
+    events: &[Event],
+    field: &OrSetField,
+    base_state: Option<&OrSet<String>>,
+    dag: Option<&EventDag>,
+) -> Vec<OrSetOp<String>> {
+    let mut current_set = if let Some(base) = base_state {
+        base.clone()
+    } else {
+        OrSet::new()
+    };
+
+    // Map new tags (created in this replay) to their full event hash
+    // so we can check ancestry.
+    let mut tag_map: HashMap<Timestamp, String> = HashMap::new();
     let mut ops = Vec::new();
 
     for event in events {
@@ -222,13 +256,36 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
                 if let EventData::Assign(data) = &event.data {
                     match data.action {
                         AssignAction::Assign => {
-                            let op = OrSetOp::Add(data.agent.clone(), tag.clone());
-                            current_set.add(data.agent.clone(), tag);
+                            let value = data.agent.clone();
+                            tag_map.insert(tag.clone(), event.event_hash.clone());
+                            let op = OrSetOp::Add(value.clone(), tag.clone());
+                            current_set.add(value, tag.clone());
                             ops.push(op);
                         }
                         AssignAction::Unassign => {
-                            let observed = current_set.remove(&data.agent);
-                            ops.push(OrSetOp::Remove(data.agent.clone(), observed));
+                            let value = data.agent.clone();
+                            // Find candidate tags that match the value
+                            let candidate_tags = current_set.active_tags(&value);
+
+                            // Filter for visibility
+                            let observed_tags: Vec<Timestamp> = candidate_tags
+                                .into_iter()
+                                .filter(|t| {
+                                    if let Some(dag_ref) = dag {
+                                        if let Some(tag_hash) = tag_map.get(t) {
+                                            dag_ref.is_ancestor(tag_hash, &event.event_hash)
+                                        } else {
+                                            true
+                                        }
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .cloned()
+                                .collect();
+
+                            current_set.remove_specific(&value, &observed_tags);
+                            ops.push(OrSetOp::Remove(value, observed_tags));
                         }
                     }
                 }
@@ -237,7 +294,6 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
                 if event.event_type == EventType::Update {
                     if let EventData::Update(data) = &event.data {
                         if data.field == "labels" {
-                            // Labels update carries the action in the value JSON
                             if let Some(obj) = data.value.as_object() {
                                 if let (Some(action), Some(label)) =
                                     (obj.get("action"), obj.get("label"))
@@ -247,13 +303,36 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
 
                                     match action_str {
                                         "add" => {
-                                            let op = OrSetOp::Add(label_str.clone(), tag.clone());
-                                            current_set.add(label_str, tag);
+                                            let value = label_str;
+                                            tag_map.insert(tag.clone(), event.event_hash.clone());
+                                            let op = OrSetOp::Add(value.clone(), tag.clone());
+                                            current_set.add(value, tag.clone());
                                             ops.push(op);
                                         }
                                         "remove" => {
-                                            let observed = current_set.remove(&label_str);
-                                            ops.push(OrSetOp::Remove(label_str, observed));
+                                            let value = label_str;
+                                            let candidate_tags = current_set.active_tags(&value);
+                                            let observed_tags: Vec<Timestamp> = candidate_tags
+                                                .into_iter()
+                                                .filter(|t| {
+                                                    if let Some(dag_ref) = dag {
+                                                        if let Some(tag_hash) = tag_map.get(t) {
+                                                            dag_ref.is_ancestor(
+                                                                tag_hash,
+                                                                &event.event_hash,
+                                                            )
+                                                        } else {
+                                                            true
+                                                        }
+                                                    } else {
+                                                        true
+                                                    }
+                                                })
+                                                .cloned()
+                                                .collect();
+
+                                            current_set.remove_specific(&value, &observed_tags);
+                                            ops.push(OrSetOp::Remove(value, observed_tags));
                                         }
                                         _ => {}
                                     }
@@ -268,24 +347,41 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
                     EventType::Link => {
                         if let EventData::Link(data) = &event.data {
                             if data.link_type == "blocks" || data.link_type == "blocked_by" {
-                                let target = data.target.to_string();
-                                let op = OrSetOp::Add(target.clone(), tag.clone());
-                                current_set.add(target, tag);
+                                let value = data.target.to_string();
+                                tag_map.insert(tag.clone(), event.event_hash.clone());
+                                let op = OrSetOp::Add(value.clone(), tag.clone());
+                                current_set.add(value, tag.clone());
                                 ops.push(op);
                             }
                         }
                     }
                     EventType::Unlink => {
                         if let EventData::Unlink(data) = &event.data {
-                            let target = data.target.to_string();
-                            // Check if this unlink is for blocked_by type
                             let is_blocked_by = data
                                 .link_type
                                 .as_ref()
                                 .is_none_or(|lt| lt == "blocks" || lt == "blocked_by");
                             if is_blocked_by {
-                                let observed = current_set.remove(&target);
-                                ops.push(OrSetOp::Remove(target, observed));
+                                let value = data.target.to_string();
+                                let candidate_tags = current_set.active_tags(&value);
+                                let observed_tags: Vec<Timestamp> = candidate_tags
+                                    .into_iter()
+                                    .filter(|t| {
+                                        if let Some(dag_ref) = dag {
+                                            if let Some(tag_hash) = tag_map.get(t) {
+                                                dag_ref.is_ancestor(tag_hash, &event.event_hash)
+                                            } else {
+                                                true
+                                            }
+                                        } else {
+                                            true
+                                        }
+                                    })
+                                    .cloned()
+                                    .collect();
+
+                                current_set.remove_specific(&value, &observed_tags);
+                                ops.push(OrSetOp::Remove(value, observed_tags));
                             }
                         }
                     }
@@ -296,23 +392,41 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
                 EventType::Link => {
                     if let EventData::Link(data) = &event.data {
                         if data.link_type == "related_to" || data.link_type == "related" {
-                            let target = data.target.to_string();
-                            let op = OrSetOp::Add(target.clone(), tag.clone());
-                            current_set.add(target, tag);
+                            let value = data.target.to_string();
+                            tag_map.insert(tag.clone(), event.event_hash.clone());
+                            let op = OrSetOp::Add(value.clone(), tag.clone());
+                            current_set.add(value, tag.clone());
                             ops.push(op);
                         }
                     }
                 }
                 EventType::Unlink => {
                     if let EventData::Unlink(data) = &event.data {
-                        let target = data.target.to_string();
                         let is_related = data
                             .link_type
                             .as_ref()
                             .is_none_or(|lt| lt == "related_to" || lt == "related");
                         if is_related {
-                            let observed = current_set.remove(&target);
-                            ops.push(OrSetOp::Remove(target, observed));
+                            let value = data.target.to_string();
+                            let candidate_tags = current_set.active_tags(&value);
+                            let observed_tags: Vec<Timestamp> = candidate_tags
+                                .into_iter()
+                                .filter(|t| {
+                                    if let Some(dag_ref) = dag {
+                                        if let Some(tag_hash) = tag_map.get(t) {
+                                            dag_ref.is_ancestor(tag_hash, &event.event_hash)
+                                        } else {
+                                            true
+                                        }
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .cloned()
+                                .collect();
+
+                            current_set.remove_specific(&value, &observed_tags);
+                            ops.push(OrSetOp::Remove(value, observed_tags));
                         }
                     }
                 }
@@ -329,7 +443,7 @@ pub fn ops_from_events(events: &[Event], field: &OrSetField) -> Vec<OrSetOp<Stri
 /// Replays the given events in order, applying add/remove operations
 /// to build the final OR-Set state.
 pub fn materialize_from_events(events: &[Event], field: &OrSetField) -> OrSet<String> {
-    let ops = ops_from_events(events, field);
+    let ops = ops_from_events(events, field, None, None);
     let mut set = OrSet::new();
     for op in ops {
         set.apply(op);
@@ -359,7 +473,7 @@ pub fn materialize_from_replay(
     field: &OrSetField,
 ) -> Result<OrSet<String>, ReplayError> {
     let replay = replay_divergent(dag, tip_a, tip_b)?;
-    Ok(apply_replay(base_state, &replay, field))
+    Ok(apply_replay(base_state, &replay, field, Some(dag)))
 }
 
 /// Apply a divergent replay to a base OR-Set state.
@@ -370,12 +484,15 @@ pub fn apply_replay(
     base_state: OrSet<String>,
     replay: &DivergentReplay,
     field: &OrSetField,
+    dag: Option<&EventDag>,
 ) -> OrSet<String> {
     // Start from the base state at the LCA.
-    let mut result = base_state;
+    let mut result = base_state.clone();
 
     // Apply all divergent events in merged (deterministic) order.
-    let ops = ops_from_events(&replay.merged, field);
+    // Pass base_state so ops_from_events knows about pre-existing tags.
+    // Pass dag so ops_from_events can resolve visibility.
+    let ops = ops_from_events(&replay.merged, field, Some(&base_state), dag);
     for op in ops {
         result.apply(op);
     }
@@ -426,7 +543,10 @@ fn hash_str_to_u64(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::data::{AssignAction, AssignData, EventData};
+    use crate::event::{Event, EventType};
     use chrono::{TimeZone, Utc};
+    use std::collections::BTreeMap;
 
     fn make_tag(wall_secs: i64, actor: u64, event_hash: u64) -> Timestamp {
         Timestamp {
@@ -845,5 +965,139 @@ mod tests {
         assert!(vals.contains(&"a".to_string()));
         assert!(vals.contains(&"c".to_string()));
         assert!(!vals.contains(&"b".to_string()));
+    }
+
+    // ===================================================================
+    // Reproduction Tests for Linearization Bugs
+    // ===================================================================
+
+    #[test]
+    fn remove_base_state_item_succeeds() {
+        // Scenario: Item added in base state, then removed in a divergent event.
+        // With base_state passed to ops_from_events, this should now work.
+
+        let base_tag = make_tag(1, 1, 100);
+        let mut base_state: OrSet<String> = OrSet::new();
+        base_state.add("alice".into(), base_tag.clone());
+
+        // Event: Unassign alice (Unlink/Remove)
+        let event = Event {
+            wall_ts_us: 2000,
+            agent: "agent".into(),
+            itc: "itc".into(),
+            parents: vec![],
+            event_type: EventType::Assign,
+            item_id: crate::model::item_id::ItemId::new_unchecked("bn-test"),
+            data: EventData::Assign(AssignData {
+                agent: "alice".into(),
+                action: AssignAction::Unassign,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: "hash".into(),
+        };
+
+        // Pass base_state so it knows what to remove.
+        let ops = ops_from_events(
+            &[event],
+            &OrSetField::Assignees,
+            Some(&base_state),
+            None,
+        );
+
+        // Apply ops to base state
+        let mut result = base_state.clone();
+        for op in ops {
+            result.apply(op);
+        }
+
+        // Alice should be removed
+        assert!(
+            !result.contains(&"alice".into()),
+            "Alice should be removed when base_state is provided"
+        );
+    }
+
+    #[test]
+    fn concurrent_remove_respects_dag_visibility() {
+        // Scenario: Concurrent Add(A) and Remove(A).
+        // Remove(A) does NOT see Add(A).
+        // Result: A should remain present (Add wins).
+
+        let root_hash = "root";
+        let add_hash = "add_hash";
+        let remove_hash = "remove_hash";
+
+        // DAG: root -> add, root -> remove
+        let mut dag = EventDag::new();
+        // We mock the DAG structure without full events for the DAG check
+        // insert() requires full Event, so we construct minimal events.
+        
+        let make_evt = |hash: &str, parents: Vec<&str>| Event {
+            wall_ts_us: 0,
+            agent: "a".into(),
+            itc: "i".into(),
+            parents: parents.iter().map(|s| s.to_string()).collect(),
+            event_type: EventType::Create, // dummy
+            item_id: crate::model::item_id::ItemId::new_unchecked("bn"),
+            data: EventData::Create(crate::event::data::CreateData {
+                title: "".into(), kind: crate::model::item::Kind::Task, size: None, urgency: crate::model::item::Urgency::Default, labels: vec![], parent: None, causation: None, description: None, extra: BTreeMap::new()
+            }),
+            event_hash: hash.into(),
+        };
+
+        dag.insert(make_evt(root_hash, vec![]));
+        dag.insert(make_evt(add_hash, vec![root_hash]));
+        dag.insert(make_evt(remove_hash, vec![root_hash]));
+
+        // Events for ops_from_events
+        // 1. Add "alice"
+        let add_event = Event {
+            wall_ts_us: 1000,
+            agent: "alice".into(),
+            itc: "1".into(),
+            parents: vec![root_hash.into()],
+            event_type: EventType::Assign,
+            item_id: crate::model::item_id::ItemId::new_unchecked("bn"),
+            data: EventData::Assign(AssignData {
+                agent: "alice".into(),
+                action: AssignAction::Assign,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: add_hash.into(),
+        };
+
+        // 2. Remove "alice" (concurrent)
+        let remove_event = Event {
+            wall_ts_us: 2000,
+            agent: "bob".into(),
+            itc: "2".into(),
+            parents: vec![root_hash.into()],
+            event_type: EventType::Assign,
+            item_id: crate::model::item_id::ItemId::new_unchecked("bn"),
+            data: EventData::Assign(AssignData {
+                agent: "alice".into(),
+                action: AssignAction::Unassign,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: remove_hash.into(),
+        };
+
+        // Replay order: Add then Remove (linearized)
+        let events = vec![add_event, remove_event];
+
+        let ops = ops_from_events(
+            &events,
+            &OrSetField::Assignees,
+            None, // empty base
+            Some(&dag),
+        );
+
+        let mut set = OrSet::new();
+        for op in ops {
+            set.apply(op);
+        }
+
+        // Alice should be present because Remove didn't see Add
+        assert!(set.contains(&"alice".into()), "Concurrent Add should survive Remove");
     }
 }

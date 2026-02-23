@@ -172,23 +172,19 @@ fn read_current_labels(conn: &Connection, item_id: &str) -> anyhow::Result<Vec<S
     Ok(labels.into_iter().map(|l| l.label).collect())
 }
 
-/// Emit an `item.update` event for the labels field.
-fn emit_labels_event(
+/// Emit an `item.update` event for a single label add/remove action.
+fn emit_label_event(
     project_root: &std::path::Path,
     agent: &str,
     item_id: &ItemId,
-    new_labels: &[String],
-) -> anyhow::Result<()> {
+    action: &str,
+    label: &str,
+) -> anyhow::Result<String> {
     let bones_dir = project_root.join(".bones");
     let shard_mgr = ShardManager::new(&bones_dir);
 
-    // Get a monotonic timestamp
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -196,22 +192,40 @@ fn emit_labels_event(
         item_id: item_id.clone(),
         data: EventData::Update(UpdateData {
             field: "labels".into(),
-            value: json!(new_labels),
+            value: json!({
+                "action": action,
+                "label": label,
+            }),
             extra: BTreeMap::new(),
         }),
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    let line =
-        write_event(&mut event).map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    Ok(())
+        assign_next_itc(project_root, &mut event)?;
+
+        let line = write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
+
+    Ok(event.event_hash)
 }
 
 fn run_tag_single(
@@ -227,20 +241,19 @@ fn run_tag_single(
 
     let current_labels = read_current_labels(&conn, item_id.as_str())?;
 
-    let mut new_labels = current_labels.clone();
+    let mut added = Vec::new();
     for label in normalized_labels {
-        if !new_labels.contains(label) {
-            new_labels.push(label.clone());
+        if !current_labels.contains(label) {
+            emit_label_event(project_root, agent, &item_id, "add", label)?;
+            added.push(label.clone());
         }
     }
 
-    let added: Vec<String> = normalized_labels
-        .iter()
-        .filter(|l| !current_labels.contains(*l))
-        .cloned()
-        .collect();
-
-    emit_labels_event(project_root, agent, &item_id, &new_labels)?;
+    let mut new_labels = current_labels;
+    for label in &added {
+        new_labels.push(label.clone());
+    }
+    new_labels.sort();
 
     Ok(json!({
         "ok": true,
@@ -403,21 +416,21 @@ fn run_untag_single(
 
     let current_labels = read_current_labels(&conn, item_id.as_str())?;
 
+    let mut removed = Vec::new();
+    for label in normalized_labels {
+        if current_labels.contains(label) {
+            emit_label_event(project_root, agent, &item_id, "remove", label)?;
+            removed.push(label.clone());
+        }
+    }
+
     let labels_to_remove: std::collections::HashSet<&str> =
-        normalized_labels.iter().map(String::as_str).collect();
-    let new_labels: Vec<String> = current_labels
-        .iter()
+        removed.iter().map(String::as_str).collect();
+    let mut new_labels: Vec<String> = current_labels
+        .into_iter()
         .filter(|l| !labels_to_remove.contains(l.as_str()))
-        .cloned()
         .collect();
-
-    let removed: Vec<String> = normalized_labels
-        .iter()
-        .filter(|l| current_labels.contains(*l))
-        .cloned()
-        .collect();
-
-    emit_labels_event(project_root, agent, &item_id, &new_labels)?;
+    new_labels.sort();
 
     Ok(json!({
         "ok": true,

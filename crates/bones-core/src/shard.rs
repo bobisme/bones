@@ -750,6 +750,43 @@ impl ShardManager {
         Ok(count as u64)
     }
 
+    /// Iterate over all event lines across all shards.
+    ///
+    /// Yields `(absolute_offset, line_content)` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if directory or shard reading fails.
+    pub fn replay_lines(
+        &self,
+    ) -> Result<impl Iterator<Item = io::Result<(usize, String)>>, ShardError> {
+        self.replay_lines_from_offset(0)
+    }
+
+    /// Iterate over event lines starting from a given absolute byte offset.
+    ///
+    /// Yields `(absolute_offset, line_content)` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if directory or shard reading fails.
+    pub fn replay_lines_from_offset(
+        &self,
+        offset: usize,
+    ) -> Result<impl Iterator<Item = io::Result<(usize, String)>>, ShardError> {
+        let shards = self.list_shards()?;
+        let bones_dir = self.bones_dir.clone();
+
+        Ok(ShardLineIterator {
+            shards,
+            current_shard_idx: 0,
+            current_reader: None,
+            cumulative_offset: 0,
+            bones_dir,
+        }
+        .skip_to_offset(offset))
+    }
+
     /// Check if the repository has any event shards.
     ///
     /// # Errors
@@ -758,6 +795,104 @@ impl ShardManager {
     pub fn is_empty(&self) -> Result<bool, ShardError> {
         let shards = self.list_shards()?;
         Ok(shards.is_empty())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ShardLineIterator
+// ---------------------------------------------------------------------------
+
+struct ShardLineIterator {
+    shards: Vec<(i32, u32)>,
+    current_shard_idx: usize,
+    current_reader: Option<io::BufReader<fs::File>>,
+    cumulative_offset: usize,
+    bones_dir: PathBuf,
+}
+
+impl ShardLineIterator {
+    fn skip_to_offset(mut self, offset: usize) -> Self {
+        // Fast-forward shards using metadata
+        while self.current_shard_idx < self.shards.len() {
+            let (year, month) = self.shards[self.current_shard_idx];
+            let shard_path = self.bones_dir.join("events").join(ShardManager::shard_filename(year, month));
+            if let Ok(meta) = fs::metadata(shard_path) {
+                let shard_len = meta.len() as usize;
+                if self.cumulative_offset + shard_len <= offset {
+                    self.cumulative_offset += shard_len;
+                    self.current_shard_idx += 1;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // Now we are at the shard that contains the offset.
+        // The first call to next() will open it and we'll need to skip
+        // the 'within-shard' offset.
+        // We can handle this by storing the skip amount.
+        self.cumulative_offset = offset;
+        self
+    }
+}
+
+impl Iterator for ShardLineIterator {
+    type Item = io::Result<(usize, String)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use std::io::{BufRead, Seek, SeekFrom};
+
+        loop {
+            if self.current_reader.is_none() {
+                if self.current_shard_idx >= self.shards.len() {
+                    return None;
+                }
+
+                let (year, month) = self.shards[self.current_shard_idx];
+                let shard_path = self.bones_dir.join("events").join(ShardManager::shard_filename(year, month));
+                let mut file = match fs::File::open(shard_path) {
+                    Ok(f) => f,
+                    Err(e) => return Some(Err(e)),
+                };
+
+                // Calculate cumulative offset before this shard
+                let mut cumulative_before = 0;
+                for i in 0..self.current_shard_idx {
+                    let (y, m) = self.shards[i];
+                    let p = self.bones_dir.join("events").join(ShardManager::shard_filename(y, m));
+                    if let Ok(meta) = fs::metadata(p) {
+                        cumulative_before += meta.len() as usize;
+                    }
+                }
+
+                if self.cumulative_offset > cumulative_before {
+                    let within = self.cumulative_offset - cumulative_before;
+                    if let Err(e) = file.seek(SeekFrom::Start(within as u64)) {
+                        return Some(Err(e));
+                    }
+                }
+
+                self.current_reader = Some(io::BufReader::new(file));
+            }
+
+            let reader = self.current_reader.as_mut().unwrap();
+            let mut line = String::new();
+            let offset = self.cumulative_offset;
+
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    // EOF for this shard
+                    self.current_reader = None;
+                    self.current_shard_idx += 1;
+                    continue;
+                }
+                Ok(n) => {
+                    self.cumulative_offset += n;
+                    return Some(Ok((offset, line)));
+                }
+                Err(e) => return Some(Err(e)),
+            }
+        }
     }
 }
 

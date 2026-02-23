@@ -273,6 +273,9 @@ impl EventDag {
     /// start in the ready set.
     #[must_use]
     pub fn topological_order(&self) -> Vec<&Event> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
         // Count in-degree (number of parents in the DAG) per node.
         let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(self.nodes.len());
         for (hash, node) in &self.nodes {
@@ -285,40 +288,27 @@ impl EventDag {
             in_degree.insert(hash.as_str(), parent_count);
         }
 
-        // Seed with all roots (in-degree 0), sorted for determinism.
-        let mut ready: Vec<&str> = in_degree
+        // Seed with all roots (in-degree 0). Use a Min-Heap for determinism.
+        let mut ready: BinaryHeap<Reverse<&str>> = in_degree
             .iter()
             .filter(|(_, deg)| **deg == 0)
-            .map(|(&hash, _)| hash)
+            .map(|(&hash, _)| Reverse(hash))
             .collect();
-        ready.sort();
 
         let mut result = Vec::with_capacity(self.nodes.len());
 
-        while !ready.is_empty() {
-            // Pop the lexicographically smallest ready node for determinism.
-            let current = ready.remove(0);
-
+        while let Some(Reverse(current)) = ready.pop() {
             if let Some(node) = self.nodes.get(current) {
                 result.push(&node.event);
 
                 // Decrement in-degree for all children.
-                let mut new_ready = Vec::new();
                 for child_hash in &node.children {
                     if let Some(deg) = in_degree.get_mut(child_hash.as_str()) {
                         *deg = deg.saturating_sub(1);
                         if *deg == 0 {
-                            new_ready.push(child_hash.as_str());
+                            ready.push(Reverse(child_hash.as_str()));
                         }
                     }
-                }
-
-                // Sort new ready nodes for determinism, then add to ready list.
-                new_ready.sort();
-                for h in new_ready {
-                    // Insert in sorted position.
-                    let pos = ready.binary_search(&h).unwrap_or_else(|p| p);
-                    ready.insert(pos, h);
                 }
             }
         }

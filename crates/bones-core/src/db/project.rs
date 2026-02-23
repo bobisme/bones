@@ -51,13 +51,18 @@ pub struct ProjectionStats {
 /// each event or [`project_batch`] for a slice.
 pub struct Projector<'conn> {
     conn: &'conn Connection,
+    has_agent_column: bool,
 }
 
 impl<'conn> Projector<'conn> {
     /// Create a new projector backed by the given connection.
     #[allow(clippy::missing_const_for_fn)]
     pub fn new(conn: &'conn Connection) -> Self {
-        Self { conn }
+        let has_agent_column = projected_events_has_agent_column(conn).unwrap_or(false);
+        Self {
+            conn,
+            has_agent_column,
+        }
     }
 
     /// Project a batch of events, returning aggregate statistics.
@@ -179,8 +184,20 @@ impl<'conn> Projector<'conn> {
         Ok(exists)
     }
 
+    fn is_event_redacted(&self, event_hash: &str) -> Result<bool> {
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM event_redactions WHERE target_event_hash = ?1)",
+                params![event_hash],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        Ok(exists)
+    }
+
     fn record_projected_hash(&self, event_hash: &str, event: &Event) -> Result<()> {
-        if projected_events_has_agent_column(&self.conn)? {
+        if self.has_agent_column {
             self.conn
                 .execute(
                     "INSERT OR IGNORE INTO projected_events (event_hash, item_id, event_type, projected_at_us, agent) \
@@ -253,19 +270,41 @@ impl<'conn> Projector<'conn> {
             anyhow::bail!("expected Create data for item.create event");
         };
 
-        let labels_str = data.labels.join(" ");
+        let is_redacted = self.is_event_redacted(&event.event_hash)?;
+        let title = if is_redacted { "" } else { &data.title };
+        let description = if is_redacted {
+            None
+        } else {
+            data.description.as_deref()
+        };
+        let labels_str = if is_redacted {
+            String::new()
+        } else {
+            data.labels.join(" ")
+        };
 
         self.conn
             .execute(
-                "INSERT OR IGNORE INTO items (
+                "INSERT INTO items (
                     item_id, title, description, kind, state, urgency,
                     size, parent_id, is_deleted, search_labels,
                     created_at_us, updated_at_us
-                ) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, 0, ?8, ?9, ?10)",
+                ) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, 0, ?8, ?9, ?10)
+                ON CONFLICT(item_id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    kind = excluded.kind,
+                    urgency = excluded.urgency,
+                    size = excluded.size,
+                    parent_id = excluded.parent_id,
+                    created_at_us = excluded.created_at_us,
+                    search_labels = excluded.search_labels,
+                    updated_at_us = excluded.updated_at_us
+                WHERE items.title = ''",
                 params![
                     event.item_id.as_str(),
-                    data.title,
-                    data.description,
+                    title,
+                    description,
                     data.kind.to_string(),
                     data.urgency.to_string(),
                     data.size.map(|s| s.to_string()),
@@ -278,14 +317,16 @@ impl<'conn> Projector<'conn> {
             .with_context(|| format!("project create for {}", event.item_id))?;
 
         // Insert initial labels
-        for label in &data.labels {
-            self.conn
-                .execute(
-                    "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
-                     VALUES (?1, ?2, ?3)",
-                    params![event.item_id.as_str(), label, event.wall_ts_us],
-                )
-                .with_context(|| format!("insert label '{label}' for {}", event.item_id))?;
+        if !is_redacted {
+            for label in &data.labels {
+                self.conn
+                    .execute(
+                        "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
+                         VALUES (?1, ?2, ?3)",
+                        params![event.item_id.as_str(), label, event.wall_ts_us],
+                    )
+                    .with_context(|| format!("insert label '{label}' for {}", event.item_id))?;
+            }
         }
 
         Ok(())
@@ -298,16 +339,26 @@ impl<'conn> Projector<'conn> {
 
         self.ensure_item_exists(event)?;
 
+        let is_redacted = self.is_event_redacted(&event.event_hash)?;
+
         match data.field.as_str() {
             "title" => {
-                let value = data.value.as_str().unwrap_or_default();
+                let value = if is_redacted {
+                    "[redacted]"
+                } else {
+                    data.value.as_str().unwrap_or_default()
+                };
                 self.conn.execute(
                     "UPDATE items SET title = ?1, updated_at_us = ?2 WHERE item_id = ?3",
                     params![value, event.wall_ts_us, event.item_id.as_str()],
                 )?;
             }
             "description" => {
-                let value = data.value.as_str().map(String::from);
+                let value = if is_redacted {
+                    Some("[redacted]".to_string())
+                } else {
+                    data.value.as_str().map(String::from)
+                };
                 self.conn.execute(
                     "UPDATE items SET description = ?1, updated_at_us = ?2 WHERE item_id = ?3",
                     params![value, event.wall_ts_us, event.item_id.as_str()],
@@ -342,15 +393,17 @@ impl<'conn> Projector<'conn> {
                 )?;
             }
             "labels" => {
-                // Labels update: replace entire label set
+                // Labels update: supports both legacy array replacement
+                // and new add/remove action format (CRDT-friendly).
+                let mut changed = false;
+
                 if let Some(labels) = data.value.as_array() {
-                    // Delete existing labels
+                    // Legacy: replace entire label set
                     self.conn.execute(
                         "DELETE FROM item_labels WHERE item_id = ?1",
                         params![event.item_id.as_str()],
                     )?;
 
-                    let mut label_strings = Vec::new();
                     for label_val in labels {
                         if let Some(label) = label_val.as_str() {
                             self.conn.execute(
@@ -358,11 +411,51 @@ impl<'conn> Projector<'conn> {
                                  VALUES (?1, ?2, ?3)",
                                 params![event.item_id.as_str(), label, event.wall_ts_us],
                             )?;
-                            label_strings.push(label.to_string());
                         }
                     }
+                    changed = true;
+                } else if let Some(obj) = data.value.as_object() {
+                    // New: add/remove single label
+                    let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or("");
 
-                    // Update search_labels
+                    if !label.is_empty() {
+                        match action {
+                            "add" => {
+                                self.conn.execute(
+                                    "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
+                                     VALUES (?1, ?2, ?3)",
+                                    params![event.item_id.as_str(), label, event.wall_ts_us],
+                                )?;
+                                changed = true;
+                            }
+                            "remove" => {
+                                self.conn.execute(
+                                    "DELETE FROM item_labels WHERE item_id = ?1 AND label = ?2",
+                                    params![event.item_id.as_str(), label],
+                                )?;
+                                changed = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if changed {
+                    // Reconstruct search_labels from item_labels table to keep FTS in sync.
+                    let mut stmt = self.conn.prepare(
+                        "SELECT label FROM item_labels WHERE item_id = ?1 ORDER BY label",
+                    )?;
+                    let label_rows = stmt
+                        .query_map(params![event.item_id.as_str()], |row| {
+                            row.get::<_, String>(0)
+                        })?;
+
+                    let mut label_strings = Vec::new();
+                    for label_res in label_rows {
+                        label_strings.push(label_res?);
+                    }
+
                     let search_labels = label_strings.join(" ");
                     self.conn.execute(
                         "UPDATE items SET search_labels = ?1, updated_at_us = ?2 WHERE item_id = ?3",
@@ -451,6 +544,9 @@ impl<'conn> Projector<'conn> {
 
         self.ensure_item_exists(event)?;
 
+        let is_redacted = self.is_event_redacted(&event.event_hash)?;
+        let body = if is_redacted { "[redacted]" } else { &data.body };
+
         self.conn
             .execute(
                 "INSERT OR IGNORE INTO item_comments (item_id, event_hash, author, body, created_at_us)
@@ -459,7 +555,7 @@ impl<'conn> Projector<'conn> {
                     event.item_id.as_str(),
                     event.event_hash,
                     event.agent,
-                    data.body,
+                    body,
                     event.wall_ts_us,
                 ],
             )
@@ -561,10 +657,17 @@ impl<'conn> Projector<'conn> {
 
         self.ensure_item_exists(event)?;
 
+        let is_redacted = self.is_event_redacted(&event.event_hash)?;
+        let summary = if is_redacted {
+            "[redacted]"
+        } else {
+            data.summary.as_str()
+        };
+
         self.conn
             .execute(
                 "UPDATE items SET compact_summary = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                params![data.summary, event.wall_ts_us, event.item_id.as_str()],
+                params![summary, event.wall_ts_us, event.item_id.as_str()],
             )
             .with_context(|| format!("project compact for {}", event.item_id))?;
 
@@ -1772,5 +1875,37 @@ mod tests {
             })
             .unwrap();
         assert_eq!(redaction_count, 1);
+    }
+
+    #[test]
+    fn late_create_populates_placeholder() {
+        let conn = test_db();
+        let projector = Projector::new(&conn);
+
+        // 1. Comment triggers placeholder creation
+        let comment = make_event(
+            EventType::Comment,
+            "bn-late",
+            EventData::Comment(CommentData {
+                body: "Comment first".into(),
+                extra: BTreeMap::new(),
+            }),
+            "h1",
+            1000,
+        );
+        projector.project_event(&comment).unwrap();
+
+        let item = query::get_item(&conn, "bn-late", false).unwrap().unwrap();
+        assert_eq!(item.title, "");
+        assert_eq!(item.created_at_us, 1000);
+
+        // 2. Late Create arrives
+        let create = make_create("bn-late", "Real Title", "h2", 900);
+
+        projector.project_event(&create).unwrap();
+
+        let item = query::get_item(&conn, "bn-late", false).unwrap().unwrap();
+        assert_eq!(item.title, "Real Title");
+        assert_eq!(item.created_at_us, 900);
     }
 }

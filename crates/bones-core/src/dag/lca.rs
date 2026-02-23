@@ -173,12 +173,16 @@ pub fn find_all_lcas(dag: &EventDag, tip_a: &str, tip_b: &str) -> Result<Vec<Str
     }
 
     // LCAs are common ancestors that have no descendants that are also common ancestors.
-    // A common ancestor C is an LCA iff no child of C (transitively) is also a common ancestor.
+    // A common ancestor C is an LCA iff no child of C is also a common ancestor.
     let mut lcas: Vec<String> = Vec::new();
     for &ca in &common {
-        let desc = dag.descendants(ca);
-        let has_common_descendant = desc.iter().any(|d| common.contains(d));
-        if !has_common_descendant {
+        let has_common_child = if let Some(node) = dag.get(ca) {
+            node.children.iter().any(|c| common.contains(c))
+        } else {
+            false
+        };
+
+        if !has_common_child {
             lcas.push(ca.clone());
         }
     }

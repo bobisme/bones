@@ -187,10 +187,6 @@ fn run_done_single(
         );
     }
 
-    let ts = shard_mgr
-        .next_timestamp()
-        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
-
     let move_data = MoveData {
         state: target_state,
         reason: reason.map(String::from),
@@ -198,7 +194,7 @@ fn run_done_single(
     };
 
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -208,14 +204,29 @@ fn run_done_single(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
+    {
+        use bones_core::lock::ShardLock;
+        let lock_path = shard_mgr.lock_path();
+        let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+            .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-    let line = writer::write_event(&mut event)
-        .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+        let (year, month) = shard_mgr
+            .rotate_if_needed()
+            .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+        event.wall_ts_us = shard_mgr
+            .next_timestamp()
+            .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+        assign_next_itc(project_root, &mut event)?;
+
+        let line = writer::write_event(&mut event)
+            .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
+
+        shard_mgr
+            .append_raw(year, month, &line)
+            .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
 
     let projector = project::Projector::new(conn);
     if let Err(e) = projector.project_event(&event) {
@@ -225,36 +236,49 @@ fn run_done_single(
     // Check goal auto-complete
     let auto_completed_parent = match check_goal_auto_complete(conn, &resolved_id)? {
         Some(parent_id) => {
-            let ts2 = shard_mgr
-                .next_timestamp()
-                .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+            let parent_move_data = MoveData {
+                state: State::Done,
+                reason: Some(format!(
+                    "auto-completed: all children of {} are done",
+                    parent_id
+                )),
+                extra: BTreeMap::new(),
+            };
 
             let mut parent_event = Event {
-                wall_ts_us: ts2,
+                wall_ts_us: 0,
                 agent: agent.to_string(),
                 itc: String::new(),
                 parents: vec![],
                 event_type: EventType::Move,
                 item_id: ItemId::new_unchecked(&parent_id),
-                data: EventData::Move(MoveData {
-                    state: State::Done,
-                    reason: Some(format!(
-                        "auto-completed: all children of {} are done",
-                        parent_id
-                    )),
-                    extra: BTreeMap::new(),
-                }),
+                data: EventData::Move(parent_move_data),
                 event_hash: String::new(),
             };
 
-            assign_next_itc(project_root, &mut parent_event)?;
+            {
+                use bones_core::lock::ShardLock;
+                let lock_path = shard_mgr.lock_path();
+                let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+                    .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-            let parent_line = writer::write_event(&mut parent_event)
-                .map_err(|e| anyhow::anyhow!("failed to serialize parent event: {e}"))?;
+                let (year, month) = shard_mgr
+                    .rotate_if_needed()
+                    .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-            shard_mgr
-                .append(&parent_line, false, Duration::from_secs(5))
-                .map_err(|e| anyhow::anyhow!("failed to write parent event: {e}"))?;
+                parent_event.wall_ts_us = shard_mgr
+                    .next_timestamp()
+                    .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+                assign_next_itc(project_root, &mut parent_event)?;
+
+                let parent_line = writer::write_event(&mut parent_event)
+                    .map_err(|e| anyhow::anyhow!("failed to serialize parent event: {e}"))?;
+
+                shard_mgr
+                    .append_raw(year, month, &parent_line)
+                    .map_err(|e| anyhow::anyhow!("failed to write parent event: {e}"))?;
+            }
 
             if let Err(e) = projector.project_event(&parent_event) {
                 tracing::warn!("parent projection failed: {e}");

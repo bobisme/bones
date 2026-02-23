@@ -273,7 +273,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
     issues.sort_by_key(|issue| issue.number);
 
     let shard_manager = ShardManager::new(project_root.join(".bones"));
-    let active_shard = shard_manager
+    shard_manager
         .init()
         .context("failed to initialize .bones shard state")?;
 
@@ -322,7 +322,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
             event_hash: String::new(),
         };
 
-        append_event(project_root, &shard_manager, active_shard, &mut event)?;
+        append_event(project_root, &shard_manager, &mut event)?;
         existing_item_ids.insert(event.item_id.to_string());
         report.imported_milestones += 1;
     }
@@ -365,7 +365,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
                 event_hash: String::new(),
             };
 
-            append_event(project_root, &shard_manager, active_shard, &mut event)?;
+            append_event(project_root, &shard_manager, &mut event)?;
             previous_hash = Some(event.event_hash.clone());
 
             match event.event_type {
@@ -485,12 +485,20 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
         let (year, month) = event_to_shard_timestamp(event.wall_ts_us)
             .with_context(|| format!("line {line_no}: invalid timestamp {}", event.wall_ts_us))?;
 
-        shard_manager
-            .create_shard(year, month)
-            .context("failed to initialize shard for timestamp")?;
-        shard_manager
-            .append_raw(year, month, &line)
-            .context("failed to append JSONL import event")?;
+        {
+            use bones_core::lock::ShardLock;
+            use std::time::Duration;
+            let lock_path = shard_manager.lock_path();
+            let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+                .context("failed to acquire shard lock")?;
+
+            shard_manager
+                .create_shard(year, month)
+                .context("failed to initialize shard for timestamp")?;
+            shard_manager
+                .append_raw(year, month, &line)
+                .context("failed to append JSONL import event")?;
+        }
 
         parent_index.insert(item_id.to_string(), event.event_hash.clone());
         *report
@@ -690,13 +698,23 @@ fn plan_issue_events(
 fn append_event(
     project_root: &Path,
     shard_manager: &ShardManager,
-    active_shard: (i32, u32),
     event: &mut Event,
 ) -> Result<()> {
+    use bones_core::lock::ShardLock;
+    use std::time::Duration;
+
+    let lock_path = shard_manager.lock_path();
+    let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+        .context("failed to acquire shard lock")?;
+
+    let (year, month) = shard_manager
+        .rotate_if_needed()
+        .context("failed to rotate shards")?;
+
     assign_next_itc(project_root, event)?;
     let line = write_event(event).context("failed to serialize imported event")?;
     shard_manager
-        .append_raw(active_shard.0, active_shard.1, &line)
+        .append_raw(year, month, &line)
         .context("failed to append imported event")
 }
 
