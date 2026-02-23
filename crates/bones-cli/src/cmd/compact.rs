@@ -21,7 +21,7 @@ use crate::output::{CliError, OutputMode, render, render_error};
 /// Arguments for `bn compact`.
 #[derive(Args, Debug)]
 pub struct CompactArgs {
-    /// Minimum days in done/archived state before an item is compacted.
+    /// Minimum days in done/archived state before a bone is compacted.
     #[arg(long, default_value = "30")]
     pub min_age_days: u32,
 

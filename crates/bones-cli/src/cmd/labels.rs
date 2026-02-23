@@ -33,16 +33,16 @@ pub struct LabelArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum LabelCommand {
-    #[command(about = "Add one label to an item")]
+    #[command(about = "Add one label to a bone")]
     Add(LabelAddArgs),
 
-    #[command(about = "Remove one label from an item")]
+    #[command(about = "Remove one label from a bone")]
     Rm(LabelRmArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct LabelAddArgs {
-    /// Item ID to label.
+    /// Bone ID to label.
     pub id: String,
 
     /// Label to add.
@@ -51,7 +51,7 @@ pub struct LabelAddArgs {
 
 #[derive(Args, Debug)]
 pub struct LabelRmArgs {
-    /// Item ID to unlabel.
+    /// Bone ID to unlabel.
     pub id: String,
 
     /// Label to remove.

@@ -23,7 +23,7 @@ pub struct PlanArgs {
     /// Optional goal ID. When provided, only open children of this goal are planned.
     pub goal_id: Option<String>,
 
-    /// Include dependency explanations for each layered item.
+    /// Include dependency explanations for each layered bone.
     #[arg(long)]
     pub explain: bool,
 }
@@ -482,8 +482,7 @@ mod tests {
             "bn-scored".to_string(),
             "bn-also-unknown".to_string(),
         ]];
-        let scores: HashMap<String, f64> =
-            HashMap::from([("bn-scored".to_string(), 5.0)]);
+        let scores: HashMap<String, f64> = HashMap::from([("bn-scored".to_string(), 5.0)]);
 
         sort_layers_by_score(&mut layers, &scores);
 
@@ -527,10 +526,8 @@ mod tests {
         let mut layers = graph::topological_layers(&graph, None);
         assert_eq!(layers.len(), 3, "three-node chain should produce 3 layers");
 
-        let original_membership: Vec<BTreeSet<String>> = layers
-            .iter()
-            .map(|l| l.iter().cloned().collect())
-            .collect();
+        let original_membership: Vec<BTreeSet<String>> =
+            layers.iter().map(|l| l.iter().cloned().collect()).collect();
 
         let scores: HashMap<String, f64> = HashMap::from([
             ("bn-a".to_string(), 1.0),
@@ -539,10 +536,8 @@ mod tests {
         ]);
         sort_layers_by_score(&mut layers, &scores);
 
-        let sorted_membership: Vec<BTreeSet<String>> = layers
-            .iter()
-            .map(|l| l.iter().cloned().collect())
-            .collect();
+        let sorted_membership: Vec<BTreeSet<String>> =
+            layers.iter().map(|l| l.iter().cloned().collect()).collect();
         assert_eq!(original_membership, sorted_membership);
     }
 

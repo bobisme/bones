@@ -1,8 +1,8 @@
-//! `bn archive` — transition done items to archived state.
+//! `bn archive` — transition done bones to archived state.
 //!
 //! Supports two modes:
-//! - `bn archive <id>`: archive one item (done -> archived)
-//! - `bn archive --auto [--days N]`: archive done items older than N days
+//! - `bn archive <id>`: archive one bone (done -> archived)
+//! - `bn archive --auto [--days N]`: archive done bones older than N days
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
@@ -29,10 +29,10 @@ use bones_core::shard::ShardManager;
 
 #[derive(Args, Debug)]
 pub struct ArchiveArgs {
-    /// Item ID to archive. Omit when using --auto.
+    /// Bone ID to archive. Omit when using --auto.
     pub id: Option<String>,
 
-    /// Bulk-archive done items older than N days.
+    /// Bulk-archive done bones older than N days.
     #[arg(long)]
     pub auto: bool,
 
@@ -336,7 +336,7 @@ pub fn run_archive(
     }
 
     if args.auto && args.id.is_some() {
-        let msg = "cannot use item ID together with --auto";
+        let msg = "cannot use bone ID together with --auto";
         render_error(
             output,
             &CliError::with_details(

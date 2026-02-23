@@ -1,4 +1,4 @@
-//! `bn bone comment` and `bn bone comments` — append and inspect item comment timelines.
+//! `bn bone comment` and `bn bone comments` — append and inspect bone comment timelines.
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
@@ -30,7 +30,7 @@ pub struct CommentArgs {
 #[derive(Subcommand, Debug)]
 pub enum CommentCommand {
     #[command(
-        about = "Add a comment to a work item",
+        about = "Add a comment to a bone",
         after_help = "EXAMPLES:\n    # Add a progress note\n    bn bone comment add bn-abc \"Investigating timeout path\"\n\n    # Add with explicit agent\n    bn --agent alice bone comment add bn-abc \"Root cause found\""
     )]
     Add(CommentAddArgs),
@@ -38,7 +38,7 @@ pub enum CommentCommand {
 
 #[derive(Args, Debug)]
 pub struct CommentAddArgs {
-    /// Item ID to comment on (supports partial IDs).
+    /// Bone ID to comment on (supports partial IDs).
     pub id: String,
 
     /// Comment body.
@@ -47,7 +47,7 @@ pub struct CommentAddArgs {
 
 #[derive(Args, Debug)]
 pub struct CommentsArgs {
-    /// Item ID to show comments for (supports partial IDs).
+    /// Bone ID to show comments for (supports partial IDs).
     pub id: String,
 
     /// Maximum number of comments to list.

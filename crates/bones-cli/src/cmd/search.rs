@@ -1,4 +1,4 @@
-//! `bn search` — hybrid search over items.
+//! `bn search` — hybrid search over bones.
 //!
 //! Uses reciprocal-rank fusion across lexical (FTS5/BM25), optional semantic
 //! embeddings, and structural graph proximity signals.
@@ -20,11 +20,11 @@ const MIN_SEMANTIC_TOP_SCORE: f32 = 0.62;
 
 #[derive(Args, Debug)]
 #[command(
-    about = "Search items using full-text search",
-    long_about = "Search work items using hybrid ranking (lexical BM25 + optional semantic + structural fusion).\n\n\
+    about = "Search bones using full-text search",
+    long_about = "Search bones using hybrid ranking (lexical BM25 + optional semantic + structural fusion).\n\n\
                   FTS5 syntax is supported for lexical query parsing: stemming ('run' matches 'running'), \
                   prefix search ('auth*'), boolean operators (AND, OR, NOT).",
-    after_help = "EXAMPLES:\n    # Search for items about authentication\n    bn search authentication\n\n\
+    after_help = "EXAMPLES:\n    # Search for bones about authentication\n    bn search authentication\n\n\
                   # Prefix search\n    bn search 'auth*'\n\n\
                   # Limit results\n    bn search timeout -n 5\n\n\
                   # Machine-readable output\n    bn search authentication --format json"

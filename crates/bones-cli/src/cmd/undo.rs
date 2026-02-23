@@ -42,11 +42,11 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct UndoArgs {
-    /// Item ID to undo events on (mutually exclusive with --event).
+    /// Bone ID to undo events on (mutually exclusive with --event).
     #[arg(conflicts_with = "event_hash")]
     pub id: Option<String>,
 
-    /// Number of most-recent events to undo (default: 1). Only used with item ID.
+    /// Number of most-recent events to undo (default: 1). Only used with a bone ID.
     #[arg(long = "last", default_value = "1", requires = "id")]
     pub last_n: usize,
 

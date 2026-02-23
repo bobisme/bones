@@ -1,4 +1,4 @@
-//! `bn show` — display full details of a single work item.
+//! `bn show` — display full details of a single bone.
 //!
 //! Supports partial ID resolution: "a7x" → "bn-a7x", and prefix matching
 //! when an exact match is not found.
@@ -16,7 +16,7 @@ use std::io::Write;
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
-    /// Item ID to display. Supports partial IDs: "a7x" → "bn-a7x".
+    /// Bone ID to display. Supports partial IDs: "a7x" → "bn-a7x".
     pub id: String,
 }
 

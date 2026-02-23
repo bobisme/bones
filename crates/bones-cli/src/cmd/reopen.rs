@@ -1,6 +1,6 @@
-//! `bn reopen` — reopen a closed or archived work item.
+//! `bn reopen` — reopen a closed or archived bone.
 //!
-//! Emits an `item.move` event transitioning the item to the Open state.
+//! Emits an `item.move` event transitioning the bone to the Open state.
 //! Valid source states: done→open, archived→open.
 //!
 //! Reopening uses the EpochPhase CRDT semantics: the new epoch ensures
@@ -33,10 +33,10 @@ use bones_core::shard::ShardManager;
 /// Arguments for `bn reopen`.
 #[derive(Args, Debug)]
 pub struct ReopenArgs {
-    /// Item ID to reopen (supports partial IDs).
+    /// Bone ID to reopen (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to reopen in the same command.
+    /// Additional bone IDs to reopen in the same command.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 }

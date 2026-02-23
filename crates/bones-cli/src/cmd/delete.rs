@@ -1,6 +1,6 @@
-//! `bn delete` — soft-delete an item via tombstone event.
+//! `bn delete` — soft-delete a bone via tombstone event.
 //!
-//! Emits `item.delete` with optional reason. Deleted items remain in the
+//! Emits `item.delete` with optional reason. Deleted bones remain in the
 //! append-only event log but are excluded from active views.
 
 use crate::agent;
@@ -27,10 +27,10 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
-    /// Item ID to delete (supports partial IDs).
+    /// Bone ID to delete (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to delete in the same command.
+    /// Additional bone IDs to delete in the same command.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 

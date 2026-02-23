@@ -1,4 +1,4 @@
-//! `bn move` — reparent a work item under a different goal.
+//! `bn move` — reparent a bone under a different goal.
 
 use crate::agent;
 use crate::itc_state::assign_next_itc;
@@ -18,10 +18,10 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct MoveArgs {
-    /// Item ID to move.
+    /// Bone ID to move.
     pub id: String,
 
-    /// New parent item ID. Use "--parent none" to make top-level.
+    /// New parent bone ID. Use "--parent none" to make top-level.
     #[arg(long)]
     pub parent: String,
 }

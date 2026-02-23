@@ -1,4 +1,4 @@
-//! `bn create` — create a new work item.
+//! `bn create` — create a new bone.
 //!
 //! Generates a unique item ID, emits an `item.create` event to the active
 //! shard, projects it into the SQLite database, and outputs the result.
@@ -33,11 +33,11 @@ use bones_triage::graph::RawGraph;
 
 #[derive(Args, Debug)]
 pub struct CreateArgs {
-    /// Title of the new item.
+    /// Title of the new bone.
     #[arg(short, long)]
     pub title: String,
 
-    /// Item kind: task, goal, or bug.
+    /// Bone kind: task, goal, or bug.
     #[arg(short, long, default_value = "task")]
     pub kind: String,
 
@@ -49,7 +49,7 @@ pub struct CreateArgs {
     #[arg(short, long)]
     pub urgency: Option<String>,
 
-    /// Parent item ID (makes this a child of a goal).
+    /// Parent bone ID (makes this a child of a goal).
     #[arg(long)]
     pub parent: Option<String>,
 
@@ -61,7 +61,7 @@ pub struct CreateArgs {
     #[arg(short, long)]
     pub description: Option<String>,
 
-    /// Items this new item blocks (can be repeated).
+    /// Bones this new bone blocks (can be repeated).
     #[arg(long)]
     pub blocks: Vec<String>,
 
@@ -70,7 +70,7 @@ pub struct CreateArgs {
     pub force: bool,
 }
 
-/// JSON output for a created item.
+/// JSON output for a created bone.
 #[derive(Debug, Serialize)]
 struct CreateOutput {
     id: String,

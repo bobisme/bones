@@ -120,8 +120,26 @@ pub fn run_triage(
     render_mode(
         output,
         &rows,
-        |_, w| render_triage_text(w, &top_picks, &actionable_blockers, &blocked_hubs, &quick_wins, &cycles),
-        |_, w| render_triage_human(w, &top_picks, &actionable_blockers, &blocked_hubs, &quick_wins, &cycles),
+        |_, w| {
+            render_triage_text(
+                w,
+                &top_picks,
+                &actionable_blockers,
+                &blocked_hubs,
+                &quick_wins,
+                &cycles,
+            )
+        },
+        |_, w| {
+            render_triage_human(
+                w,
+                &top_picks,
+                &actionable_blockers,
+                &blocked_hubs,
+                &quick_wins,
+                &cycles,
+            )
+        },
     )
 }
 
@@ -509,10 +527,7 @@ mod tests {
             ("bn-act".to_string(), "Actionable".to_string()),
             ("bn-hub".to_string(), "Hub".to_string()),
         ]);
-        let score_map = HashMap::from([
-            ("bn-act".to_string(), 0.9),
-            ("bn-hub".to_string(), 0.7),
-        ]);
+        let score_map = HashMap::from([("bn-act".to_string(), 0.9), ("bn-hub".to_string(), 0.7)]);
 
         let rows = build_rows(
             &empty_refs,
@@ -524,8 +539,10 @@ mod tests {
             &score_map,
         );
 
-        let actionable_rows: Vec<_> =
-            rows.iter().filter(|r| r.section == "actionable_blocker").collect();
+        let actionable_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.section == "actionable_blocker")
+            .collect();
         let hub_rows: Vec<_> = rows.iter().filter(|r| r.section == "blocked_hub").collect();
 
         assert_eq!(actionable_rows.len(), 1);

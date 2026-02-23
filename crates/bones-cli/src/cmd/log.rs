@@ -15,7 +15,7 @@ use std::path::Path;
 
 #[derive(Args, Debug, Clone)]
 pub struct LogArgs {
-    /// Item ID to inspect.
+    /// Bone ID to inspect.
     pub id: String,
 
     /// Include events at/after this RFC3339 timestamp.
@@ -44,7 +44,7 @@ pub struct HistoryArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct BlameArgs {
-    /// Item ID to inspect.
+    /// Bone ID to inspect.
     pub id: String,
 
     /// Field name to attribute (e.g. title, description, state).

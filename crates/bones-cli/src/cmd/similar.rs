@@ -1,8 +1,8 @@
-//! `bn similar` — find items most similar to a given item using fusion scoring.
+//! `bn similar` — find bones most similar to a given bone using fusion scoring.
 //!
 //! Combines lexical (FTS5), semantic, and structural search layers via
-//! Reciprocal Rank Fusion (RRF) to produce a ranked list of similar items.
-//! Excludes the source item from results.
+//! Reciprocal Rank Fusion (RRF) to produce a ranked list of similar bones.
+//! Excludes the source bone from results.
 
 use crate::cmd::dup::{build_fts_query, has_meaningful_signal_overlap};
 use crate::cmd::show::resolve_item_id;
@@ -21,17 +21,17 @@ const DEFAULT_LIMIT: usize = 10;
 
 #[derive(Args, Debug)]
 #[command(
-    about = "Find items most similar to a given item",
-    long_about = "Find work items most similar to the given item using fusion scoring.\n\n\
+    about = "Find bones most similar to a given bone",
+    long_about = "Find bones most similar to the given bone using fusion scoring.\n\n\
                   Combines lexical (FTS5), semantic, and structural search layers via\n\
                   Reciprocal Rank Fusion (RRF) to rank candidates by similarity.\n\n\
-                  Results exclude the source item and show per-layer score breakdown.",
-    after_help = "EXAMPLES:\n    # Find items similar to bn-abc\n    bn similar bn-abc\n\n\
+                  Results exclude the source bone and show per-layer score breakdown.",
+    after_help = "EXAMPLES:\n    # Find bones similar to bn-abc\n    bn similar bn-abc\n\n\
                   # Limit to top 5 results\n    bn similar bn-abc --limit 5\n\n\
                   # Machine-readable output\n    bn triage similar bn-abc --format json"
 )]
 pub struct SimilarArgs {
-    /// Item ID to find similar items for. Supports partial IDs.
+    /// Bone ID to find similar bones for. Supports partial IDs.
     pub id: String,
 
     /// Maximum number of results to return.
@@ -39,12 +39,12 @@ pub struct SimilarArgs {
     pub limit: usize,
 }
 
-/// A single similar item result with per-layer score breakdown.
+/// A single similar bone result with per-layer score breakdown.
 #[derive(Debug, Serialize)]
 pub struct SimilarResult {
-    /// Item ID of the similar item.
+    /// Bone ID of the similar bone.
     pub id: String,
-    /// Title of the similar item.
+    /// Title of the similar bone.
     pub title: String,
     /// Composite RRF fusion score (higher = more similar).
     pub score: f32,
@@ -59,19 +59,19 @@ pub struct SimilarResult {
 /// JSON envelope for `bn similar` output.
 #[derive(Debug, Serialize)]
 pub struct SimilarOutput {
-    /// Canonicalized source item ID.
+    /// Canonicalized source bone ID.
     pub source_id: String,
-    /// Source item title.
+    /// Source bone title.
     pub source_title: String,
     /// Number of results returned.
     pub count: usize,
-    /// Ordered list of similar items (highest score first).
+    /// Ordered list of similar bones (highest score first).
     pub results: Vec<SimilarResult>,
 }
 
 /// Compute a per-layer score from a rank position using the RRF formula.
 ///
-/// Returns `1.0 / (k + rank)` for a present item, or `0.0` if absent
+/// Returns `1.0 / (k + rank)` for a present bone, or `0.0` if absent
 /// (`rank == usize::MAX`).
 fn rank_to_score(rank: usize, k: usize) -> f32 {
     if rank == usize::MAX {
@@ -83,9 +83,9 @@ fn rank_to_score(rank: usize, k: usize) -> f32 {
 
 /// Execute `bn similar <id>`.
 ///
-/// Resolves the source item, constructs a query from its title and description,
-/// invokes the fusion search pipeline, filters out the source item from results,
-/// and renders the ranked similar items.
+/// Resolves the source bone, constructs a query from its title and description,
+/// invokes the fusion search pipeline, filters out the source bone from results,
+/// and renders the ranked similar bones.
 ///
 /// # Errors
 ///

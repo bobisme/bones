@@ -878,7 +878,10 @@ mod tests {
             ("bn-work".to_string(), Urgency::Urgent),
         ]);
         let pressure = compute_urgent_chain_pressure(&raw, &urgency_by_id, &unresolved);
-        let blocker_pressure = pressure.get("bn-blocker").map(|r| r.pressure).unwrap_or(0.0);
+        let blocker_pressure = pressure
+            .get("bn-blocker")
+            .map(|r| r.pressure)
+            .unwrap_or(0.0);
         assert!(
             blocker_pressure > 0.0,
             "blocker should receive chain pressure from urgent descendant"
@@ -941,7 +944,15 @@ mod tests {
         for i in 0..=depth {
             let id = format!("bn-n{i}");
             let urgency = if i == depth { "urgent" } else { "default" };
-            insert_item(&conn, &id, &format!("Node {i}"), "open", urgency, None, i as i64);
+            insert_item(
+                &conn,
+                &id,
+                &format!("Node {i}"),
+                "open",
+                urgency,
+                None,
+                i as i64,
+            );
         }
         for i in 0..depth {
             insert_blocks_edge(&conn, &format!("bn-n{i}"), &format!("bn-n{}", i + 1));
@@ -979,7 +990,15 @@ mod tests {
     fn no_propagation_from_done_items() {
         let conn = test_db();
         insert_item(&conn, "bn-blocker", "Blocker", "open", "default", None, 10);
-        insert_item(&conn, "bn-done-urgent", "Done urgent", "done", "urgent", None, 20);
+        insert_item(
+            &conn,
+            "bn-done-urgent",
+            "Done urgent",
+            "done",
+            "urgent",
+            None,
+            20,
+        );
         insert_blocks_edge(&conn, "bn-blocker", "bn-done-urgent");
 
         let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
@@ -1039,8 +1058,24 @@ mod tests {
     #[test]
     fn explanation_includes_urgent_item_ids() {
         let conn = test_db();
-        insert_item(&conn, "bn-prereq", "Prerequisite", "open", "default", None, 10);
-        insert_item(&conn, "bn-urgent-target", "Urgent target", "open", "urgent", None, 20);
+        insert_item(
+            &conn,
+            "bn-prereq",
+            "Prerequisite",
+            "open",
+            "default",
+            None,
+            10,
+        );
+        insert_item(
+            &conn,
+            "bn-urgent-target",
+            "Urgent target",
+            "open",
+            "urgent",
+            None,
+            20,
+        );
         insert_blocks_edge(&conn, "bn-prereq", "bn-urgent-target");
 
         let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");

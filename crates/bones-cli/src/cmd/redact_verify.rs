@@ -1,4 +1,4 @@
-//! `bn redact-verify` — verify redaction completeness for work items.
+//! `bn redact-verify` — verify redaction completeness for bones.
 //!
 //! Checks that all `item.redact` events have been fully applied:
 //! redacted content must be absent from projection rows, FTS5 index,
@@ -18,7 +18,7 @@ use std::io::{self, Write};
 
 #[derive(Args, Debug)]
 pub struct RedactVerifyArgs {
-    /// Optional item ID to verify. If omitted, verifies all redactions.
+    /// Optional bone ID to verify. If omitted, verifies all redactions.
     pub item_id: Option<String>,
 }
 

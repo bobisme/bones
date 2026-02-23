@@ -1,4 +1,4 @@
-//! `bn list` — list work items with filtering.
+//! `bn list` — list bones with filtering.
 //!
 //! By default, shows all open items (state = "open"). Filters can be
 //! combined. Supports both human-readable table and JSON output.
@@ -39,7 +39,7 @@ pub struct ListArgs {
     #[arg(short = 'u', long)]
     pub urgency: Option<String>,
 
-    /// Filter by parent item ID.
+    /// Filter by parent bone ID.
     #[arg(long)]
     pub parent: Option<String>,
 
@@ -47,19 +47,19 @@ pub struct ListArgs {
     #[arg(long)]
     pub assignee: Option<String>,
 
-    /// Filter to items updated at or after this datetime.
+    /// Filter to bones updated at or after this datetime.
     ///
     /// Accepts RFC3339 (2026-02-20T12:00:00Z), epoch seconds, or epoch microseconds.
     #[arg(long)]
     pub since: Option<String>,
 
-    /// Filter to items updated at or before this datetime.
+    /// Filter to bones updated at or before this datetime.
     ///
     /// Accepts RFC3339 (2026-02-20T12:00:00Z), epoch seconds, or epoch microseconds.
     #[arg(long)]
     pub until: Option<String>,
 
-    /// Maximum number of items to show (0 = all).
+    /// Maximum number of bones to show (0 = all).
     #[arg(short = 'n', long, default_value = "50")]
     pub limit: usize,
 

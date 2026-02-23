@@ -1,6 +1,6 @@
-//! `bn do` — transition an item to "doing" state.
+//! `bn do` — transition a bone to "doing" state.
 //!
-//! Validates the item exists and is in a valid source state (open or
+//! Validates the bone exists and is in a valid source state (open or
 //! doing→open reopen), emits an `item.move` event with `{state: "doing"}`,
 //! projects the state change into SQLite, and outputs the result.
 
@@ -28,10 +28,10 @@ use bones_core::shard::ShardManager;
 
 #[derive(Args, Debug)]
 pub struct DoArgs {
-    /// Item ID to transition (supports partial IDs).
+    /// Bone ID to transition (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to transition in the same command.
+    /// Additional bone IDs to transition in the same command.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 }

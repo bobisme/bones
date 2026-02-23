@@ -1,4 +1,4 @@
-//! `bn close` — convenience alias for transitioning an item to "done" state.
+//! `bn close` — convenience alias for transitioning a bone to "done" state.
 //!
 //! This is semantically equivalent to `bn done <id>`. It validates the
 //! current state allows a transition to done (open→done, doing→done),
@@ -14,14 +14,14 @@ use std::path::Path;
 /// Arguments for `bn close`.
 #[derive(Args, Debug)]
 pub struct CloseArgs {
-    /// Item ID to close (supports partial IDs).
+    /// Bone ID to close (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to close in the same command.
+    /// Additional bone IDs to close in the same command.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 
-    /// Optional reason for closing this item.
+    /// Optional reason for closing this bone.
     #[arg(long)]
     pub reason: Option<String>,
 }

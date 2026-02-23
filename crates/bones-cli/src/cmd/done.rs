@@ -1,10 +1,10 @@
-//! `bn done` — transition an item to "done" state.
+//! `bn done` — transition a bone to "done" state.
 //!
-//! Validates the item exists and is in a valid source state (open→done or
+//! Validates the bone exists and is in a valid source state (open→done or
 //! doing→done), emits an `item.move` event with `{state: "done"}`, projects
 //! the state change into SQLite, and outputs the result.
 //!
-//! Supports `--reason` flag for recording why the item is done. When a goal's
+//! Supports `--reason` flag for recording why the bone is done. When a goal's
 //! last open/doing child is completed, goal auto-complete emits an additional
 //! move event for the parent goal.
 
@@ -32,14 +32,14 @@ use bones_core::shard::ShardManager;
 
 #[derive(Args, Debug)]
 pub struct DoneArgs {
-    /// Item ID to mark as done (supports partial IDs).
+    /// Bone ID to mark as done (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to mark as done in the same command.
+    /// Additional bone IDs to mark as done in the same command.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 
-    /// Optional reason for completing this item.
+    /// Optional reason for completing this bone.
     #[arg(long)]
     pub reason: Option<String>,
 }

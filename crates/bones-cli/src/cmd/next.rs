@@ -70,7 +70,7 @@ struct EmptyNext {
 
 /// Execute `bn next`.
 ///
-/// - default: returns top-1 unblocked work item with explanation
+/// - default: returns top-1 ready bone with explanation
 /// - `bn next N`: returns up to `N` ranked assignments (one per slot)
 pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     let agent_slots = match parse_assignment_count(args.count) {

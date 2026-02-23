@@ -1,8 +1,8 @@
-//! `bn dup` — find potential duplicate work items using FTS5 lexical search.
+//! `bn dup` — find potential duplicate bones using FTS5 lexical search.
 //!
-//! Uses the source item's title (and optionally description) as an FTS5 query
-//! to find similar items. BM25 scores are normalized to [0, 1] using the
-//! source item's own score as the reference maximum.
+//! Uses the source bone's title (and optionally description) as an FTS5 query
+//! to find similar bones. BM25 scores are normalized to [0, 1] using the
+//! source bone's own score as the reference maximum.
 //!
 //! Match types are classified using thresholds from `.bones/config.toml`:
 //! - `search.duplicate_threshold` (default 0.85) → `likely_duplicate`
@@ -21,21 +21,21 @@ use std::io::Write;
 
 #[derive(Args, Debug)]
 #[command(
-    about = "Find potential duplicate work items",
-    long_about = "Find work items that may be duplicates of the given item.\n\n\
-                  Uses SQLite FTS5 lexical search with BM25 ranking. The item's \
-                  title and description are used as a query against all other items. \
+    about = "Find potential duplicate bones",
+    long_about = "Find bones that may be duplicates of the given bone.\n\n\
+                  Uses SQLite FTS5 lexical search with BM25 ranking. The bone's \
+                  title and description are used as a query against all other bones. \
                   Results are classified by similarity score using thresholds from \
                   `.bones/config.toml` (search.duplicate_threshold, search.related_threshold).",
-    after_help = "EXAMPLES:\n    # Find duplicates of an item\n    bn dup bn-abc\n\n\
+    after_help = "EXAMPLES:\n    # Find duplicates of a bone\n    bn dup bn-abc\n\n\
                   # Use a custom threshold\n    bn dup bn-abc --threshold 0.75\n\n\
                   # Machine-readable output\n    bn triage dup bn-abc --format json"
 )]
 pub struct DupArgs {
-    /// Item ID to check for duplicates. Supports partial IDs.
+    /// Bone ID to check for duplicates. Supports partial IDs.
     pub id: String,
 
-    /// Override similarity threshold (0.0–1.0). Below this, items are excluded.
+    /// Override similarity threshold (0.0–1.0). Below this, bones are excluded.
     /// Defaults to `search.related_threshold` from config (0.65).
     #[arg(long)]
     pub threshold: Option<f64>,
@@ -63,10 +63,10 @@ impl MatchType {
     }
 }
 
-/// A candidate duplicate item with similarity score and classification.
+/// A candidate duplicate bone with similarity score and classification.
 #[derive(Debug, Serialize)]
 pub struct DupCandidate {
-    /// Item ID of the candidate.
+    /// Bone ID of the candidate.
     pub id: String,
     /// Item title.
     pub title: String,
@@ -78,12 +78,12 @@ pub struct DupCandidate {
     pub match_type: MatchType,
 }
 
-/// JSON envelope for dup output.
+/// JSON envelope for `bn dup` output.
 #[derive(Debug, Serialize)]
 pub struct DupOutput {
-    /// Source item ID (canonicalized).
+    /// Source bone ID (canonicalized).
     pub source_id: String,
-    /// Source item title.
+    /// Source bone title.
     pub source_title: String,
     /// Duplicate threshold used.
     pub duplicate_threshold: f64,

@@ -31,14 +31,14 @@ use crate::validate;
 /// Arguments for `bn graph`.
 #[derive(Args, Debug)]
 pub struct GraphArgs {
-    /// Item ID to show graph for. If omitted, shows the project summary.
+    /// Bone ID to show graph for. If omitted, shows the project summary.
     pub id: Option<String>,
 
-    /// Only show downstream items (what this item blocks).
+    /// Only show downstream bones (what this bone blocks).
     #[arg(long)]
     pub down: bool,
 
-    /// Only show upstream items (what blocks this item).
+    /// Only show upstream bones (what blocks this bone).
     #[arg(long)]
     pub up: bool,
 
@@ -566,10 +566,7 @@ fn run_graph_summary(
                 let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
             } else {
                 let arrow_str = targets.join(", ");
-                let _ = writeln!(
-                    out,
-                    "    [{state_mark}] {id} -- {title}  --> {arrow_str}"
-                );
+                let _ = writeln!(out, "    [{state_mark}] {id} -- {title}  --> {arrow_str}");
             }
         }
     }
@@ -782,7 +779,7 @@ mod tests {
     #[test]
     fn graph_summary_shows_directed_graph() {
         use bones_core::db::migrations;
-        use rusqlite::{params, Connection};
+        use rusqlite::{Connection, params};
 
         let mut conn = Connection::open_in_memory().expect("in-memory db");
         migrations::migrate(&mut conn).expect("migrate");

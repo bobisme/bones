@@ -1,4 +1,4 @@
-//! `bn triage dep` — manage dependency links between work items.
+//! `bn triage dep` — manage dependency links between bones.
 //!
 //! Subcommands:
 //! - `bn triage dep add <from> --blocks <to>` — emit `item.link` with type "blocks"
@@ -39,13 +39,13 @@ pub struct DepArgs {
 #[derive(Subcommand, Debug)]
 pub enum DepCommand {
     #[command(
-        about = "Add a dependency link between two items",
+        about = "Add a dependency link between two bones",
         after_help = "EXAMPLES:\n    # A blocks B\n    bn triage dep add bn-abc --blocks bn-def\n\n    # A relates to B (informational)\n    bn triage dep add bn-abc --relates bn-def"
     )]
     Add(DepAddArgs),
 
     #[command(
-        about = "Remove a dependency link between two items",
+        about = "Remove a dependency link between two bones",
         after_help = "EXAMPLES:\n    # Remove the link: bn-abc blocks bn-def\n    bn triage dep rm bn-abc bn-def"
     )]
     Rm(DepRmArgs),
@@ -54,14 +54,14 @@ pub enum DepCommand {
 /// Arguments for `bn triage dep add`.
 #[derive(Args, Debug)]
 pub struct DepAddArgs {
-    /// Source item ID (the blocker / origin of the link).
+    /// Source bone ID (the blocker / origin of the link).
     pub from: String,
 
-    /// Target item: <from> blocks <to> (creates a hard blocking dependency).
+    /// Target bone: <from> blocks <to> (creates a hard blocking dependency).
     #[arg(long, group = "link_target", value_name = "TO")]
     pub blocks: Option<String>,
 
-    /// Target item: <from> relates to <to> (informational, no triage impact).
+    /// Target bone: <from> relates to <to> (informational, no triage impact).
     #[arg(long, group = "link_target", value_name = "TO")]
     pub relates: Option<String>,
 }
@@ -69,10 +69,10 @@ pub struct DepAddArgs {
 /// Arguments for `bn triage dep rm`.
 #[derive(Args, Debug)]
 pub struct DepRmArgs {
-    /// Source item ID (the blocker).
+    /// Source bone ID (the blocker).
     pub from: String,
 
-    /// Target item ID (the item that was blocked).
+    /// Target bone ID (the bone that was blocked).
     pub to: String,
 }
 

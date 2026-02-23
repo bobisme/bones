@@ -1,6 +1,6 @@
-//! `bn dedup` — bulk duplicate detection across open items.
+//! `bn dedup` — bulk duplicate detection across open bones.
 //!
-//! Scans all open items, builds a sparse similarity graph using BM25 prefiltering
+//! Scans all open bones, builds a sparse similarity graph using BM25 prefiltering
 //! and fusion scoring, then reports duplicate clusters.
 
 use crate::cmd::dup::{build_fts_query, has_meaningful_signal_overlap};
@@ -21,8 +21,8 @@ const PREFILTER_SCORE_FLOOR: f64 = 0.30;
 
 #[derive(Args, Debug)]
 #[command(
-    about = "Bulk duplicate detection across open items",
-    long_about = "Scan all open items to find likely duplicate clusters.\n\n\
+    about = "Bulk duplicate detection across open bones",
+    long_about = "Scan all open bones to find likely duplicate clusters.\n\n\
                   Uses FTS5 BM25 as a first-pass filter, then fusion scoring to\
                   confirm likely duplicate links.",
     after_help = "EXAMPLES:\n    # Scan with default threshold\n    bn dedup\n\n\

@@ -1,14 +1,14 @@
-//! `bn update` — patch one or more fields on a work item.
+//! `bn update` — patch one or more fields on a bone.
 //!
 //! Each field change emits a separate `item.update` event for CRDT
 //! correctness (one LWW write per field). Supports partial ID resolution.
 //!
 //! # Supported fields
-//! - `--title`       — item title (LWW string)
-//! - `--description` — item description (LWW string)
+//! - `--title`       — bone title (LWW string)
+//! - `--description` — bone description (LWW string)
 //! - `--size`        — t-shirt size estimate (xxs|xs|s|m|l|xl|xxl)
 //! - `--urgency`     — urgency level (punt|low|default|high|urgent)
-//! - `--kind`        — work item kind (task|bug|feature|goal|epic)
+//! - `--kind`        — bone kind (task|bug|goal)
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
@@ -34,18 +34,18 @@ use bones_core::shard::ShardManager;
 /// Arguments for `bn update`.
 #[derive(Args, Debug)]
 pub struct UpdateArgs {
-    /// Item ID to update (supports partial IDs).
+    /// Bone ID to update (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to apply the same updates to.
+    /// Additional bone IDs to apply the same updates to.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 
-    /// New title for the item.
+    /// New title for the bone.
     #[arg(long)]
     pub title: Option<String>,
 
-    /// New description for the item (pass empty string to clear).
+    /// New description for the bone (pass empty string to clear).
     #[arg(long)]
     pub description: Option<String>,
 

@@ -25,13 +25,13 @@ use bones_triage::feedback::{FeedbackEntry, FeedbackKind, record_feedback_at};
 
 #[derive(Args, Debug)]
 pub struct DidArgs {
-    /// Item ID (supports partial IDs).
+    /// Bone ID (supports partial IDs).
     pub id: String,
 }
 
 #[derive(Args, Debug)]
 pub struct SkipArgs {
-    /// Item ID (supports partial IDs).
+    /// Bone ID (supports partial IDs).
     pub id: String,
 }
 

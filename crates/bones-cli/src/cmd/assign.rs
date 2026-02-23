@@ -1,4 +1,4 @@
-//! `bn bone assign` / `bn bone unassign` — manage assignees for work items.
+//! `bn bone assign` / `bn bone unassign` — manage assignees for bones.
 //!
 //! - `bn bone assign <id> <agent>` emits `item.assign` with `action=assign`
 //! - `bn bone unassign <id>` emits `item.assign` with `action=unassign` for the
@@ -25,24 +25,24 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct AssignArgs {
-    /// Item ID to assign (supports partial IDs).
+    /// Bone ID to assign (supports partial IDs).
     pub id: String,
 
-    /// Agent to assign to this item.
+    /// Agent to assign to this bone.
     #[arg(value_name = "ASSIGNEE")]
     pub assignee: String,
 
-    /// Additional item IDs to assign the same agent to.
+    /// Additional bone IDs to assign the same agent to.
     #[arg(long = "ids", value_name = "ID", num_args = 1..)]
     pub additional_ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct UnassignArgs {
-    /// Item ID to unassign from the current agent (supports partial IDs).
+    /// Bone ID to unassign from the current agent (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to unassign.
+    /// Additional bone IDs to unassign.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 }

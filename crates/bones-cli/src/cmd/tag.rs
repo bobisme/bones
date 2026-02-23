@@ -1,4 +1,4 @@
-//! `bn bone tag` and `bn bone untag` — add/remove labels from work items.
+//! `bn bone tag` and `bn bone untag` — add/remove labels from bones.
 
 use crate::agent;
 use crate::itc_state::assign_next_itc;
@@ -18,28 +18,28 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct TagArgs {
-    /// Item ID to tag.
+    /// Bone ID to tag.
     pub id: String,
 
     /// Labels to add.
     #[arg(required = true)]
     pub labels: Vec<String>,
 
-    /// Additional item IDs to tag with the same labels.
+    /// Additional bone IDs to tag with the same labels.
     #[arg(long = "ids", value_name = "ID", num_args = 1..)]
     pub additional_ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct UntagArgs {
-    /// Item ID to untag.
+    /// Bone ID to untag.
     pub id: String,
 
     /// Labels to remove.
     #[arg(required = true)]
     pub labels: Vec<String>,
 
-    /// Additional item IDs to untag with the same labels.
+    /// Additional bone IDs to untag with the same labels.
     #[arg(long = "ids", value_name = "ID", num_args = 1..)]
     pub additional_ids: Vec<String>,
 }

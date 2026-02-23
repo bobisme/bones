@@ -1,7 +1,7 @@
 //! `bn progress <goal-id>` — goal completion status.
 //!
 //! Shows a focused goal-progress view with child tree and progress bars.
-//! Distinct from `bn show` (full item detail) — this is a focused view
+//! Distinct from `bn show` (full bone detail) — this is a focused view
 //! of how far a goal is from completion.
 
 use std::io::Write;
@@ -16,7 +16,7 @@ use crate::output::{CliError, OutputMode, render, render_error};
 /// Arguments for `bn progress`.
 #[derive(Args, Debug)]
 pub struct ProgressArgs {
-    /// Goal item ID to show progress for.
+    /// Goal bone ID to show progress for.
     pub id: String,
 }
 

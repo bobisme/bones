@@ -8,10 +8,10 @@ use std::path::Path;
 /// Shared arguments for urgency shortcut commands.
 #[derive(Args, Debug, Clone)]
 pub struct UrgencyQuickArgs {
-    /// Item ID to update urgency for (supports partial IDs).
+    /// Bone ID to update urgency for (supports partial IDs).
     pub id: String,
 
-    /// Additional item IDs to update with the same urgency.
+    /// Additional bone IDs to update with the same urgency.
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 }
