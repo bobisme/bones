@@ -10,7 +10,7 @@ use crate::fusion::scoring::rrf_fuse;
 use crate::semantic::{
     SemanticModel, SemanticSearchResult, knn_search, sync_projection_embeddings,
 };
-use crate::structural::structural_similarity;
+use crate::structural::structural_similarity_with_map;
 use anyhow::{Context, Result};
 use bones_core::db::fts::search_bm25;
 use petgraph::Direction;
@@ -117,11 +117,27 @@ fn hybrid_search_inner(
 
     let fused = rrf_fuse(&lexical_ranked, &semantic_ranked, &structural_ranked, rrf_k);
 
+    let lexical_map: HashMap<&str, usize> = lexical_ranked
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+    let semantic_map: HashMap<&str, usize> = semantic_ranked
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+    let structural_map: HashMap<&str, usize> = structural_ranked
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+
     let mut out = Vec::with_capacity(fused.len().min(limit));
     for (item_id, score) in fused.into_iter().take(limit) {
-        let lexical_rank = find_rank(&lexical_ranked, &item_id);
-        let semantic_rank = find_rank(&semantic_ranked, &item_id);
-        let structural_rank = find_rank(&structural_ranked, &item_id);
+        let lexical_rank = lexical_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let semantic_rank = semantic_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let structural_rank = structural_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
 
         // Avoid returning graph-only expansions that have no textual relevance.
         if lexical_rank == usize::MAX && semantic_rank == usize::MAX {
@@ -141,14 +157,6 @@ fn hybrid_search_inner(
     }
 
     Ok(out)
-}
-
-fn find_rank(layer: &[&str], item_id: &str) -> usize {
-    layer
-        .iter()
-        .position(|id| *id == item_id)
-        .map(|idx| idx + 1)
-        .unwrap_or(usize::MAX)
 }
 
 fn rank_to_score(rank: usize, k: usize) -> f32 {
@@ -247,7 +255,7 @@ fn derive_structural_ranked(
                 continue;
             }
 
-            let Ok(score) = structural_similarity(seed, &candidate, db, graph) else {
+            let Ok(score) = structural_similarity_with_map(seed, &candidate, db, graph, Some(&node_map)) else {
                 continue;
             };
 
@@ -322,8 +330,10 @@ fn build_dependency_graph(db: &Connection) -> Result<DiGraph<String, ()>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::structural::structural_similarity;
     use bones_core::db::migrations;
     use bones_core::db::project::{Projector, ensure_tracking_table};
+    // ... rest of imports and tests ...
     use bones_core::event::data::*;
     use bones_core::event::types::EventType;
     use bones_core::event::{Event, EventData};

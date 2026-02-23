@@ -249,25 +249,26 @@ pub fn build_dup_candidates(
 ) -> Vec<DupCandidate> {
     let mut candidates = Vec::with_capacity(fused.len());
 
+    let lexical_map: std::collections::HashMap<&str, usize> = lexical
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+    let semantic_map: std::collections::HashMap<&str, usize> = semantic
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+    let structural_map: std::collections::HashMap<&str, usize> = structural
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i + 1))
+        .collect();
+
     for (item_id, composite_score) in fused {
-        // Find ranks in each layer (1-indexed; usize::MAX if absent)
-        let lexical_rank = lexical
-            .iter()
-            .position(|id| id == item_id)
-            .map(|idx| idx + 1)
-            .unwrap_or(usize::MAX);
-
-        let semantic_rank = semantic
-            .iter()
-            .position(|id| id == item_id)
-            .map(|idx| idx + 1)
-            .unwrap_or(usize::MAX);
-
-        let structural_rank = structural
-            .iter()
-            .position(|id| id == item_id)
-            .map(|idx| idx + 1)
-            .unwrap_or(usize::MAX);
+        let lexical_rank = lexical_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let semantic_rank = semantic_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
+        let structural_rank = structural_map.get(item_id.as_str()).copied().unwrap_or(usize::MAX);
 
         let risk = classify_risk(*composite_score, config);
 

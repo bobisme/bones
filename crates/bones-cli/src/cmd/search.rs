@@ -258,12 +258,13 @@ fn or_fallback_query(query: &str) -> Option<String> {
         })
         .collect();
 
+    let mut seen = std::collections::HashSet::new();
+    tokens.retain(|token| seen.insert(token.clone()));
+
     if tokens.len() < 2 {
         return None;
     }
 
-    let mut seen = std::collections::HashSet::new();
-    tokens.retain(|token| seen.insert(token.clone()));
     Some(tokens.join(" OR "))
 }
 

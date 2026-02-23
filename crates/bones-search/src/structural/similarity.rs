@@ -135,6 +135,22 @@ pub fn structural_similarity(
     db: &Connection,
     graph: &DiGraph<String, ()>,
 ) -> Result<StructuralScore> {
+    structural_similarity_with_map(a, b, db, graph, None)
+}
+
+/// Compute structural similarity with an optional pre-computed node map.
+///
+/// Use this variant when performing many pairwise comparisons against the same
+/// graph to avoid rebuilding the `node_map` repeatedly (O(N) vs O(1)).
+///
+/// If `node_map` is `None`, it will be built internally (O(N)).
+pub fn structural_similarity_with_map(
+    a: &str,
+    b: &str,
+    db: &Connection,
+    graph: &DiGraph<String, ()>,
+    node_map: Option<&HashMap<&str, NodeIndex>>,
+) -> Result<StructuralScore> {
     // -----------------------------------------------------------------------
     // 1. Labels — query item_labels table
     // -----------------------------------------------------------------------
@@ -160,26 +176,31 @@ pub fn structural_similarity(
     };
 
     // -----------------------------------------------------------------------
-    // 4. Build node lookup from petgraph
+    // 4. Build node lookup from petgraph (if not provided)
     // -----------------------------------------------------------------------
-    // O(n) scan — acceptable at the scale of bones; callers that need to
-    // batch many similarity queries should pre-build the map and pass it in.
-    let node_map: HashMap<&str, NodeIndex> = graph
-        .node_indices()
-        .filter_map(|idx| graph.node_weight(idx).map(|s| (s.as_str(), idx)))
-        .collect();
+    let built_map;
+    let map_ref = match node_map {
+        Some(m) => m,
+        None => {
+            built_map = graph
+                .node_indices()
+                .filter_map(|idx| graph.node_weight(idx).map(|s| (s.as_str(), idx)))
+                .collect();
+            &built_map
+        }
+    };
 
     // -----------------------------------------------------------------------
     // 5. Dep-neighbour Jaccard — undirected direct neighbours in the graph
     // -----------------------------------------------------------------------
-    let neighbours_a = direct_neighbours(graph, &node_map, a);
-    let neighbours_b = direct_neighbours(graph, &node_map, b);
+    let neighbours_a = direct_neighbours(graph, map_ref, a);
+    let neighbours_b = direct_neighbours(graph, map_ref, b);
     let dep_sim = jaccard(&neighbours_a, &neighbours_b);
 
     // -----------------------------------------------------------------------
     // 6. Graph proximity — BFS in undirected view, up to MAX_HOPS
     // -----------------------------------------------------------------------
-    let graph_proximity = match bfs_distance(graph, &node_map, a, b, MAX_HOPS) {
+    let graph_proximity = match bfs_distance(graph, map_ref, a, b, MAX_HOPS) {
         Some(dist) => 1.0_f32 / (1.0_f32 + dist as f32),
         None => 0.0_f32,
     };

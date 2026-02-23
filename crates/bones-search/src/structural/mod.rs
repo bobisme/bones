@@ -6,4 +6,4 @@
 
 mod similarity;
 
-pub use similarity::{StructuralScore, jaccard, structural_similarity};
+pub use similarity::{StructuralScore, jaccard, structural_similarity, structural_similarity_with_map};
