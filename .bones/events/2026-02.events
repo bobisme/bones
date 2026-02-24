@@ -1868,3 +1868,7 @@
 1771883327249577	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEypgE		item.move	bn-mts1	{"state":"done"}	blake3:TklySR5AMuSG8GluPcUWrB3g0Akqx0rn1CZ5m9bH0aU
 1771958677649348	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3jwo		item.create	bn-xk1i	{"kind":"task","labels":["qux","foo","bar","baz"],"title":"test label aliases"}	blake3:xEK71I5ilyHrU_mIt7g_4GLKYdYv1Xe5nR3saU09Pbs
 1771958683918169	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3kAo		item.move	bn-xk1i	{"state":"done"}	blake3:rRNgDlaMoGujD_5qYC8oycTxq3Srp_T_dicJeaJD740
+1771958702636647	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3kQo		item.move	bn-1myf	{"state":"done"}	blake3:Xla4dFGDn5PkSzo2-lq2S31A7nVEXUVBShoyDRufLbQ
+1771958702644078	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3kgo		item.move	bn-1gu3	{"state":"done"}	blake3:eiWRmEygXy1LB9vh6FcGYNzr7EMFZHZMfO950y3n_NA
+1771958702644774	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3kwo		item.move	bn-1uww	{"state":"done"}	blake3:mc-MS1XrsU37mSRVkMUqtpu7TD_hUl9lNLJSnMS-tiw
+1771958702645348	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3lAo		item.move	bn-3lmd	{"state":"done"}	blake3:VvJWjJ8YiDsR8XyhwaaPJGE_Q3MWF_To-DYYv7QCsoQ
