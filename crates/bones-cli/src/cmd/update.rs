@@ -6,7 +6,7 @@
 //! # Supported fields
 //! - `--title`       — bone title (LWW string)
 //! - `--description` — bone description (LWW string)
-//! - `--size`        — t-shirt size estimate (xxs|xs|s|m|l|xl|xxl)
+//! - `--size`        — t-shirt size estimate (xs|s|m|l|xl)
 //! - `--urgency`     — urgency level (punt|low|default|high|urgent)
 //! - `--kind`        — bone kind (task|bug|goal)
 
@@ -49,7 +49,7 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub description: Option<String>,
 
-    /// New size estimate (xxs|xs|s|m|l|xl|xxl).
+    /// New size estimate (xs|s|m|l|xl).
     #[arg(long)]
     pub size: Option<String>,
 
@@ -234,12 +234,12 @@ pub fn run_update(
         match s.parse::<Size>() {
             Ok(sz) => Some(sz),
             Err(_) => {
-                let msg = format!("invalid size '{}': expected xxs|xs|s|m|l|xl|xxl", s);
+                let msg = format!("invalid size '{}': expected xs|s|m|l|xl", s);
                 render_error(
                     output,
                     &CliError::with_details(
                         &msg,
-                        "Valid sizes: xxs xs s m l xl xxl",
+                        "Valid sizes: xs s m l xl",
                         "invalid_size",
                     ),
                 )?;

@@ -382,9 +382,7 @@ fn sample_size(prng: &mut Prng) -> Option<Size> {
         2 => Some(Size::S),
         3 => Some(Size::M),
         4 => Some(Size::L),
-        5 => Some(Size::Xl),
-        6 => Some(Size::Xxl),
-        _ => Some(Size::Xxs),
+        _ => Some(Size::Xl),
     }
 }
 

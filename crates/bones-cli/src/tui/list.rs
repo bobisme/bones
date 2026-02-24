@@ -756,19 +756,17 @@ impl CreateModalState {
         }
     }
 
-    fn size_options() -> [&'static str; 8] {
-        ["(none)", "xxs", "xs", "s", "m", "l", "xl", "xxl"]
+    fn size_options() -> [&'static str; 6] {
+        ["(none)", "xs", "s", "m", "l", "xl"]
     }
 
     fn size_index(size: Option<&str>) -> usize {
         match size {
-            Some("xxs") => 1,
-            Some("xs") => 2,
-            Some("s") => 3,
-            Some("m") => 4,
-            Some("l") => 5,
-            Some("xl") => 6,
-            Some("xxl") => 7,
+            Some("xs") => 1,
+            Some("s") => 2,
+            Some("m") => 3,
+            Some("l") => 4,
+            Some("xl") => 5,
             _ => 0,
         }
     }
@@ -2775,13 +2773,11 @@ fn truncate(s: &str, max_chars: usize) -> String {
 
 fn size_marker(size: &str) -> &str {
     match size {
-        "xxs" => "⠁",
         "xs" => "⠃",
         "s" => "⠋",
         "m" => "⠛",
         "l" => "⠟",
         "xl" => "⠿",
-        "xxl" => "⣿",
         _ => size,
     }
 }
@@ -3569,45 +3565,48 @@ fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
     let val_style = Style::default().fg(Color::Cyan);
     let dim_style = Style::default().fg(Color::DarkGray);
 
+    // Left padding
+    spans.push(Span::raw(" "));
+
     match app.input_mode {
         InputMode::Search => {
-            spans.push(Span::styled("ESC", key_style));
+            spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" cancel  ", dim_style));
-            spans.push(Span::styled("ENTER", key_style));
+            spans.push(Span::styled("enter", key_style));
             spans.push(Span::styled(" confirm", dim_style));
         }
         InputMode::CreateModal => {
-            spans.push(Span::styled("TAB", key_style));
+            spans.push(Span::styled("tab", key_style));
             spans.push(Span::styled(" next field  ", dim_style));
-            spans.push(Span::styled("SHIFT+TAB", key_style));
+            spans.push(Span::styled("shift+tab", key_style));
             spans.push(Span::styled(" prev field  ", dim_style));
-            spans.push(Span::styled("CTRL+S", key_style));
+            spans.push(Span::styled("ctrl+s", key_style));
             spans.push(Span::styled(" save  ", dim_style));
-            spans.push(Span::styled("ESC", key_style));
+            spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" cancel", dim_style));
         }
         InputMode::NoteModal => {
-            spans.push(Span::styled("CTRL+S", key_style));
+            spans.push(Span::styled("ctrl+s", key_style));
             spans.push(Span::styled(" submit note  ", dim_style));
-            spans.push(Span::styled("ESC", key_style));
+            spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" cancel", dim_style));
         }
         InputMode::FilterPopup | InputMode::FilterLabel => {
-            spans.push(Span::styled("TAB", key_style));
+            spans.push(Span::styled("tab", key_style));
             spans.push(Span::styled(" move field  ", dim_style));
             spans.push(Span::styled("←/→", key_style));
             spans.push(Span::styled(" change value  ", dim_style));
-            spans.push(Span::styled("ENTER", key_style));
+            spans.push(Span::styled("enter", key_style));
             spans.push(Span::styled(" apply/edit  ", dim_style));
-            spans.push(Span::styled("ESC", key_style));
+            spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" close", dim_style));
         }
         InputMode::Help => {
-            spans.push(Span::styled("TYPE", key_style));
+            spans.push(Span::styled("type", key_style));
             spans.push(Span::styled(" search keys  ", dim_style));
-            spans.push(Span::styled("BACKSPACE", key_style));
+            spans.push(Span::styled("backspace", key_style));
             spans.push(Span::styled(" delete char  ", dim_style));
-            spans.push(Span::styled("ESC", key_style));
+            spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" close help", dim_style));
         }
         InputMode::Normal => {
@@ -3676,14 +3675,15 @@ fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
     }
 
     let version = format!("bones {}", env!("CARGO_PKG_VERSION"));
+    let right_part = format!("{version} "); // trailing space for right padding
     let left_len: usize = spans.iter().map(|span| span.content.chars().count()).sum();
-    let right_len = version.chars().count();
+    let right_len = right_part.chars().count();
     if (width as usize) > left_len + right_len + 1 {
         spans.push(Span::raw(" ".repeat(width as usize - left_len - right_len)));
     } else {
         spans.push(Span::raw("  "));
     }
-    spans.push(Span::styled(version, dim_style));
+    spans.push(Span::styled(right_part, dim_style));
 
     Line::from(spans)
 }

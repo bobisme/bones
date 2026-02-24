@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS items (
     kind TEXT NOT NULL CHECK (kind IN ('task', 'goal', 'bug')),
     state TEXT NOT NULL CHECK (state IN ('open', 'doing', 'done', 'archived')),
     urgency TEXT NOT NULL DEFAULT 'default' CHECK (urgency IN ('urgent', 'default', 'punt')),
-    size TEXT CHECK (size IS NULL OR size IN ('xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl')),
+    size TEXT CHECK (size IS NULL OR size IN ('xs', 's', 'm', 'l', 'xl')),
     parent_id TEXT REFERENCES items(item_id) ON DELETE SET NULL,
     compact_summary TEXT,
     snapshot_json TEXT,

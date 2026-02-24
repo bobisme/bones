@@ -89,17 +89,15 @@ impl Default for WhittleConfig {
 
 /// Map a size string to expected completion time in work units.
 ///
-/// Follows the bead spec's exponential sizing: `xxs=0.5`, `xs=1`, `s=1`,
-/// `m=2`, `l=4`, `xl=8`, `xxl=16`. Unknown sizes default to `2` (medium).
+/// Follows the bead spec's exponential sizing: `xs=1`, `s=1`,
+/// `m=2`, `l=4`, `xl=8`. Unknown sizes default to `2` (medium).
 fn size_to_time(size: Option<&str>) -> f64 {
     match size {
-        Some("xxs") => 0.5,
         Some("xs") => 1.0,
         Some("s") => 1.0,
         Some("m") => 2.0,
         Some("l") => 4.0,
         Some("xl") => 8.0,
-        Some("xxl") => 16.0,
         _ => 2.0, // default to medium
     }
 }
@@ -661,13 +659,11 @@ mod tests {
 
     #[test]
     fn size_to_time_covers_all_sizes() {
-        assert!((size_to_time(Some("xxs")) - 0.5).abs() < f64::EPSILON);
         assert!((size_to_time(Some("xs")) - 1.0).abs() < f64::EPSILON);
         assert!((size_to_time(Some("s")) - 1.0).abs() < f64::EPSILON);
         assert!((size_to_time(Some("m")) - 2.0).abs() < f64::EPSILON);
         assert!((size_to_time(Some("l")) - 4.0).abs() < f64::EPSILON);
         assert!((size_to_time(Some("xl")) - 8.0).abs() < f64::EPSILON);
-        assert!((size_to_time(Some("xxl")) - 16.0).abs() < f64::EPSILON);
         assert!((size_to_time(None) - 2.0).abs() < f64::EPSILON);
         assert!((size_to_time(Some("unknown")) - 2.0).abs() < f64::EPSILON);
     }

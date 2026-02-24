@@ -213,7 +213,7 @@ pub fn validate_size(s: &str) -> Result<Size, ValidationError> {
         ValidationError::new(
             "size",
             s,
-            "expected one of xxs, xs, s, m, l, xl, xxl",
+            "expected one of xs, s, m, l, xl",
             "use --size s, --size m, etc.",
             "invalid_size",
         )

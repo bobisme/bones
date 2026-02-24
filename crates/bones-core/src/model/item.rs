@@ -108,28 +108,47 @@ impl Urgency {
 }
 
 /// Optional t-shirt sizing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Legacy values `xxs` and `xxl` are accepted on deserialization and mapped
+/// to `Xs` and `Xl` respectively for backward compatibility with old events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Size {
-    Xxs,
     Xs,
     S,
     M,
     L,
     Xl,
-    Xxl,
+}
+
+impl<'de> serde::Deserialize<'de> for Size {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "xxs" | "xs" => Ok(Size::Xs),
+            "s" => Ok(Size::S),
+            "m" => Ok(Size::M),
+            "l" => Ok(Size::L),
+            "xxl" | "xl" => Ok(Size::Xl),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["xs", "s", "m", "l", "xl"],
+            )),
+        }
+    }
 }
 
 impl Size {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::Xxs => "xxs",
             Self::Xs => "xs",
             Self::S => "s",
             Self::M => "m",
             Self::L => "l",
             Self::Xl => "xl",
-            Self::Xxl => "xxl",
         }
     }
 }
@@ -284,13 +303,12 @@ impl FromStr for Size {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let normalized = normalize(s);
         match normalized.as_str() {
-            "xxs" => Ok(Self::Xxs),
-            "xs" => Ok(Self::Xs),
+            // Legacy compat: map xxs->xs, xxl->xl
+            "xxs" | "xs" => Ok(Self::Xs),
             "s" => Ok(Self::S),
             "m" => Ok(Self::M),
             "l" => Ok(Self::L),
-            "xl" => Ok(Self::Xl),
-            "xxl" => Ok(Self::Xxl),
+            "xxl" | "xl" => Ok(Self::Xl),
             _ => Err(ParseEnumError {
                 expected: "size",
                 got: s.to_string(),
@@ -312,7 +330,7 @@ mod tests {
             serde_json::to_string(&Urgency::Default).unwrap(),
             "\"default\""
         );
-        assert_eq!(serde_json::to_string(&Size::Xxl).unwrap(), "\"xxl\"");
+        assert_eq!(serde_json::to_string(&Size::Xl).unwrap(), "\"xl\"");
 
         assert_eq!(serde_json::from_str::<Kind>("\"bug\"").unwrap(), Kind::Bug);
         assert_eq!(
@@ -346,15 +364,7 @@ mod tests {
             assert_eq!(value, reparsed);
         }
 
-        for value in [
-            Size::Xxs,
-            Size::Xs,
-            Size::S,
-            Size::M,
-            Size::L,
-            Size::Xl,
-            Size::Xxl,
-        ] {
+        for value in [Size::Xs, Size::S, Size::M, Size::L, Size::Xl] {
             let rendered = value.to_string();
             let reparsed = Size::from_str(&rendered).unwrap();
             assert_eq!(value, reparsed);

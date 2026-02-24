@@ -41,7 +41,7 @@ pub struct CreateArgs {
     #[arg(short, long, default_value = "task")]
     pub kind: String,
 
-    /// T-shirt size estimate: xxs, xs, s, m, l, xl, xxl.
+    /// T-shirt size estimate: xs, s, m, l, xl.
     #[arg(short, long)]
     pub size: Option<String>,
 

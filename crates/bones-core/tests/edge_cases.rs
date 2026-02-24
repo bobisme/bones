@@ -654,7 +654,7 @@ fn item_with_64kb_description_round_trips() {
         data: EventData::Create(CreateData {
             title: "Large description item".into(),
             kind: Kind::Task,
-            size: Some(Size::Xxl),
+            size: Some(Size::Xl),
             urgency: Urgency::Default,
             labels: vec![],
             parent: None,

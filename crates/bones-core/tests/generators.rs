@@ -108,15 +108,13 @@ fn arb_lww_register_kind() -> impl Strategy<Value = LwwRegister<Kind>> + Clone {
 
 fn arb_lww_register_size() -> impl Strategy<Value = LwwRegister<Option<Size>>> + Clone {
     any::<u8>().prop_map(|token| {
-        let value = match token % 8 {
+        let value = match token % 6 {
             0 => None,
-            1 => Some(Size::Xxs),
-            2 => Some(Size::Xs),
-            3 => Some(Size::S),
-            4 => Some(Size::M),
-            5 => Some(Size::L),
-            6 => Some(Size::Xl),
-            _ => Some(Size::Xxl),
+            1 => Some(Size::Xs),
+            2 => Some(Size::S),
+            3 => Some(Size::M),
+            4 => Some(Size::L),
+            _ => Some(Size::Xl),
         };
         lww_from_token(token, value)
     })

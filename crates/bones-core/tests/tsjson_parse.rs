@@ -704,7 +704,7 @@ fn roundtrip_create_all_kinds() {
 
 #[test]
 fn roundtrip_create_all_sizes() {
-    for size in [Size::Xs, Size::S, Size::M, Size::L, Size::Xl, Size::Xxl] {
+    for size in [Size::Xs, Size::S, Size::M, Size::L, Size::Xl] {
         let event = base_event(
             EventType::Create,
             "bn-a7x",
@@ -1280,7 +1280,7 @@ fn build_golden_corpus() -> Vec<Event> {
             EventData::Create(CreateData {
                 title: "X".repeat(1_000),
                 kind: Kind::Task,
-                size: Some(Size::Xxl),
+                size: Some(Size::Xl),
                 urgency: Urgency::Urgent,
                 labels: (0..10).map(|i| format!("label-{i}")).collect(),
                 parent: None,

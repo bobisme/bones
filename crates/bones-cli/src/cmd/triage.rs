@@ -380,7 +380,7 @@ fn format_score(score: f64) -> String {
 }
 
 fn is_small_size(size: Option<&str>) -> bool {
-    matches!(size, Some("xxs") | Some("xs") | Some("s"))
+    matches!(size, Some("xs") | Some("s"))
 }
 
 #[cfg(test)]
@@ -418,7 +418,6 @@ mod tests {
 
     #[test]
     fn small_size_classifier_matches_expected_values() {
-        assert!(is_small_size(Some("xxs")));
         assert!(is_small_size(Some("xs")));
         assert!(is_small_size(Some("s")));
         assert!(!is_small_size(Some("m")));
