@@ -490,22 +490,43 @@ fn build_dependency_order(
         kids.sort_by_key(|id| base_rank.get(id).copied().unwrap_or(usize::MAX));
     }
 
-    // Build dependency nesting for items that do NOT have a hierarchy parent.
-    // Items with a hierarchy parent are nested under their parent goal instead
-    // of under their primary blocker.
+    // Build a lookup: item_id -> parent_id (for items that have a hierarchy parent).
+    let mut item_parent: HashMap<String, String> = HashMap::new();
+    for item_id in &sorted_ids {
+        if let Some(Some(pid)) = parent_map.get(item_id) {
+            if id_set.contains(pid) {
+                item_parent.insert(item_id.clone(), pid.clone());
+            }
+        }
+    }
+
+    // Build dependency nesting.  Items with a hierarchy parent can still nest
+    // under a blocker *if that blocker shares the same hierarchy parent* (i.e.
+    // both are siblings under the same goal).  This preserves intra-phase
+    // dependency indentation while keeping cross-phase items grouped under
+    // their parent goal.
     let mut primary_blocker: HashMap<String, String> = HashMap::new();
     for blocked_id in &sorted_ids {
-        // Skip items that will be nested under a hierarchy parent.
-        if has_hierarchy_parent.contains(blocked_id) {
-            continue;
-        }
         let Some(blockers) = blocker_map.get(blocked_id) else {
             continue;
         };
 
+        let blocked_parent = item_parent.get(blocked_id);
+
         let chosen = blockers
             .iter()
-            .filter(|blocker_id| id_set.contains((*blocker_id).as_str()))
+            .filter(|blocker_id| {
+                if !id_set.contains((*blocker_id).as_str()) {
+                    return false;
+                }
+                // If blocked item has a hierarchy parent, only nest under a
+                // blocker that shares the same parent (sibling dependency).
+                if let Some(bp) = blocked_parent {
+                    let blocker_parent = item_parent.get((*blocker_id).as_str());
+                    return blocker_parent == Some(bp);
+                }
+                true
+            })
             .min_by_key(|blocker_id| {
                 base_rank
                     .get((*blocker_id).as_str())
@@ -535,15 +556,18 @@ fn build_dependency_order(
                 .unwrap_or(usize::MAX)
         });
     }
-    // Layer hierarchy children on top. They are visited first (before
-    // dependency children) so that the parent-goal group stays together.
+    // Layer hierarchy children on top.  Only add children that are NOT already
+    // nested under a sibling blocker (those are reachable via the dependency
+    // tree within the parent group).
     for (parent_id, kids) in &hierarchy_children {
         let entry = children.entry(parent_id.clone()).or_default();
-        // Prepend hierarchy children before any dependency children so the
-        // parent's own tasks appear directly below it.
-        let mut merged = kids.clone();
-        merged.extend(entry.drain(..));
-        *entry = merged;
+        let mut top_kids: Vec<String> = kids
+            .iter()
+            .filter(|kid| !primary_blocker.contains_key((*kid).as_str()))
+            .cloned()
+            .collect();
+        top_kids.extend(entry.drain(..));
+        *entry = top_kids;
     }
 
     // A root is any item that is neither a dependency child nor a hierarchy
