@@ -374,7 +374,13 @@ fn triage_json_sections_are_known_values() {
     let json = run_json(dir.path(), &["triage"]);
     let rows = json.as_array().expect("triage --json must be an array");
 
-    let valid_sections = ["top_pick", "actionable_blocker", "blocked_hub", "quick_win", "cycle"];
+    let valid_sections = [
+        "top_pick",
+        "actionable_blocker",
+        "blocked_hub",
+        "quick_win",
+        "cycle",
+    ];
     for row in rows {
         let section = row["section"].as_str().unwrap_or("");
         assert!(

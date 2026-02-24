@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.3"
+version = "0.16.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A CRDT-native issue tracker for distributed teams and AI agents"

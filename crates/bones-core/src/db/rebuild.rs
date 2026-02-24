@@ -453,7 +453,10 @@ mod tests {
         append_event(&shard_mgr, &create2);
 
         let report = rebuild(&events_dir, &db_path).unwrap();
-        assert_eq!(report.event_count, 2, "should project 2 events with bd- prefix");
+        assert_eq!(
+            report.event_count, 2,
+            "should project 2 events with bd- prefix"
+        );
         assert_eq!(report.item_count, 2, "should have 2 items with bd- prefix");
     }
 

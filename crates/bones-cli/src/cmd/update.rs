@@ -237,11 +237,7 @@ pub fn run_update(
                 let msg = format!("invalid size '{}': expected xs|s|m|l|xl", s);
                 render_error(
                     output,
-                    &CliError::with_details(
-                        &msg,
-                        "Valid sizes: xs s m l xl",
-                        "invalid_size",
-                    ),
+                    &CliError::with_details(&msg, "Valid sizes: xs s m l xl", "invalid_size"),
                 )?;
                 anyhow::bail!("{}", msg);
             }

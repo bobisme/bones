@@ -151,10 +151,7 @@ mod tests {
     use super::*;
     use petgraph::graph::DiGraph as PetDiGraph;
 
-    fn build_graph(
-        nodes: &[&str],
-        edges: &[(&str, &str)],
-    ) -> crate::graph::diagnostics::DiGraph {
+    fn build_graph(nodes: &[&str], edges: &[(&str, &str)]) -> crate::graph::diagnostics::DiGraph {
         let mut graph = PetDiGraph::<String, ()>::new();
         let mut node_map: HashMap<&str, petgraph::graph::NodeIndex> = HashMap::new();
 
@@ -246,10 +243,7 @@ mod tests {
     #[test]
     fn multiple_prerequisites_sorted_by_score() {
         // Both a and b are unblocked prerequisites of urgent c.
-        let graph = build_graph(
-            &["a", "b", "c"],
-            &[("a", "c"), ("b", "c")],
-        );
+        let graph = build_graph(&["a", "b", "c"], &[("a", "c"), ("b", "c")]);
         let s = scores(&[("a", 3.0), ("b", 7.0), ("c", f64::INFINITY)]);
         let unblocked = id_set(&["a", "b"]);
         let urgent = id_set(&["c"]);
@@ -284,10 +278,7 @@ mod tests {
 
     #[test]
     fn deterministic_ordering_for_equal_scores() {
-        let graph = build_graph(
-            &["a", "b", "c"],
-            &[("a", "c"), ("b", "c")],
-        );
+        let graph = build_graph(&["a", "b", "c"], &[("a", "c"), ("b", "c")]);
         let s = scores(&[("a", 5.0), ("b", 5.0), ("c", f64::INFINITY)]);
         let unblocked = id_set(&["a", "b"]);
         let urgent = id_set(&["c"]);
@@ -295,7 +286,10 @@ mod tests {
         let r1 = find_urgent_chain_front(&graph, &s, &unblocked, &urgent);
         let r2 = find_urgent_chain_front(&graph, &s, &unblocked, &urgent);
 
-        assert_eq!(r1.chain_front, r2.chain_front, "ordering must be deterministic");
+        assert_eq!(
+            r1.chain_front, r2.chain_front,
+            "ordering must be deterministic"
+        );
         // With equal scores, sorted by ID ascending.
         assert_eq!(r1.chain_front, vec!["a".to_string(), "b".to_string()]);
     }
