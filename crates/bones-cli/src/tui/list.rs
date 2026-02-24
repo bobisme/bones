@@ -451,6 +451,7 @@ fn build_hierarchy_order(
 fn build_dependency_order(
     sorted_items: Vec<WorkItem>,
     blocker_map: &HashMap<String, Vec<String>>,
+    parent_map: &HashMap<String, Option<String>>,
 ) -> (Vec<WorkItem>, Vec<usize>) {
     if sorted_items.is_empty() {
         return (Vec::new(), Vec::new());
@@ -467,8 +468,37 @@ fn build_dependency_order(
         .map(|(idx, id)| (id.clone(), idx))
         .collect();
 
+    // Build parent-child tree from the parent_map (hierarchy relationships).
+    // An item whose parent_id points to an item in the current set is a
+    // hierarchy child.
+    let mut hierarchy_children: HashMap<String, Vec<String>> = HashMap::new();
+    let mut has_hierarchy_parent: HashSet<String> = HashSet::new();
+    for item_id in &sorted_ids {
+        if let Some(Some(pid)) = parent_map.get(item_id) {
+            if id_set.contains(pid) {
+                hierarchy_children
+                    .entry(pid.clone())
+                    .or_default()
+                    .push(item_id.clone());
+                has_hierarchy_parent.insert(item_id.clone());
+            }
+        }
+    }
+    // Sort hierarchy children by their execution rank so they appear in
+    // the right relative order under their parent.
+    for kids in hierarchy_children.values_mut() {
+        kids.sort_by_key(|id| base_rank.get(id).copied().unwrap_or(usize::MAX));
+    }
+
+    // Build dependency nesting for items that do NOT have a hierarchy parent.
+    // Items with a hierarchy parent are nested under their parent goal instead
+    // of under their primary blocker.
     let mut primary_blocker: HashMap<String, String> = HashMap::new();
     for blocked_id in &sorted_ids {
+        // Skip items that will be nested under a hierarchy parent.
+        if has_hierarchy_parent.contains(blocked_id) {
+            continue;
+        }
         let Some(blockers) = blocker_map.get(blocked_id) else {
             continue;
         };
@@ -489,6 +519,7 @@ fn build_dependency_order(
         }
     }
 
+    // Merge dependency children and hierarchy children into one tree.
     let mut children: HashMap<String, Vec<String>> = HashMap::new();
     for (blocked_id, blocker_id) in &primary_blocker {
         children
@@ -496,18 +527,33 @@ fn build_dependency_order(
             .or_default()
             .push(blocked_id.clone());
     }
-    for blocked_children in children.values_mut() {
-        blocked_children.sort_by_key(|item_id| {
+    for dep_children in children.values_mut() {
+        dep_children.sort_by_key(|item_id| {
             base_rank
                 .get(item_id.as_str())
                 .copied()
                 .unwrap_or(usize::MAX)
         });
     }
+    // Layer hierarchy children on top. They are visited first (before
+    // dependency children) so that the parent-goal group stays together.
+    for (parent_id, kids) in &hierarchy_children {
+        let entry = children.entry(parent_id.clone()).or_default();
+        // Prepend hierarchy children before any dependency children so the
+        // parent's own tasks appear directly below it.
+        let mut merged = kids.clone();
+        merged.extend(entry.drain(..));
+        *entry = merged;
+    }
 
+    // A root is any item that is neither a dependency child nor a hierarchy
+    // child.
     let roots: Vec<String> = sorted_ids
         .iter()
-        .filter(|item_id| !primary_blocker.contains_key((*item_id).as_str()))
+        .filter(|item_id| {
+            !primary_blocker.contains_key((*item_id).as_str())
+                && !has_hierarchy_parent.contains((*item_id).as_str())
+        })
         .cloned()
         .collect();
 
@@ -1709,7 +1755,7 @@ impl ListView {
         }
 
         let (mut ordered, mut depths) = if !query_active && self.sort == SortField::Execution {
-            build_dependency_order(active_items, &self.blocker_map)
+            build_dependency_order(active_items, &self.blocker_map, &self.parent_map)
         } else {
             build_hierarchy_order(active_items, &self.parent_map)
         };
@@ -4355,11 +4401,63 @@ mod tests {
 
         sort_items(&mut items, SortField::Priority);
         sort_items_execution(&mut items, &blocker_map);
-        let (ordered, depths) = build_dependency_order(items, &blocker_map);
+        let parent_map = HashMap::new();
+        let (ordered, depths) = build_dependency_order(items, &blocker_map, &parent_map);
         let ordered_ids: Vec<String> = ordered.into_iter().map(|item| item.item_id).collect();
 
         assert_eq!(ordered_ids, vec!["bn-aaa", "bn-bbb", "bn-ccc"]);
         assert_eq!(depths, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn dependency_order_groups_children_under_parent_goals() {
+        // Phase I goal blocks Phase II goal (dependency edge).
+        // Tasks A and B are children of Phase I (parent edge).
+        // Task C is a child of Phase II (parent edge).
+        // Task D has no parent.
+        //
+        // Expected: Phase I, then its children (A, B), then Phase II,
+        // then its child (C), then D.
+        let mut items = vec![
+            make_item("bn-p1", "Phase I", "open", "goal", "default", vec![], 100, 500),
+            make_item("bn-p2", "Phase II", "open", "goal", "default", vec![], 100, 400),
+            make_item("bn-a", "Task A", "open", "task", "default", vec![], 100, 300),
+            make_item("bn-b", "Task B", "open", "task", "default", vec![], 100, 200),
+            make_item("bn-c", "Task C", "open", "task", "default", vec![], 100, 150),
+            make_item("bn-d", "Task D", "open", "task", "default", vec![], 100, 100),
+        ];
+
+        // Phase II is blocked by Phase I.
+        let blocker_map = HashMap::from([
+            ("bn-p2".to_string(), vec!["bn-p1".to_string()]),
+        ]);
+
+        // Tasks A, B are children of Phase I; Task C is child of Phase II.
+        let parent_map = HashMap::from([
+            ("bn-p1".to_string(), None),
+            ("bn-p2".to_string(), None),
+            ("bn-a".to_string(), Some("bn-p1".to_string())),
+            ("bn-b".to_string(), Some("bn-p1".to_string())),
+            ("bn-c".to_string(), Some("bn-p2".to_string())),
+            ("bn-d".to_string(), None),
+        ]);
+
+        sort_items(&mut items, SortField::Priority);
+        sort_items_execution(&mut items, &blocker_map);
+        let (ordered, depths) = build_dependency_order(items, &blocker_map, &parent_map);
+        let ordered_ids: Vec<String> = ordered.iter().map(|item| item.item_id.clone()).collect();
+
+        // Phase I is a root; its hierarchy children (A, B) nest under it at depth 1.
+        // Phase II is a dependency child of Phase I, at depth 1.
+        // Task C nests under Phase II at depth 2.
+        // Task D is a root with no parent.
+        assert_eq!(
+            ordered_ids,
+            vec!["bn-p1", "bn-a", "bn-b", "bn-p2", "bn-c", "bn-d"],
+            "parent goals should appear before their children"
+        );
+        // Phase I=0, A=1, B=1, Phase II=1, C=2, D=0
+        assert_eq!(depths, vec![0, 1, 1, 1, 2, 0]);
     }
 
     #[test]
