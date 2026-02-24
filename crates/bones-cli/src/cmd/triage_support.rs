@@ -91,8 +91,14 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         });
     }
 
-    let unresolved_blockers = load_unresolved_blocker_counts(conn)?;
+    let mut unresolved_blockers = load_unresolved_blocker_counts(conn)?;
     let active_unblocks = load_active_unblocks_counts(conn)?;
+
+    // Propagate blocked status from parent goals to their children.
+    // If a goal is blocked (e.g. Phase I blocks Phase II), all children of
+    // Phase II should also be treated as blocked so triage doesn't recommend
+    // them before their parent's blockers are resolved.
+    propagate_parent_blocked(&active_items, &mut unresolved_blockers);
     let urgency_by_id: HashMap<String, Urgency> = active_items
         .iter()
         .map(|item| {
@@ -508,6 +514,52 @@ fn seed_from_graph(content_hash: &str) -> u64 {
 
 fn is_active_state(state: &str) -> bool {
     !matches!(state, "done" | "archived")
+}
+
+/// Walk parent chains and propagate blocked status downward.
+///
+/// If a goal has `blocked_by_active > 0`, every descendant that currently
+/// has `blocked_by_active == 0` gets an inherited blocker count so that
+/// triage treats it as blocked.
+fn propagate_parent_blocked(
+    active_items: &[query::QueryItem],
+    unresolved_blockers: &mut HashMap<String, usize>,
+) {
+    // Build parent_id lookup for active items.
+    let parent_of: HashMap<&str, &str> = active_items
+        .iter()
+        .filter_map(|item| {
+            item.parent_id
+                .as_deref()
+                .map(|pid| (item.item_id.as_str(), pid))
+        })
+        .collect();
+
+    let active_ids: HashSet<&str> = active_items
+        .iter()
+        .map(|item| item.item_id.as_str())
+        .collect();
+
+    for item in active_items {
+        // Only propagate to items that appear unblocked on their own.
+        if unresolved_blockers.get(&item.item_id).copied().unwrap_or(0) > 0 {
+            continue;
+        }
+
+        // Walk up the parent chain looking for a blocked ancestor.
+        let mut cursor = item.item_id.as_str();
+        while let Some(&pid) = parent_of.get(cursor) {
+            if !active_ids.contains(pid) {
+                break;
+            }
+            if unresolved_blockers.get(pid).copied().unwrap_or(0) > 0 {
+                // Ancestor is blocked — mark this item as inherited-blocked.
+                unresolved_blockers.insert(item.item_id.clone(), 1);
+                break;
+            }
+            cursor = pid;
+        }
+    }
 }
 
 fn load_unresolved_blocker_counts(conn: &Connection) -> Result<HashMap<String, usize>> {
@@ -1089,6 +1141,130 @@ mod tests {
             prereq.explanation.contains("bn-urgent-target"),
             "explanation should include the specific urgent item ID, got: {}",
             prereq.explanation
+        );
+    }
+
+    fn insert_goal_with_children(
+        conn: &Connection,
+        goal_id: &str,
+        goal_title: &str,
+        child_ids: &[(&str, &str)],
+    ) {
+        // Insert goal
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES (?1, ?2, 'goal', 'open', 'default', NULL, 0, '', 0, 10)",
+            params![goal_id, goal_title],
+        )
+        .expect("insert goal");
+
+        // Insert children with parent_id set
+        for &(child_id, child_title) in child_ids {
+            conn.execute(
+                "INSERT INTO items (
+                    item_id, title, kind, state, urgency, size,
+                    parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+                ) VALUES (?1, ?2, 'task', 'open', 'default', NULL, ?3, 0, '', 0, 10)",
+                params![child_id, child_title, goal_id],
+            )
+            .expect("insert child");
+        }
+    }
+
+    #[test]
+    fn children_of_blocked_goal_are_excluded_from_unblocked() {
+        let conn = test_db();
+
+        // Phase I goal with one task
+        insert_goal_with_children(
+            &conn,
+            "bn-phase1",
+            "Phase I",
+            &[("bn-task1", "Phase 1 task")],
+        );
+        // Phase II goal with one task; Phase I blocks Phase II
+        insert_goal_with_children(
+            &conn,
+            "bn-phase2",
+            "Phase II",
+            &[("bn-task2", "Phase 2 task")],
+        );
+        insert_blocks_edge(&conn, "bn-phase1", "bn-phase2");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let unblocked_ids: Vec<&str> = snapshot
+            .unblocked_ranked
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        // Phase I goal and its task should be unblocked
+        assert!(
+            unblocked_ids.contains(&"bn-phase1"),
+            "Phase I goal should be unblocked"
+        );
+        assert!(
+            unblocked_ids.contains(&"bn-task1"),
+            "Phase I task should be unblocked"
+        );
+        // Phase II goal is directly blocked
+        assert!(
+            !unblocked_ids.contains(&"bn-phase2"),
+            "Phase II goal should be blocked"
+        );
+        // Phase II task should inherit blocked status from its parent
+        assert!(
+            !unblocked_ids.contains(&"bn-task2"),
+            "Phase II task should be blocked (inherited from parent goal)"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_children_inherit_blocked_from_grandparent() {
+        let conn = test_db();
+
+        // Blocker goal
+        insert_goal_with_children(&conn, "bn-g1", "Goal 1", &[]);
+        // Blocked goal with a sub-goal, which has a task
+        insert_goal_with_children(&conn, "bn-g2", "Goal 2", &[]);
+        insert_blocks_edge(&conn, "bn-g1", "bn-g2");
+
+        // Sub-goal under g2
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-sub', 'Sub-goal', 'goal', 'open', 'default', NULL, 'bn-g2', 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert sub-goal");
+
+        // Task under sub-goal
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-leaf', 'Leaf task', 'task', 'open', 'default', NULL, 'bn-sub', 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert leaf");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let unblocked_ids: Vec<&str> = snapshot
+            .unblocked_ranked
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        assert!(
+            !unblocked_ids.contains(&"bn-sub"),
+            "sub-goal should inherit blocked from g2"
+        );
+        assert!(
+            !unblocked_ids.contains(&"bn-leaf"),
+            "leaf task should inherit blocked from grandparent g2"
         );
     }
 }
