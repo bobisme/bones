@@ -57,6 +57,18 @@ pub struct CreateArgs {
     #[arg(short, long)]
     pub label: Vec<String>,
 
+    /// Hidden alias: --tag (same as --label).
+    #[arg(long, hide = true)]
+    pub tag: Vec<String>,
+
+    /// Hidden alias: --labels (comma-separated).
+    #[arg(long, hide = true, value_delimiter = ',')]
+    pub labels: Vec<String>,
+
+    /// Hidden alias: --tags (comma-separated).
+    #[arg(long, hide = true, value_delimiter = ',')]
+    pub tags: Vec<String>,
+
     /// Description text (use '-' to read from stdin).
     #[arg(short, long)]
     pub description: Option<String>,
@@ -68,6 +80,17 @@ pub struct CreateArgs {
     /// Skip duplicate check entirely.
     #[arg(long)]
     pub force: bool,
+}
+
+impl CreateArgs {
+    /// Collect labels from all alias flags (--label, --tag, --labels, --tags).
+    pub fn all_labels(&self) -> Vec<String> {
+        let mut out = self.label.clone();
+        out.extend(self.tag.iter().cloned());
+        out.extend(self.labels.iter().cloned());
+        out.extend(self.tags.iter().cloned());
+        out
+    }
 }
 
 /// JSON output for a created bone.
@@ -160,7 +183,8 @@ pub fn run_create(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    for label in &args.label {
+    let all_labels = args.all_labels();
+    for label in &all_labels {
         if let Err(e) = validate::validate_label(label) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
@@ -405,7 +429,7 @@ pub fn run_create(
         kind,
         size,
         urgency,
-        labels: args.label.clone(),
+        labels: all_labels.clone(),
         parent: args.parent.clone(),
         causation: None,
         description: description.clone(),
@@ -470,7 +494,7 @@ pub fn run_create(
         urgency: urgency.to_string(),
         size: size.map(|s| s.to_string()),
         parent: args.parent.clone(),
-        labels: args.label.clone(),
+        labels: all_labels,
         description,
         agent,
         event_hash: event.event_hash.clone(),
@@ -621,6 +645,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec!["test".to_string()],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: Some("A test description".to_string()),
             blocks: vec![],
             force: false,
@@ -662,6 +689,9 @@ mod tests {
             urgency: Some("urgent".to_string()),
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -695,6 +725,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -721,6 +754,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -747,6 +783,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -773,6 +812,9 @@ mod tests {
             urgency: Some("hot".to_string()), // invalid
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -801,6 +843,9 @@ mod tests {
                 urgency: None,
                 parent: None,
                 label: vec![],
+                tag: vec![],
+                labels: vec![],
+                tags: vec![],
                 description: None,
                 blocks: vec![],
                 force: false,
@@ -844,6 +889,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: Some("Detailed description here".to_string()),
             blocks: vec![],
             force: false,
@@ -883,6 +931,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec!["backend".to_string(), "auth".to_string()],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -933,6 +984,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec!["backend".to_string()],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -949,6 +1003,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -984,6 +1041,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: false,
@@ -1000,6 +1060,9 @@ mod tests {
             urgency: None,
             parent: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             description: None,
             blocks: vec![],
             force: true, // Force skip duplicate check
@@ -1015,5 +1078,31 @@ mod tests {
             .filter(|l| !l.starts_with('#') && !l.is_empty())
             .collect();
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn tag_alias_works_like_label() {
+        let w = TestCli::parse_from(["test", "--title", "Hello", "--tag", "foo"]);
+        assert_eq!(w.args.all_labels(), vec!["foo"]);
+    }
+
+    #[test]
+    fn tags_alias_splits_commas() {
+        let w = TestCli::parse_from(["test", "--title", "Hello", "--tags", "a,b,c"]);
+        assert_eq!(w.args.all_labels(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn labels_alias_splits_commas() {
+        let w = TestCli::parse_from(["test", "--title", "Hello", "--labels", "a,b,c"]);
+        assert_eq!(w.args.all_labels(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn mixed_label_aliases_merge() {
+        let w = TestCli::parse_from([
+            "test", "--title", "Hello", "-l", "x", "--tag", "y", "--tags", "a,b",
+        ]);
+        assert_eq!(w.args.all_labels(), vec!["x", "y", "a", "b"]);
     }
 }

@@ -107,8 +107,58 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         });
     }
 
+    // Build a set of IDs that need decomposition for quick lookup.
+    let needs_decomp: HashSet<String> = snapshot
+        .needs_decomposition
+        .iter()
+        .map(|item| item.id.clone())
+        .collect();
+
     if agent_slots == 1 {
-        let top = &snapshot.unblocked_ranked[0];
+        // Skip undecomposed L/XL tasks — pick the first ready item that
+        // doesn't need decomposition, but warn about any skipped items.
+        let mut skipped: Vec<&RankedItem> = Vec::new();
+        let mut chosen: Option<&RankedItem> = None;
+        for item in &snapshot.unblocked_ranked {
+            if needs_decomp.contains(&item.id) {
+                skipped.push(item);
+            } else {
+                chosen = Some(item);
+                break;
+            }
+        }
+
+        // Emit decomposition warnings for skipped items.
+        if !skipped.is_empty() {
+            let stderr = &mut std::io::stderr();
+            for item in &skipped {
+                let size = item.size.as_deref().unwrap_or("?");
+                let _ = writeln!(
+                    stderr,
+                    "warn: skipping {} ({}, {}) — needs decomposition into subtasks before work can begin",
+                    item.id,
+                    item.title,
+                    size.to_uppercase(),
+                );
+            }
+        }
+
+        let top = match chosen {
+            Some(item) => item,
+            None => {
+                // Every unblocked item needs decomposition — tell the agent.
+                let empty = EmptyNext {
+                    message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
+                };
+                return render(output, &empty, |_, w| {
+                    writeln!(
+                        w,
+                        "advice  decompose-first  All unblocked items are L/XL without subtasks. Decompose them before starting work."
+                    )
+                });
+            }
+        };
+
         let next = NextPick {
             id: top.id.clone(),
             title: top.title.clone(),
@@ -126,7 +176,8 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         );
     }
 
-    let assignments = multi_agent_assignments(&conn, &snapshot, agent_slots, args.mode)?;
+    let assignments =
+        multi_agent_assignments(&conn, &snapshot, agent_slots, args.mode, &needs_decomp)?;
 
     let payload = NextAssignments {
         mode: args.mode,
@@ -145,6 +196,7 @@ fn multi_agent_assignments(
     snapshot: &crate::cmd::triage_support::TriageSnapshot,
     agent_slots: usize,
     mode: ScheduleMode,
+    needs_decomp: &HashSet<String>,
 ) -> anyhow::Result<Vec<NextAssignment>> {
     let ranked_by_id: HashMap<&str, &RankedItem> = snapshot
         .unblocked_ranked
@@ -199,6 +251,9 @@ fn multi_agent_assignments(
                 if assignments.len() >= agent_slots {
                     break;
                 }
+                if needs_decomp.contains(chain_id) {
+                    continue;
+                }
                 let Some(base) = ranked_by_id.get(chain_id.as_str()) else {
                     continue;
                 };
@@ -240,6 +295,9 @@ fn multi_agent_assignments(
             if assigned_ids.contains(&item.item_id) {
                 continue;
             }
+            if needs_decomp.contains(&item.item_id) {
+                continue;
+            }
             let Some(base) = ranked_by_id.get(item.item_id.as_str()) else {
                 continue;
             };
@@ -266,6 +324,9 @@ fn multi_agent_assignments(
 
     for assignment in fallback {
         if assigned_ids.contains(&assignment.item_id) {
+            continue;
+        }
+        if needs_decomp.contains(&assignment.item_id) {
             continue;
         }
         let Some(item) = ranked_by_id.get(assignment.item_id.as_str()) else {

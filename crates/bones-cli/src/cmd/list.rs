@@ -35,6 +35,18 @@ pub struct ListArgs {
     #[arg(short, long)]
     pub label: Vec<String>,
 
+    /// Hidden alias: --tag (same as --label).
+    #[arg(long, hide = true)]
+    pub tag: Vec<String>,
+
+    /// Hidden alias: --labels (comma-separated).
+    #[arg(long, hide = true, value_delimiter = ',')]
+    pub labels: Vec<String>,
+
+    /// Hidden alias: --tags (comma-separated).
+    #[arg(long, hide = true, value_delimiter = ',')]
+    pub tags: Vec<String>,
+
     /// Filter by urgency: urgent, default, punt.
     #[arg(short = 'u', long)]
     pub urgency: Option<String>,
@@ -73,6 +85,17 @@ pub struct ListArgs {
     /// updated_desc, updated_asc.
     #[arg(long, default_value = "updated")]
     pub sort: String,
+}
+
+impl ListArgs {
+    /// Collect labels from all alias flags (--label, --tag, --labels, --tags).
+    pub fn all_labels(&self) -> Vec<String> {
+        let mut out = self.label.clone();
+        out.extend(self.tag.iter().cloned());
+        out.extend(self.labels.iter().cloned());
+        out.extend(self.tags.iter().cloned());
+        out
+    }
 }
 
 /// A single list row emitted in JSON output.
@@ -208,7 +231,8 @@ pub fn run_list(
             anyhow::bail!("{}", e.reason);
         }
     }
-    for label in &args.label {
+    let all_labels = args.all_labels();
+    for label in &all_labels {
         if let Err(e) = validate::validate_label(label) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
@@ -311,12 +335,14 @@ fn build_list_response(
     since_us: Option<i64>,
     until_us: Option<i64>,
 ) -> anyhow::Result<ListResponse> {
+    let all_labels = args.all_labels();
+
     // Default to showing open items unless any filter is explicitly set.
     // Pagination/sort alone should not disable this default behavior.
     let has_any_filter = args.state.is_some()
         || args.all
         || args.kind.is_some()
-        || !args.label.is_empty()
+        || !all_labels.is_empty()
         || args.urgency.is_some()
         || args.parent.is_some()
         || args.assignee.is_some()
@@ -335,7 +361,7 @@ fn build_list_response(
         state: state_filter,
         kind: args.kind.clone(),
         urgency: args.urgency.clone(),
-        label: args.label.first().cloned(),
+        label: all_labels.first().cloned(),
         parent_id: args.parent.clone(),
         assignee: args.assignee.clone(),
         limit: None,
@@ -347,8 +373,8 @@ fn build_list_response(
     let mut raw = query::list_items(conn, &filter)?;
 
     // AND-filter labels when multiple --label values are supplied.
-    if !args.label.is_empty() {
-        let required_labels: HashSet<&str> = args.label.iter().map(String::as_str).collect();
+    if !all_labels.is_empty() {
+        let required_labels: HashSet<&str> = all_labels.iter().map(String::as_str).collect();
         raw.retain(|item| {
             let labels = query::get_labels(conn, &item.item_id).unwrap_or_default();
             let present: HashSet<&str> = labels.iter().map(|l| l.label.as_str()).collect();
@@ -568,6 +594,9 @@ mod tests {
             all: false,
             kind: None,
             label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
             urgency: None,
             parent: None,
             assignee: None,

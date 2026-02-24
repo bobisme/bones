@@ -4443,18 +4443,70 @@ mod tests {
         // Expected: Phase I, then its children (A, B), then Phase II,
         // then its child (C), then D.
         let mut items = vec![
-            make_item("bn-p1", "Phase I", "open", "goal", "default", vec![], 100, 500),
-            make_item("bn-p2", "Phase II", "open", "goal", "default", vec![], 100, 400),
-            make_item("bn-a", "Task A", "open", "task", "default", vec![], 100, 300),
-            make_item("bn-b", "Task B", "open", "task", "default", vec![], 100, 200),
-            make_item("bn-c", "Task C", "open", "task", "default", vec![], 100, 150),
-            make_item("bn-d", "Task D", "open", "task", "default", vec![], 100, 100),
+            make_item(
+                "bn-p1",
+                "Phase I",
+                "open",
+                "goal",
+                "default",
+                vec![],
+                100,
+                500,
+            ),
+            make_item(
+                "bn-p2",
+                "Phase II",
+                "open",
+                "goal",
+                "default",
+                vec![],
+                100,
+                400,
+            ),
+            make_item(
+                "bn-a",
+                "Task A",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                300,
+            ),
+            make_item(
+                "bn-b",
+                "Task B",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                200,
+            ),
+            make_item(
+                "bn-c",
+                "Task C",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                150,
+            ),
+            make_item(
+                "bn-d",
+                "Task D",
+                "open",
+                "task",
+                "default",
+                vec![],
+                100,
+                100,
+            ),
         ];
 
         // Phase II is blocked by Phase I.
-        let blocker_map = HashMap::from([
-            ("bn-p2".to_string(), vec!["bn-p1".to_string()]),
-        ]);
+        let blocker_map = HashMap::from([("bn-p2".to_string(), vec!["bn-p1".to_string()])]);
 
         // Tasks A, B are children of Phase I; Task C is child of Phase II.
         let parent_map = HashMap::from([

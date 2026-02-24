@@ -1866,3 +1866,5 @@
 1771883327219267	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEypAE		item.move	bn-orl2	{"state":"done"}	blake3:ObmEBT0jqZuTQdSl6i0Sems2Xh43f1MjRqz2KvikOAU
 1771883327234064	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEypQE		item.comment	bn-mts1	{"body":"Execution sort now nests dependency chains in the list (blocker -> blocked) with indentation depth derived from dependency edges, while other sort modes keep parent-hierarchy nesting. Added unit test coverage for blocker-chain nesting."}	blake3:TkCAAsniuT8rFLK-B69f2lyrOwE_XAg04tDlU_gFQsE
 1771883327249577	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEypgE		item.move	bn-mts1	{"state":"done"}	blake3:TklySR5AMuSG8GluPcUWrB3g0Akqx0rn1CZ5m9bH0aU
+1771958677649348	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3jwo		item.create	bn-xk1i	{"kind":"task","labels":["qux","foo","bar","baz"],"title":"test label aliases"}	blake3:xEK71I5ilyHrU_mIt7g_4GLKYdYv1Xe5nR3saU09Pbs
+1771958683918169	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3kAo		item.move	bn-xk1i	{"state":"done"}	blake3:rRNgDlaMoGujD_5qYC8oycTxq3Srp_T_dicJeaJD740

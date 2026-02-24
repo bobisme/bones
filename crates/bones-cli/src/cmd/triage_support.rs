@@ -47,6 +47,7 @@ pub(crate) struct RankedItem {
 pub(crate) struct TriageSnapshot {
     pub ranked: Vec<RankedItem>,
     pub unblocked_ranked: Vec<RankedItem>,
+    pub needs_decomposition: Vec<RankedItem>,
     pub cycles: Vec<Vec<String>>,
 }
 
@@ -87,6 +88,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         return Ok(TriageSnapshot {
             ranked: Vec::new(),
             unblocked_ranked: Vec::new(),
+            needs_decomposition: Vec::new(),
             cycles,
         });
     }
@@ -175,6 +177,12 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
     let urgent_chain_norm = normalize_metric(&urgent_chain_raw);
     let weights = sampled_weights_from_feedback(seed_from_graph(normalized.content_hash()));
 
+    // Build set of item IDs that have at least one active child.
+    let ids_with_children: HashSet<&str> = active_items
+        .iter()
+        .filter_map(|item| item.parent_id.as_deref())
+        .collect();
+
     let mut ranked: Vec<RankedItem> = active_items
         .iter()
         .enumerate()
@@ -259,6 +267,28 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
                 )
             };
 
+            // Penalize large tasks (L/XL) that have no children (need decomposition).
+            // Goals are exempt since they are expected to have children managed separately.
+            let (score, explanation) = {
+                let size_lower = item.size.as_deref().unwrap_or("").to_lowercase();
+                let is_large = size_lower == "l" || size_lower == "xl";
+                let is_goal = item.kind == "goal";
+                let has_children = ids_with_children.contains(item.item_id.as_str());
+
+                if is_large && !is_goal && !has_children {
+                    let multiplier = if size_lower == "xl" { 0.25 } else { 0.5 };
+                    let penalized = score * multiplier;
+                    let note = format!(
+                        " Score reduced: large task needs decomposition ({}x{}).",
+                        size_lower.to_uppercase(),
+                        multiplier,
+                    );
+                    (penalized, format!("{explanation}{note}"))
+                } else {
+                    (score, explanation)
+                }
+            };
+
             RankedItem {
                 id: item.item_id.clone(),
                 title: item.title.clone(),
@@ -287,9 +317,30 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         .cloned()
         .collect();
 
+    // L/XL tasks (not goals) with no active children, sorted by score desc.
+    let mut needs_decomposition: Vec<RankedItem> = ranked
+        .iter()
+        .filter(|item| {
+            matches!(item.size.as_deref(), Some("l") | Some("xl"))
+                && !ids_with_children.contains(item.id.as_str())
+        })
+        .filter(|item| {
+            // Exclude goals -- only tasks/bugs/etc.
+            active_items
+                .iter()
+                .find(|ai| ai.item_id == item.id)
+                .map(|ai| ai.kind != "goal")
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
+    needs_decomposition.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+    needs_decomposition.truncate(5);
+
     Ok(TriageSnapshot {
         ranked,
         unblocked_ranked,
+        needs_decomposition,
         cycles,
     })
 }
@@ -1265,6 +1316,282 @@ mod tests {
         assert!(
             !unblocked_ids.contains(&"bn-leaf"),
             "leaf task should inherit blocked from grandparent g2"
+        );
+    }
+
+    #[test]
+    fn needs_decomposition_lists_large_tasks_without_children() {
+        let conn = test_db();
+        // Large task with no children => should appear in needs_decomposition
+        insert_item(
+            &conn,
+            "bn-big",
+            "Big task",
+            "open",
+            "default",
+            Some("l"),
+            10,
+        );
+        // XL task with no children => should appear
+        insert_item(
+            &conn,
+            "bn-huge",
+            "Huge task",
+            "open",
+            "default",
+            Some("xl"),
+            20,
+        );
+        // Small task => should NOT appear
+        insert_item(
+            &conn,
+            "bn-small",
+            "Small task",
+            "open",
+            "default",
+            Some("s"),
+            30,
+        );
+        // Large goal => should NOT appear (goals are excluded)
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-goal', 'Big goal', 'goal', 'open', 'default', 'l', 0, '', 0, 40)",
+            [],
+        )
+        .expect("insert goal");
+        // Large task WITH a child => should NOT appear
+        insert_item(
+            &conn,
+            "bn-parent",
+            "Parent task",
+            "open",
+            "default",
+            Some("l"),
+            50,
+        );
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-child', 'Child task', 'task', 'open', 'default', 's', 'bn-parent', 0, '', 0, 60)",
+            [],
+        )
+        .expect("insert child");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let decomp_ids: Vec<&str> = snapshot
+            .needs_decomposition
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        assert!(
+            decomp_ids.contains(&"bn-big"),
+            "L task without children should be in needs_decomposition"
+        );
+        assert!(
+            decomp_ids.contains(&"bn-huge"),
+            "XL task without children should be in needs_decomposition"
+        );
+        assert!(
+            !decomp_ids.contains(&"bn-small"),
+            "small task should NOT be in needs_decomposition"
+        );
+        assert!(
+            !decomp_ids.contains(&"bn-goal"),
+            "goal should NOT be in needs_decomposition"
+        );
+        assert!(
+            !decomp_ids.contains(&"bn-parent"),
+            "L task WITH children should NOT be in needs_decomposition"
+        );
+    }
+
+    fn insert_item_with_kind(
+        conn: &Connection,
+        item_id: &str,
+        title: &str,
+        kind: &str,
+        state: &str,
+        urgency: &str,
+        size: Option<&str>,
+        parent_id: Option<&str>,
+        updated_at_us: i64,
+    ) {
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size, parent_id,
+                is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, '', 0, ?8)",
+            params![
+                item_id,
+                title,
+                kind,
+                state,
+                urgency,
+                size,
+                parent_id,
+                updated_at_us
+            ],
+        )
+        .expect("insert item with kind");
+    }
+
+    #[test]
+    fn large_task_without_children_gets_score_penalty() {
+        let conn = test_db();
+
+        // A small task (no size penalty)
+        insert_item(
+            &conn,
+            "bn-small",
+            "Small task",
+            "open",
+            "default",
+            Some("s"),
+            10,
+        );
+        // An L task with no children (should get 0.5x penalty)
+        insert_item(
+            &conn,
+            "bn-large",
+            "Large task",
+            "open",
+            "default",
+            Some("l"),
+            10,
+        );
+        // An XL task with no children (should get 0.25x penalty)
+        insert_item(
+            &conn,
+            "bn-xlarge",
+            "XL task",
+            "open",
+            "default",
+            Some("xl"),
+            10,
+        );
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+
+        let small = snapshot
+            .ranked
+            .iter()
+            .find(|r| r.id == "bn-small")
+            .expect("small");
+        let large = snapshot
+            .ranked
+            .iter()
+            .find(|r| r.id == "bn-large")
+            .expect("large");
+        let xlarge = snapshot
+            .ranked
+            .iter()
+            .find(|r| r.id == "bn-xlarge")
+            .expect("xlarge");
+
+        // L task score should be lower than the small task score due to 0.5x multiplier
+        assert!(
+            large.score < small.score,
+            "L task ({}) should score lower than small task ({}) due to decomposition penalty",
+            large.score,
+            small.score
+        );
+        assert!(
+            large
+                .explanation
+                .contains("Score reduced: large task needs decomposition"),
+            "L task explanation should mention penalty, got: {}",
+            large.explanation
+        );
+
+        // XL task score should be lower than L task due to harsher 0.25x penalty
+        assert!(
+            xlarge.score < large.score,
+            "XL task ({}) should score lower than L task ({}) due to harsher penalty",
+            xlarge.score,
+            large.score
+        );
+        assert!(
+            xlarge
+                .explanation
+                .contains("Score reduced: large task needs decomposition"),
+            "XL task explanation should mention penalty, got: {}",
+            xlarge.explanation
+        );
+    }
+
+    #[test]
+    fn large_task_with_children_is_not_penalized() {
+        let conn = test_db();
+
+        // An L task that has a child (should NOT be penalized)
+        insert_item(
+            &conn,
+            "bn-parent",
+            "Parent L task",
+            "open",
+            "default",
+            Some("l"),
+            10,
+        );
+        // Child of the L task
+        insert_item_with_kind(
+            &conn,
+            "bn-child",
+            "Child task",
+            "task",
+            "open",
+            "default",
+            Some("s"),
+            Some("bn-parent"),
+            10,
+        );
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let parent = snapshot
+            .ranked
+            .iter()
+            .find(|r| r.id == "bn-parent")
+            .expect("parent");
+
+        assert!(
+            !parent.explanation.contains("Score reduced"),
+            "L task with children should not be penalized, got: {}",
+            parent.explanation
+        );
+    }
+
+    #[test]
+    fn large_goal_is_not_penalized() {
+        let conn = test_db();
+
+        // An L goal with no children (goals are exempt)
+        insert_item_with_kind(
+            &conn,
+            "bn-goal",
+            "Big goal",
+            "goal",
+            "open",
+            "default",
+            Some("l"),
+            None,
+            10,
+        );
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let goal = snapshot
+            .ranked
+            .iter()
+            .find(|r| r.id == "bn-goal")
+            .expect("goal");
+
+        assert!(
+            !goal.explanation.contains("Score reduced"),
+            "goal should not be penalized for lack of children, got: {}",
+            goal.explanation
         );
     }
 }
