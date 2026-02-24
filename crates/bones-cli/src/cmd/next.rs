@@ -128,13 +128,13 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             }
         }
 
-        // Emit decomposition warnings for skipped items.
+        // Emit decomposition warnings for skipped items on stdout so agents see them.
         if !skipped.is_empty() {
-            let stderr = &mut std::io::stderr();
+            let stdout = &mut std::io::stdout();
             for item in &skipped {
                 let size = item.size.as_deref().unwrap_or("?");
                 let _ = writeln!(
-                    stderr,
+                    stdout,
                     "warn: skipping {} ({}, {}) — needs decomposition into subtasks before work can begin",
                     item.id,
                     item.title,
