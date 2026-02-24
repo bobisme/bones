@@ -448,6 +448,139 @@ fn build_hierarchy_order(
     (ordered, depths)
 }
 
+fn build_dependency_order(
+    sorted_items: Vec<WorkItem>,
+    blocker_map: &HashMap<String, Vec<String>>,
+) -> (Vec<WorkItem>, Vec<usize>) {
+    if sorted_items.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    let sorted_ids: Vec<String> = sorted_items
+        .iter()
+        .map(|item| item.item_id.clone())
+        .collect();
+    let id_set: HashSet<String> = sorted_ids.iter().cloned().collect();
+    let base_rank: HashMap<String, usize> = sorted_ids
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (id.clone(), idx))
+        .collect();
+
+    let mut primary_blocker: HashMap<String, String> = HashMap::new();
+    for blocked_id in &sorted_ids {
+        let Some(blockers) = blocker_map.get(blocked_id) else {
+            continue;
+        };
+
+        let chosen = blockers
+            .iter()
+            .filter(|blocker_id| id_set.contains((*blocker_id).as_str()))
+            .min_by_key(|blocker_id| {
+                base_rank
+                    .get((*blocker_id).as_str())
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            })
+            .cloned();
+
+        if let Some(blocker_id) = chosen {
+            primary_blocker.insert(blocked_id.clone(), blocker_id);
+        }
+    }
+
+    let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    for (blocked_id, blocker_id) in &primary_blocker {
+        children
+            .entry(blocker_id.clone())
+            .or_default()
+            .push(blocked_id.clone());
+    }
+    for blocked_children in children.values_mut() {
+        blocked_children.sort_by_key(|item_id| {
+            base_rank
+                .get(item_id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    let roots: Vec<String> = sorted_ids
+        .iter()
+        .filter(|item_id| !primary_blocker.contains_key((*item_id).as_str()))
+        .cloned()
+        .collect();
+
+    let mut by_id: HashMap<String, WorkItem> = sorted_items
+        .into_iter()
+        .map(|item| (item.item_id.clone(), item))
+        .collect();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut ordered = Vec::new();
+    let mut depths = Vec::new();
+
+    fn visit(
+        item_id: &str,
+        depth: usize,
+        children: &HashMap<String, Vec<String>>,
+        by_id: &mut HashMap<String, WorkItem>,
+        visited: &mut HashSet<String>,
+        ordered: &mut Vec<WorkItem>,
+        depths: &mut Vec<usize>,
+    ) {
+        if !visited.insert(item_id.to_string()) {
+            return;
+        }
+
+        if let Some(item) = by_id.remove(item_id) {
+            ordered.push(item);
+            depths.push(depth);
+        }
+
+        if let Some(direct) = children.get(item_id) {
+            for child_id in direct {
+                visit(
+                    child_id,
+                    depth + 1,
+                    children,
+                    by_id,
+                    visited,
+                    ordered,
+                    depths,
+                );
+            }
+        }
+    }
+
+    for root_id in &roots {
+        visit(
+            root_id,
+            0,
+            &children,
+            &mut by_id,
+            &mut visited,
+            &mut ordered,
+            &mut depths,
+        );
+    }
+
+    for item_id in &sorted_ids {
+        if !visited.contains(item_id) {
+            visit(
+                item_id,
+                0,
+                &children,
+                &mut by_id,
+                &mut visited,
+                &mut ordered,
+                &mut depths,
+            );
+        }
+    }
+
+    (ordered, depths)
+}
+
 // ---------------------------------------------------------------------------
 // Application input modes
 // ---------------------------------------------------------------------------
@@ -1242,21 +1375,47 @@ fn remove_char_at(value: &mut String, char_idx: usize) {
     value.replace_range(start..end, "");
 }
 
-fn with_cursor(value: &str, char_idx: usize) -> String {
+fn with_cursor_marker(value: &str, char_idx: usize) -> String {
+    let cursor = char_idx.min(char_len(value));
     let mut out = String::new();
-    let mut replaced = false;
+    let mut inserted = false;
     for (idx, ch) in value.chars().enumerate() {
-        if idx == char_idx {
-            out.push('█');
-            replaced = true;
-        } else {
-            out.push(ch);
+        if idx == cursor {
+            out.push('|');
+            inserted = true;
         }
+        out.push(ch);
     }
-    if !replaced {
-        out.push('█');
+    if !inserted {
+        out.push('|');
     }
     out
+}
+
+fn with_cursor_spans(value: &str, char_idx: usize, base_style: Style) -> Vec<Span<'static>> {
+    let chars: Vec<char> = value.chars().collect();
+    let cursor = char_idx.min(chars.len());
+    let cursor_style = base_style.add_modifier(Modifier::REVERSED);
+
+    let mut spans = Vec::with_capacity(chars.len() + 1);
+    for (idx, ch) in chars.iter().enumerate() {
+        let style = if idx == cursor {
+            cursor_style
+        } else {
+            base_style
+        };
+        spans.push(Span::styled(ch.to_string(), style));
+    }
+
+    if cursor == chars.len() {
+        spans.push(Span::styled(" ".to_string(), cursor_style));
+    }
+
+    spans
+}
+
+fn with_cursor_line(value: &str, char_idx: usize, base_style: Style) -> Line<'static> {
+    Line::from(with_cursor_spans(value, char_idx, base_style))
 }
 
 /// Main application state for the TUI list view.
@@ -1551,7 +1710,11 @@ impl ListView {
             }
         }
 
-        let (mut ordered, mut depths) = build_hierarchy_order(active_items, &self.parent_map);
+        let (mut ordered, mut depths) = if !query_active && self.sort == SortField::Execution {
+            build_dependency_order(active_items, &self.blocker_map)
+        } else {
+            build_hierarchy_order(active_items, &self.parent_map)
+        };
         self.done_start_idx = None;
         if self.show_done && !done_items.is_empty() {
             // Show completed bones newest-first (reverse close order approximation).
@@ -2909,9 +3072,13 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
                 .add_modifier(Modifier::BOLD),
         );
     let title_text = if title_focused {
-        with_cursor(&modal.title, modal.title_cursor)
+        with_cursor_line(
+            &modal.title,
+            modal.title_cursor,
+            Style::default().fg(Color::White),
+        )
     } else {
-        modal.title.clone()
+        Line::from(modal.title.clone())
     };
     // Scroll so cursor stays visible (1 inner row, width minus borders)
     let title_inner_w = chunks[0].width.saturating_sub(2) as usize;
@@ -2944,7 +3111,7 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         .enumerate()
         .map(|(row, line)| {
             if desc_focused && row == modal.desc_row {
-                Line::from(with_cursor(line, modal.desc_col))
+                with_cursor_line(line, modal.desc_col, Style::default().fg(Color::White))
             } else {
                 Line::from(line.clone())
             }
@@ -3030,20 +3197,13 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         Style::default().fg(Color::White)
     };
 
-    let labels_text = if labels_focused {
-        with_cursor(&modal.labels, modal.labels_cursor)
-    } else if modal.labels.is_empty() {
-        "(none)".to_string()
-    } else {
-        modal.labels.clone()
-    };
     let labels_style = if labels_focused {
         Style::default().fg(Color::Green)
     } else {
         Style::default().fg(Color::White)
     };
 
-    let options_line = Line::from(vec![
+    let mut options_spans = vec![
         Span::styled("Type: ", Style::default().fg(Color::DarkGray)),
         Span::styled(format!(" {} ", modal.kind()), type_style),
         Span::raw("   "),
@@ -3057,8 +3217,19 @@ fn render_create_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         Span::styled(format!(" {} ", modal.urgency_display()), urgency_style),
         Span::raw("   "),
         Span::styled("Labels: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(labels_text, labels_style),
-    ]);
+    ];
+    if labels_focused {
+        options_spans.extend(with_cursor_spans(
+            &modal.labels,
+            modal.labels_cursor,
+            labels_style,
+        ));
+    } else if modal.labels.is_empty() {
+        options_spans.push(Span::styled("(none)".to_string(), labels_style));
+    } else {
+        options_spans.push(Span::styled(modal.labels.clone(), labels_style));
+    }
+    let options_line = Line::from(options_spans);
     frame.render_widget(Paragraph::new(options_line), options_inner);
 }
 
@@ -3075,43 +3246,16 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
 
     frame.render_widget(Clear, modal_area);
 
-    let (title, subtitle) = match modal.mode {
-        NoteMode::Comment => (" Comment ", "Write a multiline comment"),
-        NoteMode::Transition { target, .. } if target == State::Open => {
-            (" Reopen Bone ", "Add a reason and reopen")
-        }
-        NoteMode::Transition { .. } => (" Complete Bone ", "Add a completion note and mark done"),
+    let title = match modal.mode {
+        NoteMode::Comment => " Comment ",
+        NoteMode::Transition { target, .. } if target == State::Open => " Reopen Reason ",
+        NoteMode::Transition { .. } => " Completion Note ",
     };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_set(border::ROUNDED)
-        .border_style(Style::default().fg(Color::Green))
-        .title(title)
-        .title_style(
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        );
-    let inner = block.inner(modal_area);
-    frame.render_widget(block, modal_area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(
-            subtitle,
-            Style::default().fg(Color::DarkGray),
-        )])),
-        chunks[0],
-    );
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(modal_area);
 
     let lines: Vec<Line<'static>> = modal
         .lines
@@ -3119,15 +3263,15 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
         .enumerate()
         .map(|(row, line)| {
             if row == modal.row {
-                Line::from(with_cursor(line, modal.col))
+                with_cursor_line(line, modal.col, Style::default().fg(Color::White))
             } else {
                 Line::from(line.clone())
             }
         })
         .collect();
     // Scroll note so cursor row/col stay visible
-    let note_inner_h = chunks[1].height.saturating_sub(2) as usize;
-    let note_inner_w = chunks[1].width.saturating_sub(2) as usize;
+    let note_inner_h = chunks[0].height.saturating_sub(2) as usize;
+    let note_inner_w = chunks[0].width.saturating_sub(2) as usize;
     let note_row_offset = if modal.row >= note_inner_h {
         (modal.row - note_inner_h + 1) as u16
     } else {
@@ -3144,11 +3288,16 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
                 Block::default()
                     .borders(Borders::ALL)
                     .border_set(border::ROUNDED)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Note "),
+                    .border_style(Style::default().fg(Color::Green))
+                    .title(title)
+                    .title_style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
             )
             .scroll((note_row_offset, note_col_offset)),
-        chunks[1],
+        chunks[0],
     );
 
     frame.render_widget(
@@ -3158,7 +3307,7 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
             Span::styled("Esc", Style::default().fg(Color::Cyan)),
             Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
         ])),
-        chunks[2],
+        chunks[1],
     );
 }
 
@@ -3244,13 +3393,16 @@ fn render_help_overlay(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         )]));
     }
 
-    let query_line = Line::from(vec![
-        Span::styled("Filter: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            with_cursor(&app.help_query, app.help_cursor),
-            Style::default().fg(Color::White),
-        ),
-    ]);
+    let mut query_spans = vec![Span::styled(
+        "Filter: ",
+        Style::default().fg(Color::DarkGray),
+    )];
+    query_spans.extend(with_cursor_spans(
+        &app.help_query,
+        app.help_cursor,
+        Style::default().fg(Color::White),
+    ));
+    let query_line = Line::from(query_spans);
     frame.render_widget(Paragraph::new(query_line), Rect { height: 1, ..inner });
 
     frame.render_widget(Paragraph::new(lines), rows_area);
@@ -3322,7 +3474,7 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
     let block_title = match app.input_mode {
         InputMode::Search => format!(
             " bones — search: {} ",
-            with_cursor(&app.search_buf, app.search_cursor)
+            with_cursor_marker(&app.search_buf, app.search_cursor)
         ),
         _ => format!(
             " bones — {} of {} bones  [sort: {}] ",
@@ -3637,22 +3789,22 @@ fn render_filter_popup(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
         } else {
             app.label_buf.clone()
         };
-        let val_with_cursor = if editing && is_focused {
-            with_cursor(&val_display, app.label_cursor)
-        } else {
-            val_display
-        };
-        let line = Line::from(vec![
+        let mut line_spans = vec![
             Span::styled(prefix.to_string(), focused_style),
             Span::styled("Label  ".to_string(), label_style),
             Span::styled(": ".to_string(), dim_style),
-            Span::styled(val_with_cursor, val_style),
-            if editing {
-                Span::styled("  type to edit, Enter done".to_string(), dim_style)
-            } else {
-                Span::styled("  Enter to edit".to_string(), dim_style)
-            },
-        ]);
+        ];
+        if editing && is_focused {
+            line_spans.extend(with_cursor_spans(&val_display, app.label_cursor, val_style));
+        } else {
+            line_spans.push(Span::styled(val_display, val_style));
+        }
+        line_spans.push(if editing {
+            Span::styled("  type to edit, Enter done".to_string(), dim_style)
+        } else {
+            Span::styled("  Enter to edit".to_string(), dim_style)
+        });
+        let line = Line::from(line_spans);
         frame.render_widget(
             Paragraph::new(line),
             Rect {
@@ -4187,6 +4339,27 @@ mod tests {
         let ordered_ids: Vec<String> = ordered.into_iter().map(|item| item.item_id).collect();
         assert_eq!(ordered_ids, vec!["bn-001", "bn-002", "bn-003"]);
         assert_eq!(depths, vec![0, 1, 0]);
+    }
+
+    #[test]
+    fn dependency_order_nests_blocked_under_blocker_chain() {
+        let mut items = vec![
+            make_item("bn-ccc", "C", "open", "task", "default", vec![], 100, 100),
+            make_item("bn-bbb", "B", "open", "task", "default", vec![], 100, 200),
+            make_item("bn-aaa", "A", "open", "task", "default", vec![], 100, 300),
+        ];
+        let blocker_map = HashMap::from([
+            ("bn-bbb".to_string(), vec!["bn-aaa".to_string()]),
+            ("bn-ccc".to_string(), vec!["bn-bbb".to_string()]),
+        ]);
+
+        sort_items(&mut items, SortField::Priority);
+        sort_items_execution(&mut items, &blocker_map);
+        let (ordered, depths) = build_dependency_order(items, &blocker_map);
+        let ordered_ids: Vec<String> = ordered.into_iter().map(|item| item.item_id).collect();
+
+        assert_eq!(ordered_ids, vec!["bn-aaa", "bn-bbb", "bn-ccc"]);
+        assert_eq!(depths, vec![0, 1, 2]);
     }
 
     #[test]
