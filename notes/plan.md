@@ -114,17 +114,15 @@ No "blocked" state — blocking is a relationship, not a state. An item in `open
 
 This replaces numeric priority (P0-P4). **Priority is computed from the dependency graph**, not assigned by hand. Urgency is the human override valve.
 
-### Size (optional, 7)
+### Size (optional, 5)
 
 | Size | Label |
 |------|-------|
-| `xxs` | Extra extra small |
 | `xs` | Extra small |
 | `s` | Small |
 | `m` | Medium |
 | `l` | Large |
 | `xl` | Extra large |
-| `xxl` | Extra extra large |
 
 Sizes are **optional**. No timelines attached — agents get estimates wrong. If an agent sets a size, fine. If not, nothing breaks. The triage engine doesn't use size for priority; it's purely informational for humans planning capacity.
 

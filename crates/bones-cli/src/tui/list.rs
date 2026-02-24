@@ -2773,11 +2773,11 @@ fn truncate(s: &str, max_chars: usize) -> String {
 
 fn size_marker(size: &str) -> &str {
     match size {
-        "xs" => "⠃",
-        "s" => "⠋",
+        "xs" => "⠁",
+        "s" => "⠉",
         "m" => "⠛",
-        "l" => "⠟",
-        "xl" => "⠿",
+        "l" => "⠿",
+        "xl" => "⣿",
         _ => size,
     }
 }
