@@ -349,8 +349,8 @@ impl SemanticModel {
 
         let mut input_ids = Vec::with_capacity(keep);
         let mut attention_mask = Vec::with_capacity(keep);
-        for idx in 0..keep {
-            input_ids.push(i64::from(ids[idx]));
+        for (idx, id) in ids.iter().enumerate().take(keep) {
+            input_ids.push(i64::from(*id));
             attention_mask.push(i64::from(*attention.get(idx).unwrap_or(&1_u32)));
         }
         if attention_mask.iter().all(|v| *v == 0) {
@@ -380,10 +380,9 @@ impl SemanticModel {
         let mut flat_attention = vec![0_i64; batch * seq_len];
         for (row_idx, row) in encoded.iter().enumerate() {
             let row_base = row_idx * seq_len;
-            for col_idx in 0..row.input_ids.len() {
-                flat_ids[row_base + col_idx] = row.input_ids[col_idx];
-                flat_attention[row_base + col_idx] = row.attention_mask[col_idx];
-            }
+            flat_ids[row_base..(row.input_ids.len() + row_base)].copy_from_slice(&row.input_ids);
+            flat_attention[row_base..(row.attention_mask.len() + row_base)]
+                .copy_from_slice(&row.attention_mask);
         }
         let flat_token_types = vec![0_i64; batch * seq_len];
 
