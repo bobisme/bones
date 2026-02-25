@@ -1,7 +1,7 @@
-//! Event replay → SQLite projection pipeline.
+//! Event replay → `SQLite` projection pipeline.
 //!
 //! The [`Projector`] replays events from the TSJSON event log and upserts
-//! the resulting state into the SQLite projection database. It handles all
+//! the resulting state into the `SQLite` projection database. It handles all
 //! 11 event types and supports both incremental (single-event) and full
 //! rebuild modes.
 //!
@@ -45,7 +45,7 @@ pub struct ProjectionStats {
 // Projector
 // ---------------------------------------------------------------------------
 
-/// Replays events into the SQLite projection.
+/// Replays events into the `SQLite` projection.
 ///
 /// Create a `Projector` with a connection, then call [`project_event`] for
 /// each event or [`project_batch`] for a slice.
@@ -332,6 +332,7 @@ impl<'conn> Projector<'conn> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn project_update(&self, event: &Event) -> Result<()> {
         let EventData::Update(ref data) = event.data else {
             anyhow::bail!("expected Update data for item.update event");

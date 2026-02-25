@@ -63,11 +63,12 @@ pub const CACHE_VERSION: u8 = 1;
 /// Layout:
 /// - 4 bytes: magic
 /// - 1 byte:  version
-/// - 1 byte:  column_count
+/// - 1 byte:  `column_count`
 /// - 2 bytes: reserved (must be zero)
-/// - 8 bytes: row_count
-/// - 8 bytes: created_at_us
-/// - 8 bytes: data_crc64
+/// - 8 bytes: `row_count`
+/// - 8 bytes: `created_at_us`
+/// - 8 bytes: `data_crc64`
+///
 /// = 32 bytes total
 pub const HEADER_SIZE: usize = 32;
 
@@ -76,7 +77,7 @@ pub const HEADER_SIZE: usize = 32;
 // ---------------------------------------------------------------------------
 
 /// Errors returned by cache encoding and decoding.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CacheError {
     /// The file does not start with `BNCH`.
     #[error("invalid magic bytes: expected BNCH, got {0:?}")]
@@ -119,9 +120,9 @@ impl From<serde_json::Error> for CacheError {
 /// implementation; production code can swap in a crate like `crc64` if
 /// available.
 fn checksum(data: &[u8]) -> u64 {
-    // Polynomial for CRC-64/XZ: 0xC96C5795D7870F42
+    // Polynomial for CRC-64/XZ
     // Simple table-less implementation for correctness
-    const POLY: u64 = 0xC96C5795D7870F42;
+    const POLY: u64 = 0xC96C_5795_D787_0F42;
     let mut crc: u64 = u64::MAX;
     for &byte in data {
         crc ^= u64::from(byte) << 56;
@@ -149,7 +150,7 @@ pub struct CacheHeader {
     pub column_count: u8,
     /// Number of events (rows) in the file.
     pub row_count: u64,
-    /// Wall-clock timestamp at cache creation (µs since Unix epoch).
+    /// Wall-clock timestamp at cache creation (us since Unix epoch).
     pub created_at_us: u64,
     /// CRC-64 over all column data bytes.
     pub data_crc64: u64,
@@ -159,10 +160,14 @@ impl CacheHeader {
     /// Create a new header for a file containing `row_count` events,
     /// created at `created_at_us` with a placeholder CRC.
     #[must_use]
-    pub fn new(row_count: u64, created_at_us: u64) -> Self {
+    pub const fn new(row_count: u64, created_at_us: u64) -> Self {
         Self {
             version: CACHE_VERSION,
-            column_count: COLUMN_COUNT as u8,
+            column_count: {
+                const { assert!(COLUMN_COUNT <= u8::MAX as usize) };
+                #[allow(clippy::cast_possible_truncation)]
+                { COLUMN_COUNT as u8 }
+            },
             row_count,
             created_at_us,
             data_crc64: 0,
@@ -240,6 +245,11 @@ impl CacheHeader {
     /// - The version is unsupported.
     /// - The CRC does not match.
     /// - Any column data is truncated or malformed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if fixed-size slice conversions fail, which cannot happen when
+    /// the data length has already been validated.
     pub fn decode(data: &[u8]) -> Result<(Self, CacheColumns), CacheError> {
         if data.len() < HEADER_SIZE {
             return Err(CacheError::UnexpectedEof);
@@ -298,17 +308,20 @@ impl CacheHeader {
             });
         }
 
-        let count = row_count as usize;
+        let count = usize::try_from(row_count).map_err(|_| {
+            CacheError::DataCorrupted(format!("row_count {row_count} exceeds platform usize"))
+        })?;
 
         // Helper: get column data slice given offset index
         let col_slice = |col_idx: usize| -> Result<&[u8], CacheError> {
-            let start = offsets[col_idx] as usize;
+            let start =
+                usize::try_from(offsets[col_idx]).map_err(|_| CacheError::UnexpectedEof)?;
             if start > data.len() {
                 return Err(CacheError::UnexpectedEof);
             }
             // End is either the next column's offset or end of file
             let end = if col_idx + 1 < column_count {
-                offsets[col_idx + 1] as usize
+                usize::try_from(offsets[col_idx + 1]).map_err(|_| CacheError::UnexpectedEof)?
             } else {
                 data.len()
             };
@@ -339,7 +352,9 @@ impl CacheHeader {
 
         let header = Self {
             version,
-            column_count: column_count as u8,
+            column_count: u8::try_from(column_count).map_err(|_| {
+                CacheError::DataCorrupted(format!("column_count {column_count} exceeds u8"))
+            })?,
             row_count,
             created_at_us,
             data_crc64: stored_crc,
@@ -668,6 +683,7 @@ mod tests {
             assert_eq!(orig.wall_ts_us, dec.wall_ts_us, "ts mismatch at {i}");
             assert_eq!(orig.agent, dec.agent, "agent mismatch at {i}");
             assert_eq!(orig.event_type, dec.event_type, "type mismatch at {i}");
+            assert_eq!(orig.item_id, dec.item_id, "item mismatch at {i}");
         }
     }
 }

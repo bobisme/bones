@@ -160,14 +160,11 @@ fn split_known_key(scope: ConfigScope, key: &str) -> Result<(&str, &str)> {
     let valid = match scope {
         ConfigScope::Project => matches!(
             (section, leaf),
-            ("goals", "auto_complete")
-                | ("search", "semantic")
-                | ("search", "model")
-                | ("search", "duplicate_threshold")
-                | ("search", "related_threshold")
-                | ("search", "warn_on_create")
-                | ("triage", "feedback_learning")
-                | ("done", "require_reason")
+            ("goals", "auto_complete") |
+("search",
+"semantic" | "model" | "duplicate_threshold" | "related_threshold" |
+"warn_on_create") | ("triage", "feedback_learning") |
+("done", "require_reason")
         ),
         ConfigScope::User => matches!((section, leaf), ("user", "output")),
     };
@@ -184,7 +181,7 @@ fn parse_value(scope: ConfigScope, key: &str, raw: &str) -> Result<Value> {
 
     match (section, leaf) {
         ("search", "model") | ("user", "output") => Ok(Value::String(raw.to_string())),
-        ("search", "duplicate_threshold") | ("search", "related_threshold") => {
+        ("search", "duplicate_threshold" | "related_threshold") => {
             let number: f64 = raw
                 .parse()
                 .with_context(|| format!("{key} expects a number"))?;

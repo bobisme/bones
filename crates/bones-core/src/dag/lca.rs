@@ -94,17 +94,17 @@ pub fn find_lca(dag: &EventDag, tip_a: &str, tip_b: &str) -> Result<Option<Strin
         }
 
         // Step walk A.
-        if !a_done {
-            if let Some(lca) = bfs_step(dag, &mut queue_a, &mut visited_a, &visited_b) {
-                return Ok(Some(lca));
-            }
+        if !a_done
+            && let Some(lca) = bfs_step(dag, &mut queue_a, &mut visited_a, &visited_b)
+        {
+            return Ok(Some(lca));
         }
 
         // Step walk B.
-        if !b_done {
-            if let Some(lca) = bfs_step(dag, &mut queue_b, &mut visited_b, &visited_a) {
-                return Ok(Some(lca));
-            }
+        if !b_done
+            && let Some(lca) = bfs_step(dag, &mut queue_b, &mut visited_b, &visited_a)
+        {
+            return Ok(Some(lca));
         }
     }
 }
@@ -176,11 +176,9 @@ pub fn find_all_lcas(dag: &EventDag, tip_a: &str, tip_b: &str) -> Result<Vec<Str
     // A common ancestor C is an LCA iff no child of C is also a common ancestor.
     let mut lcas: Vec<String> = Vec::new();
     for &ca in &common {
-        let has_common_child = if let Some(node) = dag.get(ca) {
-            node.children.iter().any(|c| common.contains(c))
-        } else {
-            false
-        };
+        let has_common_child = dag
+            .get(ca)
+            .is_some_and(|node| node.children.iter().any(|c| common.contains(c)));
 
         if !has_common_child {
             lcas.push(ca.clone());

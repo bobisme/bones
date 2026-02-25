@@ -77,6 +77,10 @@ impl SemanticModel {
     /// bundled model bytes into the cache directory before creating an ORT
     /// session. When no bundled bytes are available, this attempts a one-time
     /// download of model/tokenizer assets from stable URLs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot be loaded or the cache is invalid.
     pub fn load() -> Result<Self> {
         let path = Self::model_cache_path()?;
         Self::ensure_model_cached(&path)?;
@@ -100,10 +104,10 @@ impl SemanticModel {
                     format!("failed to load semantic model from {}", path.display())
                 })?;
 
-            return Ok(Self {
+            Ok(Self {
                 session: Mutex::new(session),
                 tokenizer,
-            });
+            })
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -116,6 +120,10 @@ impl SemanticModel {
     /// Return the OS-appropriate cache path for the model file.
     ///
     /// Uses `dirs::cache_dir() / bones / models / minilm-l6-v2-int8.onnx`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the OS cache directory cannot be determined.
     pub fn model_cache_path() -> Result<PathBuf> {
         Ok(Self::model_cache_root()?.join(MODEL_FILENAME))
     }
@@ -133,6 +141,7 @@ impl SemanticModel {
     }
 
     /// Check if cached model matches expected SHA256.
+    #[must_use] 
     pub fn is_cached_valid(path: &Path) -> bool {
         let expected_sha256 = expected_model_sha256();
         if expected_sha256.is_none() {
@@ -147,6 +156,11 @@ impl SemanticModel {
     }
 
     /// Extract bundled model bytes to cache directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no bundled bytes are available, or if the file
+    /// system operations fail, or if the extracted model fails SHA256 verification.
     pub fn extract_to_cache(path: &Path) -> Result<()> {
         let bundled = bundled_model_bytes().ok_or_else(|| {
             anyhow!(
@@ -230,7 +244,7 @@ impl SemanticModel {
                 );
             }
 
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -273,14 +287,18 @@ impl SemanticModel {
     }
 
     /// Run inference for a single text input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime is unavailable or inference fails.
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
         #[cfg(feature = "semantic-ort")]
         {
             let encoded = self.encode_text(text)?;
             let mut out = self.run_model_batch(&[encoded])?;
-            return out
+            out
                 .pop()
-                .ok_or_else(|| anyhow!("semantic model returned no embedding"));
+                .ok_or_else(|| anyhow!("semantic model returned no embedding"))
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -292,6 +310,10 @@ impl SemanticModel {
     }
 
     /// Batch inference for efficiency.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime is unavailable or batch inference fails.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         #[cfg(feature = "semantic-ort")]
         {
@@ -299,7 +321,7 @@ impl SemanticModel {
                 .iter()
                 .map(|text| self.encode_text(text))
                 .collect::<Result<Vec<_>>>()?;
-            return self.run_model_batch(&encoded);
+            self.run_model_batch(&encoded)
         }
 
         #[cfg(not(feature = "semantic-ort"))]
@@ -342,6 +364,7 @@ impl SemanticModel {
     }
 
     #[cfg(feature = "semantic-ort")]
+    #[allow(clippy::significant_drop_tightening, clippy::cast_precision_loss)]
     fn run_model_batch(&self, encoded: &[EncodedText]) -> Result<Vec<Vec<f32>>> {
         if encoded.is_empty() {
             return Ok(Vec::new());
@@ -427,6 +450,7 @@ fn input_source(index: usize, input_name: &str) -> InputSource {
 }
 
 #[cfg(feature = "semantic-ort")]
+#[allow(clippy::cast_precision_loss)]
 fn decode_embeddings(
     shape: &[i64],
     data: &[f32],
@@ -543,7 +567,7 @@ pub fn is_semantic_available() -> bool {
     SemanticModel::load().is_ok()
 }
 
-fn bundled_model_bytes() -> Option<&'static [u8]> {
+const fn bundled_model_bytes() -> Option<&'static [u8]> {
     #[cfg(feature = "bundled-model")]
     {
         if BUNDLED_MODEL_BYTES.is_empty() {
@@ -640,9 +664,9 @@ fn download_to_path(url: &str, path: &Path, artifact_label: &str) -> Result<()> 
         let mut out = fs::File::create(&temp_path)
             .with_context(|| format!("failed to create temporary file {}", temp_path.display()))?;
         std::io::copy(&mut reader, &mut out)
-            .with_context(|| format!("failed to write {} download", artifact_label))?;
+            .with_context(|| format!("failed to write {artifact_label} download"))?;
         out.flush()
-            .with_context(|| format!("failed to flush {} download", artifact_label))?;
+            .with_context(|| format!("failed to flush {artifact_label} download"))?;
     }
 
     if path.exists() {

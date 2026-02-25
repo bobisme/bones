@@ -43,7 +43,7 @@ use crate::shard::ShardManager;
 // ---------------------------------------------------------------------------
 
 /// Identifies the last event that was successfully applied to the projection.
-/// Stored in the `projection_meta` table in SQLite.
+/// Stored in the `projection_meta` table in `SQLite`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventHash(pub String);
 
@@ -80,13 +80,14 @@ pub struct ApplyReport {
 /// # Arguments
 ///
 /// * `events_dir` — Path to `.bones/events/` (the shard directory)
-/// * `db_path`    — Path to `.bones/bones.db` (the SQLite projection file)
+/// * `db_path`    — Path to `.bones/bones.db` (the `SQLite` projection file)
 /// * `force_full` — If `true`, skip incremental and always do a full rebuild
-///                  (`bn admin rebuild --full`).
+///   (`bn admin rebuild --full`).
 ///
 /// # Errors
 ///
 /// Returns an error if reading shards, parsing events, or projection fails.
+#[allow(clippy::too_many_lines)]
 pub fn incremental_apply(
     events_dir: &Path,
     db_path: &Path,
@@ -100,16 +101,13 @@ pub fn incremental_apply(
 
     // Try to open existing DB.  If it doesn't exist or is corrupt we need a
     // full rebuild.
-    let conn = match query::try_open_projection(db_path)? {
-        Some(c) => c,
-        None => {
-            return do_full_rebuild(
-                events_dir,
-                db_path,
-                start,
-                "projection database missing or corrupt",
-            );
-        }
+    let Some(conn) = query::try_open_projection(db_path)? else {
+        return do_full_rebuild(
+            events_dir,
+            db_path,
+            start,
+            "projection database missing or corrupt",
+        );
     };
 
     // Read cursor
@@ -129,7 +127,7 @@ pub fn incremental_apply(
     }
 
     // 6. Read and replay new events in streaming batches
-    let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
+    let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
     let shards = shard_mgr
         .list_shards()
@@ -178,13 +176,13 @@ pub fn incremental_apply(
     let mut total_projected = 0;
     let mut total_duplicates = 0;
     let mut total_errors = 0;
-    let mut current_last_hash = last_hash.clone();
+    let mut current_last_hash = last_hash;
     let mut total_byte_len = offset;
 
     let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
     let projector = project::Projector::new(&conn);
 
-    while let Some(line_res) = line_iter.next() {
+    for line_res in line_iter {
         let (abs_offset, line): (usize, String) =
             line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;
@@ -262,7 +260,7 @@ pub fn incremental_apply(
     })
 }
 
-/// Read the current high-water mark from the SQLite metadata table.
+/// Read the current high-water mark from the `SQLite` metadata table.
 /// Returns `None` if no events have been applied (fresh DB).
 ///
 /// # Errors
@@ -295,6 +293,11 @@ pub fn write_hwm(db: &Connection, hwm: &EventHash) -> Result<()> {
 ///
 /// Returns `Ok(())` if incremental is safe, `Err(reason)` with a human-readable
 /// reason string if a full rebuild is needed.
+///
+/// # Errors
+///
+/// Returns an error string describing why incremental rebuild is unsafe
+/// (schema mismatch, missing tracking table, or shard corruption).
 pub fn check_incremental_safety(db: &Connection, events_dir: &Path) -> Result<(), String> {
     // 1. Schema version check
     let schema_version = migrations::current_schema_version(db)
@@ -319,7 +322,7 @@ pub fn check_incremental_safety(db: &Connection, events_dir: &Path) -> Result<()
     }
 
     // 3. Sealed shard manifest integrity
-    let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
+    let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
     let shards = shard_mgr
         .list_shards()

@@ -19,7 +19,7 @@ pub struct MetricInputs {
 /// Configurable weights for the composite formula:
 ///
 /// `P(v) = alpha*CP + beta*PR + gamma*BC + delta*U + epsilon*D`
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompositeWeights<T = f64> {
     pub alpha: T,
     pub beta: T,
@@ -58,11 +58,7 @@ pub fn composite_score(inputs: &MetricInputs, weights: &CompositeWeights) -> f64
     let u = urgency_component(inputs.urgency);
     let d = decay_component(inputs.decay_days);
 
-    (weights.alpha * cp)
-        + (weights.beta * pr)
-        + (weights.gamma * bc)
-        + (weights.delta * u)
-        + (weights.epsilon * d)
+    weights.epsilon.mul_add(d, weights.delta.mul_add(u, weights.gamma.mul_add(bc, weights.alpha.mul_add(cp, weights.beta * pr))))
 }
 
 /// Min-max normalization that maps raw metric values to `[0, 1]`.
@@ -89,7 +85,7 @@ pub fn normalize_metric(values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-fn normalize_unit(value: f64) -> f64 {
+const fn normalize_unit(value: f64) -> f64 {
     if !value.is_finite() {
         return 0.0;
     }
@@ -97,7 +93,7 @@ fn normalize_unit(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
-fn urgency_component(urgency: Urgency) -> f64 {
+const fn urgency_component(urgency: Urgency) -> f64 {
     match urgency {
         Urgency::Urgent => 1.0,
         Urgency::Default => 0.5,

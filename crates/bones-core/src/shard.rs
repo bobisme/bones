@@ -612,7 +612,7 @@ impl ShardManager {
         for (year, month) in shards {
             let path = self.shard_path(year, month);
             let meta = fs::metadata(&path)?;
-            total = total.saturating_add(meta.len() as usize);
+            total = total.saturating_add(usize::try_from(meta.len()).unwrap_or(usize::MAX));
         }
         Ok(total)
     }
@@ -641,7 +641,7 @@ impl ShardManager {
 
         for (year, month) in shards {
             let path = self.shard_path(year, month);
-            let shard_len = fs::metadata(&path)?.len() as usize;
+            let shard_len = usize::try_from(fs::metadata(&path)?.len()).unwrap_or(usize::MAX);
 
             let shard_end = cumulative.saturating_add(shard_len);
 
@@ -654,19 +654,15 @@ impl ShardManager {
             // This shard overlaps with or is entirely after the cursor.
             let shard_content = fs::read_to_string(&path)?;
 
-            if !found_start {
+            if found_start {
+                result.push_str(&shard_content);
+            } else {
                 // Calculate the within-shard byte offset.
-                let within = if cumulative < offset {
-                    offset - cumulative
-                } else {
-                    0
-                };
+                let within = offset.saturating_sub(cumulative);
                 // Guard: within must not exceed shard content length.
                 let within = within.min(shard_content.len());
                 result.push_str(&shard_content[within..]);
                 found_start = true;
-            } else {
-                result.push_str(&shard_content);
             }
 
             cumulative = shard_end;
@@ -701,7 +697,7 @@ impl ShardManager {
 
         for (year, month) in shards {
             let path = self.shard_path(year, month);
-            let shard_len = fs::metadata(&path)?.len() as usize;
+            let shard_len = usize::try_from(fs::metadata(&path)?.len()).unwrap_or(usize::MAX);
             let shard_end = cumulative.saturating_add(shard_len);
 
             if shard_end <= start_offset {
@@ -820,7 +816,7 @@ impl ShardLineIterator {
                 .join("events")
                 .join(ShardManager::shard_filename(year, month));
             if let Ok(meta) = fs::metadata(shard_path) {
-                let shard_len = meta.len() as usize;
+                let shard_len = usize::try_from(meta.len()).unwrap_or(usize::MAX);
                 if self.cumulative_offset + shard_len <= offset {
                     self.cumulative_offset += shard_len;
                     self.current_shard_idx += 1;
@@ -870,7 +866,7 @@ impl Iterator for ShardLineIterator {
                         .join("events")
                         .join(ShardManager::shard_filename(y, m));
                     if let Ok(meta) = fs::metadata(p) {
-                        cumulative_before += meta.len() as usize;
+                        cumulative_before += usize::try_from(meta.len()).unwrap_or(usize::MAX);
                     }
                 }
 
@@ -884,7 +880,10 @@ impl Iterator for ShardLineIterator {
                 self.current_reader = Some(io::BufReader::new(file));
             }
 
-            let reader = self.current_reader.as_mut().unwrap();
+            let reader = self
+                .current_reader
+                .as_mut()
+                .expect("reader was just set above");
             let mut line = String::new();
             let offset = self.cumulative_offset;
 
@@ -893,7 +892,6 @@ impl Iterator for ShardLineIterator {
                     // EOF for this shard
                     self.current_reader = None;
                     self.current_shard_idx += 1;
-                    continue;
                 }
                 Ok(n) => {
                     self.cumulative_offset += n;

@@ -53,7 +53,7 @@ pub struct SccNode {
 impl SccNode {
     /// Return `true` if this SCC contains more than one item (i.e., a cycle).
     #[must_use]
-    pub fn is_cycle(&self) -> bool {
+    pub const fn is_cycle(&self) -> bool {
         self.members.len() > 1
     }
 
@@ -75,7 +75,7 @@ impl SccNode {
 /// - `reduced`: transitively-reduced condensed DAG (minimum edges).
 #[derive(Debug)]
 pub struct NormalizedGraph {
-    /// Original graph from SQLite (may contain cycles).
+    /// Original graph from `SQLite` (may contain cycles).
     pub raw: RawGraph,
     /// Condensed DAG: SCCs collapsed to single nodes.
     pub condensed: DiGraph<SccNode, ()>,
@@ -112,7 +112,7 @@ impl NormalizedGraph {
                 sorted.sort_unstable();
                 SccNode { members: sorted }
             },
-            |_, _| (),
+            |_, ()| (),
         );
 
         // Build item_to_scc mapping.
@@ -189,6 +189,7 @@ impl NormalizedGraph {
 /// # Panics
 ///
 /// Panics if `g` contains a cycle (input must be a DAG).
+#[must_use] 
 pub fn transitive_reduction<N: Clone>(g: &DiGraph<N, ()>) -> DiGraph<N, ()> {
     use petgraph::algo::toposort;
 
@@ -222,7 +223,7 @@ pub fn transitive_reduction<N: Clone>(g: &DiGraph<N, ()>) -> DiGraph<N, ()> {
     // Build the reduced graph: keep edge (u, v) only if v is NOT reachable
     // from any other successor of u (i.e., v is not reachable from u via
     // a path that doesn't use the direct edge u→v).
-    let mut reduced = g.map(|_, w| w.clone(), |_, _| ());
+    let mut reduced = g.map(|_, w| w.clone(), |_, ()| ());
 
     // Collect edges to remove (can't mutate while iterating).
     let to_remove: Vec<_> = g

@@ -1,4 +1,4 @@
-//! SQLite schema migrations for the disposable projection database.
+//! `SQLite` schema migrations for the disposable projection database.
 
 use super::schema;
 use rusqlite::{Connection, types::Type};
@@ -12,7 +12,7 @@ const MIGRATIONS: &[(u32, &str)] = &[(1, schema::MIGRATION_V1_SQL), (2, schema::
 ///
 /// # Errors
 ///
-/// Returns an error if querying SQLite fails or the version value cannot be
+/// Returns an error if querying `SQLite` fails or the version value cannot be
 /// represented as `u32`.
 pub fn current_schema_version(conn: &Connection) -> rusqlite::Result<u32> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;

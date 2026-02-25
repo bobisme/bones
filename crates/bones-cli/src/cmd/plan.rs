@@ -44,27 +44,23 @@ struct PlanScheduleRegime {
 
 /// Execute `bn plan`.
 pub fn run_plan(args: &PlanArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
-    if let Some(goal_id) = &args.goal_id {
-        if let Err(e) = validate::validate_item_id(goal_id) {
+    if let Some(goal_id) = &args.goal_id
+        && let Err(e) = validate::validate_item_id(goal_id) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
 
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     if let Some(goal_id) = &args.goal_id {
@@ -236,7 +232,7 @@ fn build_scoped_graph(raw: &RawGraph, scoped_ids: &BTreeSet<String>) -> graph::D
     graph
 }
 
-/// Build a map of item_id -> composite triage score.
+/// Build a map of `item_id` -> composite triage score.
 /// Falls back to an empty map if triage snapshot computation fails.
 fn build_score_map(conn: &rusqlite::Connection) -> HashMap<String, f64> {
     let now_us = std::time::SystemTime::now()
@@ -293,14 +289,13 @@ fn render_plan_human(
         return Ok(());
     }
 
-    if explain {
-        if let Some(regime) = &payload.schedule_regime {
+    if explain
+        && let Some(regime) = &payload.schedule_regime {
             writeln!(w, "\nScheduler regime: {}", regime.detail)?;
             for violation in &regime.violations {
                 writeln!(w, "  note: {violation}")?;
             }
         }
-    }
 
     for (idx, layer) in payload.layers.iter().enumerate() {
         let noun = if layer.len() == 1 { "item" } else { "items" };

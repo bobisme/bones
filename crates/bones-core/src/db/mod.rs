@@ -1,4 +1,4 @@
-//! SQLite projection database utilities.
+//! `SQLite` projection database utilities.
 //!
 //! Runtime defaults are intentionally conservative:
 //! - `journal_mode = WAL` to allow concurrent readers while writers append
@@ -21,7 +21,7 @@ use tracing::debug;
 /// Busy timeout used for projection DB connections.
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Open (or create) the projection SQLite database, apply runtime pragmas,
+/// Open (or create) the projection `SQLite` database, apply runtime pragmas,
 /// and migrate schema to the latest version.
 ///
 /// # Errors

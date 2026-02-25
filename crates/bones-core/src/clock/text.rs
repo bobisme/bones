@@ -9,14 +9,15 @@ const BASE64_URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
 #[must_use]
 pub fn stamp_to_text(stamp: &Stamp) -> String {
     let compact = stamp.serialize_compact();
-    if let Some(sparse_payload) = compact_to_sparse_payload(&compact) {
-        format!(
-            "{ITC_TEXT_PREFIX}{}",
-            encode_base64_url_no_pad(&sparse_payload)
-        )
-    } else {
-        format!("{LEGACY_ITC_TEXT_PREFIX}{}", encode_hex(&compact))
-    }
+    compact_to_sparse_payload(&compact).map_or_else(
+        || format!("{LEGACY_ITC_TEXT_PREFIX}{}", encode_hex(&compact)),
+        |sparse_payload| {
+            format!(
+                "{ITC_TEXT_PREFIX}{}",
+                encode_base64_url_no_pad(&sparse_payload)
+            )
+        },
+    )
 }
 
 #[must_use]
@@ -84,12 +85,12 @@ fn sparse_payload_to_compact(sparse: &[u8]) -> Option<Vec<u8>> {
     }
 
     let id_bit_len = decode_varint_usize(sparse, &mut cursor)?;
-    let id_bits_len = bytes_for_bits(id_bit_len)?;
-    let id_bits = take_slice(sparse, &mut cursor, id_bits_len)?;
+    let id_byte_len = bytes_for_bits(id_bit_len)?;
+    let id_bits = take_slice(sparse, &mut cursor, id_byte_len)?;
 
     let event_bit_len = decode_varint_usize(sparse, &mut cursor)?;
-    let event_bits_len = bytes_for_bits(event_bit_len)?;
-    let event_bits = take_slice(sparse, &mut cursor, event_bits_len)?;
+    let event_byte_len = bytes_for_bits(event_bit_len)?;
+    let event_bits = take_slice(sparse, &mut cursor, event_byte_len)?;
 
     let non_zero_count = decode_varint_usize(sparse, &mut cursor)?;
 
@@ -149,12 +150,12 @@ fn parse_compact_sections(raw: &[u8]) -> Option<CompactSections<'_>> {
     }
 
     let id_bit_len = decode_varint_usize(raw, &mut cursor)?;
-    let id_bits_len = bytes_for_bits(id_bit_len)?;
-    let id_bits = take_slice(raw, &mut cursor, id_bits_len)?;
+    let id_byte_len = bytes_for_bits(id_bit_len)?;
+    let id_bits = take_slice(raw, &mut cursor, id_byte_len)?;
 
     let event_bit_len = decode_varint_usize(raw, &mut cursor)?;
-    let event_bits_len = bytes_for_bits(event_bit_len)?;
-    let event_bits = take_slice(raw, &mut cursor, event_bits_len)?;
+    let event_byte_len = bytes_for_bits(event_bit_len)?;
+    let event_bits = take_slice(raw, &mut cursor, event_byte_len)?;
 
     let event_values_len = decode_varint_usize(raw, &mut cursor)?;
     let event_values = take_slice(raw, &mut cursor, event_values_len)?;
@@ -318,7 +319,7 @@ fn decode_base64_url_no_pad(raw: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn decode_base64_url_digit(raw: u8) -> Option<u8> {
+const fn decode_base64_url_digit(raw: u8) -> Option<u8> {
     match raw {
         b'A'..=b'Z' => Some(raw - b'A'),
         b'a'..=b'z' => Some(raw - b'a' + 26),
@@ -340,7 +341,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(raw: &str) -> Option<Vec<u8>> {
-    if raw.len() % 2 != 0 {
+    if !raw.len().is_multiple_of(2) {
         return None;
     }
 
@@ -357,7 +358,7 @@ fn decode_hex(raw: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn decode_hex_nibble(c: char) -> Option<u8> {
+const fn decode_hex_nibble(c: char) -> Option<u8> {
     match c {
         '0'..='9' => Some((c as u8) - b'0'),
         'a'..='f' => Some((c as u8) - b'a' + 10),

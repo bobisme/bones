@@ -20,7 +20,7 @@ use crate::graph::normalize::NormalizedGraph;
 // ---------------------------------------------------------------------------
 
 /// Per-item degree centrality scores.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DegreeCentrality {
     /// In-degree per item ID (how many things block this item).
     pub in_degree: HashMap<String, usize>,
@@ -206,11 +206,9 @@ pub fn source_items(ng: &NormalizedGraph) -> Vec<String> {
             .neighbors_directed(idx, Direction::Incoming)
             .next()
             .is_none()
-        {
-            if let Some(scc) = ng.condensed.node_weight(idx) {
+            && let Some(scc) = ng.condensed.node_weight(idx) {
                 sources.extend(scc.members.iter().cloned());
             }
-        }
     }
     sources.sort_unstable();
     sources
@@ -228,11 +226,9 @@ pub fn sink_items(ng: &NormalizedGraph) -> Vec<String> {
             .neighbors_directed(idx, Direction::Outgoing)
             .next()
             .is_none()
-        {
-            if let Some(scc) = ng.condensed.node_weight(idx) {
+            && let Some(scc) = ng.condensed.node_weight(idx) {
                 sinks.extend(scc.members.iter().cloned());
             }
-        }
     }
     sinks.sort_unstable();
     sinks

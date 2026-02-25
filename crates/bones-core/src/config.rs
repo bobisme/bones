@@ -5,6 +5,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ProjectConfig {
     #[serde(default)]
     pub goals: GoalConfig,
@@ -16,16 +17,6 @@ pub struct ProjectConfig {
     pub done: DoneConfig,
 }
 
-impl Default for ProjectConfig {
-    fn default() -> Self {
-        Self {
-            goals: GoalConfig::default(),
-            search: SearchConfig::default(),
-            triage: TriageConfig::default(),
-            done: DoneConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoalConfig {
@@ -82,18 +73,12 @@ impl Default for TriageConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DoneConfig {
     #[serde(default)]
     pub require_reason: bool,
 }
 
-impl Default for DoneConfig {
-    fn default() -> Self {
-        Self {
-            require_reason: false,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoConfig {
@@ -116,6 +101,11 @@ pub struct EffectiveConfig {
     pub resolved_output: String,
 }
 
+/// Load project-level configuration from `.bones/config.toml`.
+///
+/// # Errors
+///
+/// Returns an error if the file exists but cannot be read or parsed.
 pub fn load_project_config(project_root: &Path) -> Result<ProjectConfig> {
     let path = project_root.join(".bones/config.toml");
     if !path.exists() {
@@ -129,6 +119,11 @@ pub fn load_project_config(project_root: &Path) -> Result<ProjectConfig> {
         .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
+/// Load user-level configuration from `<config-dir>/bones/config.toml`.
+///
+/// # Errors
+///
+/// Returns an error if the file exists but cannot be read or parsed.
 pub fn load_user_config() -> Result<UserConfig> {
     let Some(config_dir) = dirs::config_dir() else {
         return Ok(UserConfig::default());
@@ -146,6 +141,7 @@ pub fn load_user_config() -> Result<UserConfig> {
         .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
+#[must_use] 
 pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
     config
         .repos
@@ -157,15 +153,15 @@ pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
             let available = path.exists() && bones_dir.exists();
 
             if !available {
-                if !path.exists() {
+                if path.exists() {
                     eprintln!(
-                        "Warning: Repository '{}' configured at {} does not exist",
+                        "Warning: Repository '{}' at {} does not contain .bones/ directory",
                         repo_config.name,
                         path.display()
                     );
                 } else {
                     eprintln!(
-                        "Warning: Repository '{}' at {} does not contain .bones/ directory",
+                        "Warning: Repository '{}' configured at {} does not exist",
                         repo_config.name,
                         path.display()
                     );
@@ -177,12 +173,18 @@ pub fn discover_repos(config: &UserConfig) -> Vec<(String, PathBuf, bool)> {
         .collect()
 }
 
+/// Resolve the effective configuration by merging project, user, CLI, and
+/// environment settings.
+///
+/// # Errors
+///
+/// Returns an error if loading project or user configuration fails.
 pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveConfig> {
     let project = load_project_config(project_root)?;
     let user = load_user_config()?;
 
     let env_format = env::var("FORMAT").ok();
-    let resolved_output = resolve_output(cli_json, user.output.clone(), env_format)?;
+    let resolved_output = resolve_output(cli_json, user.output.as_deref(), env_format.as_deref())?;
 
     Ok(EffectiveConfig {
         project,
@@ -193,18 +195,15 @@ pub fn resolve_config(project_root: &Path, cli_json: bool) -> Result<EffectiveCo
 
 fn resolve_output(
     cli_json: bool,
-    user_output: Option<String>,
-    env_format: Option<String>,
+    user_output: Option<&str>,
+    env_format: Option<&str>,
 ) -> Result<String> {
     fn normalize_output_mode(raw: &str) -> Option<&'static str> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            // canonical values
-            "pretty" => Some("pretty"),
-            "text" => Some("text"),
+            // canonical values + legacy aliases
+            "pretty" | "human" => Some("pretty"),
+            "text" | "table" => Some("text"),
             "json" => Some("json"),
-            // legacy compatibility
-            "human" => Some("pretty"),
-            "table" => Some("text"),
             _ => None,
         }
     }
@@ -213,11 +212,11 @@ fn resolve_output(
         return Ok("json".to_string());
     }
 
-    if let Some(mode) = env_format.as_deref().and_then(normalize_output_mode) {
+    if let Some(mode) = env_format.and_then(normalize_output_mode) {
         return Ok(mode.to_string());
     }
 
-    if let Some(mode) = user_output.as_deref().and_then(normalize_output_mode) {
+    if let Some(mode) = user_output.and_then(normalize_output_mode) {
         return Ok(mode.to_string());
     }
 
@@ -272,18 +271,18 @@ mod tests {
 
     #[test]
     fn cli_json_overrides_env_and_config() {
-        let output = resolve_output(true, Some("pretty".to_string()), Some("text".to_string()))
+        let output = resolve_output(true, Some("pretty"), Some("text"))
             .expect("resolve should succeed");
         assert_eq!(output, "json");
     }
 
     #[test]
     fn legacy_aliases_are_normalized() {
-        let pretty = resolve_output(false, Some("table".to_string()), Some("human".to_string()))
+        let pretty = resolve_output(false, Some("table"), Some("human"))
             .expect("resolve should succeed");
         assert_eq!(pretty, "pretty");
 
-        let text = resolve_output(false, Some("human".to_string()), Some("table".to_string()))
+        let text = resolve_output(false, Some("human"), Some("table"))
             .expect("resolve should succeed");
         assert_eq!(text, "text");
     }

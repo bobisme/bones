@@ -2,7 +2,7 @@
 //!
 //! Validates the bone exists and is in a valid source state (open or
 //! doing→open reopen), emits an `item.move` event with `{state: "doing"}`,
-//! projects the state change into SQLite, and outputs the result.
+//! projects the state change into `SQLite`, and outputs the result.
 
 use crate::agent;
 use crate::cmd::show::resolve_item_id;
@@ -91,11 +91,11 @@ fn run_do_single(
 
     // Resolve item ID (supports partial IDs)
     let resolved_id = resolve_item_id(conn, raw_id)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{raw_id}' not found"))?;
 
     // Get current item and validate state transition
     let item = query::get_item(conn, &resolved_id, false)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{resolved_id}' not found"))?;
 
     let current_state: State = item.state.parse().map_err(|_| {
         anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
@@ -210,7 +210,7 @@ pub fn run_do(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 3. Open projection DB

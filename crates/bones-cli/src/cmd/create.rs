@@ -1,7 +1,7 @@
 //! `bn create` — create a new bone.
 //!
 //! Generates a unique item ID, emits an `item.create` event to the active
-//! shard, projects it into the SQLite database, and outputs the result.
+//! shard, projects it into the `SQLite` database, and outputs the result.
 
 use crate::agent;
 use crate::cmd::dup::build_fts_query;
@@ -216,8 +216,7 @@ pub fn run_create(
     let urgency: Urgency = match &args.urgency {
         Some(u) => u.parse().map_err(|_| {
             let msg = format!(
-                "invalid urgency '{}': expected one of urgent, default, punt",
-                u
+                "invalid urgency '{u}': expected one of urgent, default, punt"
             );
             render_error(
                 output,
@@ -228,7 +227,7 @@ pub fn run_create(
                 ),
             )
             .ok();
-            anyhow::anyhow!("{}", msg)
+            anyhow::anyhow!("{msg}")
         })?,
         None => Urgency::Default,
     };
@@ -248,7 +247,7 @@ pub fn run_create(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 7. Set up shard manager
@@ -280,10 +279,10 @@ pub fn run_create(
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-        if db_path.exists() {
-            if let Some(conn) = db::query::try_open_projection(&db_path)? {
-                if !db::query::item_exists(&conn, parent_id)? {
-                    let msg = format!("parent item '{}' not found", parent_id);
+        if db_path.exists()
+            && let Some(conn) = db::query::try_open_projection(&db_path)?
+                && !db::query::item_exists(&conn, parent_id)? {
+                    let msg = format!("parent item '{parent_id}' not found");
                     render_error(
                         output,
                         &CliError::with_details(
@@ -292,10 +291,8 @@ pub fn run_create(
                             "parent_not_found",
                         ),
                     )?;
-                    anyhow::bail!("{}", msg);
+                    anyhow::bail!("{msg}");
                 }
-            }
-        }
     }
 
     // 10. Validate --blocks targets exist
@@ -304,10 +301,10 @@ pub fn run_create(
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-        if db_path.exists() {
-            if let Some(conn) = db::query::try_open_projection(&db_path)? {
-                if !db::query::item_exists(&conn, block_target)? {
-                    let msg = format!("blocks target '{}' not found", block_target);
+        if db_path.exists()
+            && let Some(conn) = db::query::try_open_projection(&db_path)?
+                && !db::query::item_exists(&conn, block_target)? {
+                    let msg = format!("blocks target '{block_target}' not found");
                     render_error(
                         output,
                         &CliError::with_details(
@@ -316,16 +313,14 @@ pub fn run_create(
                             "blocks_target_not_found",
                         ),
                     )?;
-                    anyhow::bail!("{}", msg);
+                    anyhow::bail!("{msg}");
                 }
-            }
-        }
     }
 
     // 11. Check for duplicate items (unless --force is set)
     let mut duplicate_matches: Vec<DuplicateMatch> = Vec::new();
-    if !args.force && db_path.exists() {
-        if let Some(conn) = db::query::try_open_projection(&db_path)? {
+    if !args.force && db_path.exists()
+        && let Some(conn) = db::query::try_open_projection(&db_path)? {
             // Load project config to get search configuration
             let project_config = load_project_config(project_root).unwrap_or_default();
 
@@ -360,7 +355,11 @@ pub fn run_create(
                 });
 
             let duplicate_query = build_fts_query(&args.title, description.as_deref());
-            if !duplicate_query.is_empty() {
+            if duplicate_query.is_empty() {
+                tracing::debug!(
+                    "duplicate check skipped: no usable lexical tokens from title/description"
+                );
+            } else {
                 // Run duplicate detection
                 match find_duplicates_with_model(
                     &duplicate_query,
@@ -404,13 +403,8 @@ pub fn run_create(
                         tracing::warn!("duplicate check failed: {}", e);
                     }
                 }
-            } else {
-                tracing::debug!(
-                    "duplicate check skipped: no usable lexical tokens from title/description"
-                );
             }
         }
-    }
 
     // 12. Generate item ID
     let item_id = generate_item_id(&args.title, item_count, |candidate| {

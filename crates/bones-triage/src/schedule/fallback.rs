@@ -53,24 +53,24 @@ pub enum ScheduleRegime {
 impl ScheduleRegime {
     /// Returns `true` if the Whittle regime is active.
     #[must_use]
-    pub fn is_whittle(&self) -> bool {
-        matches!(self, ScheduleRegime::Whittle { .. })
+    pub const fn is_whittle(&self) -> bool {
+        matches!(self, Self::Whittle { .. })
     }
 
     /// Returns `true` if the fallback regime is active.
     #[must_use]
-    pub fn is_fallback(&self) -> bool {
-        matches!(self, ScheduleRegime::Fallback { .. })
+    pub const fn is_fallback(&self) -> bool {
+        matches!(self, Self::Fallback { .. })
     }
 
     /// Short one-line description suitable for CLI output.
     #[must_use]
     pub fn explain(&self) -> String {
         match self {
-            ScheduleRegime::Whittle { indexability_score } => {
+            Self::Whittle { indexability_score } => {
                 format!("Whittle Index (indexability score: {indexability_score:.3})")
             }
-            ScheduleRegime::Fallback { reason } => {
+            Self::Fallback { reason } => {
                 format!("Fallback scheduler — {reason}")
             }
         }
@@ -78,7 +78,7 @@ impl ScheduleRegime {
 }
 
 /// Configuration for the fallback scheduler.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FallbackConfig {
     /// Maximum number of extra items any agent may receive above the per-agent
     /// average (floor).  Prevents one agent from hoarding all the work.
@@ -104,7 +104,7 @@ impl Default for FallbackConfig {
 /// * `items` — Item IDs to assign. Duplicates are silently deduplicated.
 /// * `agent_count` — Number of agents available. Must be ≥ 1.
 /// * `scores` — Composite scores keyed by item ID. Missing items get `0.0`.
-/// * `history` — Previously attempted assignments (agent_idx, item_id) that
+/// * `history` — Previously attempted assignments (`agent_idx`, `item_id`) that
 ///   were **not completed** (i.e., skipped). The scheduler avoids re-pairing
 ///   the same (agent, item) when possible.
 ///
@@ -118,6 +118,7 @@ impl Default for FallbackConfig {
 ///
 /// Panics if `agent_count == 0`.
 #[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn assign_fallback(
     items: &[String],
     agent_count: usize,
@@ -134,7 +135,12 @@ pub fn assign_fallback(
 }
 
 /// Like [`assign_fallback`] but accepts explicit [`FallbackConfig`].
+///
+/// # Panics
+///
+/// Panics if `agent_count == 0`.
 #[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn assign_fallback_with_config(
     items: &[String],
     agent_count: usize,
@@ -195,7 +201,7 @@ pub fn assign_fallback_with_config(
         // fall back to absolute least-loaded without the skip filter.
         let agent_idx = preferred.unwrap_or_else(|| {
             pick_agent(&load, agent_count, config, total_items, |_| true)
-                .unwrap_or(least_loaded_agent(&load))
+                .unwrap_or_else(|| least_loaded_agent(&load))
         });
 
         load[agent_idx] += 1;
@@ -243,12 +249,11 @@ fn least_loaded_agent(load: &[usize]) -> usize {
     load.iter()
         .enumerate()
         .min_by_key(|&(_, &l)| l)
-        .map(|(idx, _)| idx)
-        .unwrap_or(0)
+        .map_or(0, |(idx, _)| idx)
 }
 
 /// Enforce fairness: steal the lowest-priority item from over-loaded agents
-/// and give it to any agent with zero items, when items >= agent_count.
+/// and give it to any agent with zero items, when items >= `agent_count`.
 fn enforce_fairness(
     assignments: &mut Vec<Assignment>,
     load: &mut Vec<usize>,

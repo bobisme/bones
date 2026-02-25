@@ -119,12 +119,9 @@ fn render_tree(
     depth_limit: Option<usize>,
     out: &mut String,
 ) {
-    let root_idx = match raw.node_index(root_id) {
-        Some(idx) => idx,
-        None => {
-            let _ = writeln!(out, "  (no connections)");
-            return;
-        }
+    let root_idx = if let Some(idx) = raw.node_index(root_id) { idx } else {
+        let _ = writeln!(out, "  (no connections)");
+        return;
     };
 
     // Check if there are any edges in this direction
@@ -175,7 +172,7 @@ fn render_tree_nodes(
         let connector = if is_last { "└── " } else { "├── " };
         let child_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
 
-        let state_mark = meta.get(id).map(|m| m.display_state()).unwrap_or(" ");
+        let state_mark = meta.get(id).map_or(" ", ItemMeta::display_state);
         let title = meta
             .get(id)
             .map(|m| format!(" — {}", m.title))
@@ -188,7 +185,7 @@ fn render_tree_nodes(
             );
         } else {
             let _ = writeln!(out, "{prefix}{connector}[{state_mark}] {id}{title}");
-            visited.insert(id.to_string());
+            visited.insert(id.clone());
 
             // Recurse if within depth limit
             let at_limit = depth_limit.is_some_and(|d| current_depth + 1 >= d);
@@ -237,12 +234,11 @@ fn render_tree_nodes(
 
 pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     // Validate item ID if given
-    if let Some(ref id) = args.id {
-        if let Err(e) = validate::validate_item_id(id) {
+    if let Some(ref id) = args.id
+        && let Err(e) = validate::validate_item_id(id) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
 
     // Find .bones dir
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
@@ -256,17 +252,14 @@ pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> a
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = match try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            let msg = "projection database not found; run `bn admin rebuild` first";
-            render_error(output, &CliError::new(msg))?;
-            anyhow::bail!("{}", msg);
-        }
+    let conn = if let Some(c) = try_open_projection(&db_path)? { c } else {
+        let msg = "projection database not found; run `bn admin rebuild` first";
+        render_error(output, &CliError::new(msg))?;
+        anyhow::bail!("{msg}");
     };
 
     // Build raw graph
@@ -291,7 +284,7 @@ fn run_graph_item(
     if !item_exists(conn, id)? {
         let msg = format!("item not found: {id}");
         render_error(output, &CliError::new(&msg))?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     // Load metadata for all nodes
@@ -339,8 +332,8 @@ fn run_graph_item(
         let root_meta = meta.get(id);
         let val = json!({
             "id": id,
-            "title": root_meta.map(|m| m.title.as_str()).unwrap_or(""),
-            "state": root_meta.map(|m| m.state.as_str()).unwrap_or(""),
+            "title": root_meta.map_or("", |m| m.title.as_str()),
+            "state": root_meta.map_or("", |m| m.state.as_str()),
             "blocked_by": up_ids,
             "blocks": down_ids,
         });
@@ -449,8 +442,7 @@ fn run_graph_summary(
         .iter()
         .filter(|id| {
             meta.get(*id)
-                .map(|m| m.state != "done" && m.state != "archived")
-                .unwrap_or(true) // include unknown items
+                .is_none_or(|m| m.state != "done" && m.state != "archived") // include unknown items
         })
         .cloned()
         .collect();
@@ -485,8 +477,8 @@ fn run_graph_summary(
                 let m = meta.get(id);
                 json!({
                     "id": id,
-                    "title": m.map(|m| m.title.as_str()).unwrap_or(""),
-                    "state": m.map(|m| m.state.as_str()).unwrap_or(""),
+                    "title": m.map_or("", |m| m.title.as_str()),
+                    "state": m.map_or("", |m| m.state.as_str()),
                 })
             })
             .collect();
@@ -546,9 +538,9 @@ fn run_graph_summary(
     // Render layered graph
     let _ = writeln!(out);
     for (layer_idx, layer) in filtered_layers.iter().enumerate() {
-        let _ = writeln!(out, "  layer {}:", layer_idx);
+        let _ = writeln!(out, "  layer {layer_idx}:");
         for id in layer {
-            let state_mark = meta.get(id).map(|m| m.display_state()).unwrap_or(" ");
+            let state_mark = meta.get(id).map_or(" ", ItemMeta::display_state);
             let title = meta
                 .get(id)
                 .map(|m| truncate(&m.title, 50))
@@ -560,7 +552,7 @@ fn run_graph_summary(
                 .filter(|(src, _)| src == id)
                 .map(|(_, tgt)| tgt.as_str())
                 .collect();
-            targets.sort();
+            targets.sort_unstable();
 
             if targets.is_empty() {
                 let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
@@ -585,7 +577,7 @@ fn run_graph_summary(
     if !unlayered.is_empty() {
         let _ = writeln!(out, "  unlayered (cycle members):");
         for id in &unlayered {
-            let state_mark = meta.get(*id).map(|m| m.display_state()).unwrap_or(" ");
+            let state_mark = meta.get(*id).map_or(" ", ItemMeta::display_state);
             let title = meta
                 .get(*id)
                 .map(|m| truncate(&m.title, 50))

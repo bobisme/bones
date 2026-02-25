@@ -3,7 +3,7 @@
 //! # Overview
 //!
 //! This module constructs and normalizes a petgraph-based directed dependency
-//! graph from the SQLite projection database. The graph feeds into all
+//! graph from the `SQLite` projection database. The graph feeds into all
 //! centrality metrics and scheduling computations in the triage engine.
 //!
 //! ## Pipeline

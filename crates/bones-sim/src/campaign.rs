@@ -14,7 +14,7 @@ use crate::{SimulationConfig, SimulationResult, Simulator};
 
 /// Campaign-level configuration controlling how many seeds to run and
 /// what simulation parameters to use for each seed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CampaignConfig {
     /// Range of seeds to execute, e.g., `0..100`.
     pub seed_range: Range<u64>,
@@ -77,7 +77,7 @@ impl CampaignConfig {
                 freeze_rate_percent: self.fault_freeze_percent,
                 freeze_duration_rounds: self.fault_freeze_duration,
             },
-            clock: Default::default(),
+            clock: crate::clock::ClockConfig::default(),
         }
     }
 
@@ -101,7 +101,7 @@ impl CampaignConfig {
 }
 
 /// Failure details for a single seed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeedFailure {
     /// The seed that failed.
     pub seed: u64,
@@ -110,7 +110,7 @@ pub struct SeedFailure {
 }
 
 /// Aggregate report produced by a campaign run.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CampaignReport {
     /// Total seeds executed.
     pub seeds_run: usize,
@@ -127,7 +127,7 @@ pub struct CampaignReport {
 impl CampaignReport {
     /// True if every seed passed.
     #[must_use]
-    pub fn all_passed(&self) -> bool {
+    pub const fn all_passed(&self) -> bool {
         self.failures.is_empty()
     }
 }

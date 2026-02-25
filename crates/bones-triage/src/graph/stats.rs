@@ -2,24 +2,24 @@
 //!
 //! # Statistics Provided
 //!
-//! - **node_count**: Total number of items (nodes) in the original graph.
-//! - **edge_count**: Total number of blocking edges in the original graph.
+//! - **`node_count`**: Total number of items (nodes) in the original graph.
+//! - **`edge_count`**: Total number of blocking edges in the original graph.
 //! - **density**: Ratio of actual edges to maximum possible edges for a
 //!   directed graph: `density = edge_count / (node_count * (node_count - 1))`.
 //!   A fully connected directed graph has density 1.0. An empty or
 //!   single-node graph has density 0.0.
-//! - **scc_count**: Number of strongly connected components (= number of nodes
+//! - **`scc_count`**: Number of strongly connected components (= number of nodes
 //!   in the condensed graph). In an acyclic graph this equals `node_count`.
-//! - **cycle_count**: Number of SCCs with more than one member (dependency
+//! - **`cycle_count`**: Number of SCCs with more than one member (dependency
 //!   cycles that need resolution).
-//! - **weakly_connected_component_count**: Number of weakly connected
+//! - **`weakly_connected_component_count`**: Number of weakly connected
 //!   components. A value greater than 1 means the dependency graph is split
 //!   into disjoint subgraphs with no edges between them.
-//! - **isolated_node_count**: Nodes with no edges at all (neither in-edges
+//! - **`isolated_node_count`**: Nodes with no edges at all (neither in-edges
 //!   nor out-edges). These items have no dependencies and no dependents.
-//! - **max_in_degree**: Highest in-degree (most blocked-by dependencies)
+//! - **`max_in_degree`**: Highest in-degree (most blocked-by dependencies)
 //!   in the original graph.
-//! - **max_out_degree**: Highest out-degree (most items blocked) in the
+//! - **`max_out_degree`**: Highest out-degree (most items blocked) in the
 //!   original graph.
 
 use petgraph::{Direction, algo::connected_components, visit::IntoNodeIdentifiers};
@@ -150,13 +150,13 @@ impl GraphStats {
 
     /// Return `true` if the graph has no blocking edges.
     #[must_use]
-    pub fn is_flat(&self) -> bool {
+    pub const fn is_flat(&self) -> bool {
         self.edge_count == 0
     }
 
     /// Return `true` if the graph contains at least one dependency cycle.
     #[must_use]
-    pub fn has_cycles(&self) -> bool {
+    pub const fn has_cycles(&self) -> bool {
         self.cycle_count > 0
     }
 

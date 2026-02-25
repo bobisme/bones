@@ -91,9 +91,7 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn micros_to_rfc3339(us: i64) -> String {
-    DateTime::<Utc>::from_timestamp_micros(us)
-        .map(|ts| ts.to_rfc3339())
-        .unwrap_or_else(|| us.to_string())
+    DateTime::<Utc>::from_timestamp_micros(us).map_or_else(|| us.to_string(), |ts| ts.to_rfc3339())
 }
 
 fn validate_comment_body(body: &str) -> anyhow::Result<()> {
@@ -183,7 +181,7 @@ fn run_comment_add(
                 "invalid_comment",
             ),
         )?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
@@ -200,35 +198,29 @@ fn run_comment_add(
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            let msg = format!(
-                "projection database not found or corrupt at {}",
-                db_path.display()
-            );
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        let msg = format!(
+            "projection database not found or corrupt at {}",
+            db_path.display()
+        );
+        render_error(
+            output,
+            &CliError::with_details(
+                &msg,
+                "Run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "Check the item ID with `bn list`", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+        let msg = format!("item '{}' not found", args.id);
+        render_error(
+            output,
+            &CliError::with_details(&msg, "Check the item ID with `bn list`", "item_not_found"),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
     let item_id = ItemId::new_unchecked(&resolved_id);
@@ -319,35 +311,29 @@ pub fn run_comments(
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            let msg = format!(
-                "projection database not found or corrupt at {}",
-                db_path.display()
-            );
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        let msg = format!(
+            "projection database not found or corrupt at {}",
+            db_path.display()
+        );
+        render_error(
+            output,
+            &CliError::with_details(
+                &msg,
+                "Run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", args.id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "Check the item ID with `bn list`", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+        let msg = format!("item '{}' not found", args.id);
+        render_error(
+            output,
+            &CliError::with_details(&msg, "Check the item ID with `bn list`", "item_not_found"),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
     let comments = timeline_rows(query::get_comments(
@@ -362,7 +348,7 @@ pub fn run_comments(
         &comments,
         |rows, w| {
             if rows.is_empty() {
-                writeln!(w, "item={}  comments=0", resolved_id)?;
+                writeln!(w, "item={resolved_id}  comments=0")?;
                 return Ok(());
             }
 
@@ -380,11 +366,11 @@ pub fn run_comments(
         },
         |rows, w| {
             if rows.is_empty() {
-                writeln!(w, "(no comments for {})", resolved_id)?;
+                writeln!(w, "(no comments for {resolved_id})")?;
                 return Ok(());
             }
 
-            writeln!(w, "Comments for {}:", resolved_id)?;
+            writeln!(w, "Comments for {resolved_id}:")?;
             for row in rows {
                 writeln!(
                     w,

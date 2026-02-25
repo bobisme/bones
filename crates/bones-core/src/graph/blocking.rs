@@ -80,9 +80,9 @@ use crate::crdt::item_state::WorkItemState;
 /// computation.
 #[derive(Debug, Clone, Default)]
 pub struct BlockingGraph {
-    /// item_id → set of item_ids that block it.
+    /// `item_id` → set of `item_ids` that block it.
     blocked_by: HashMap<String, HashSet<String>>,
-    /// item_id → set of related item_ids.
+    /// `item_id` → set of related `item_ids`.
     related_to: HashMap<String, HashSet<String>>,
     /// All known item IDs (the full key set from the source states map).
     all_items: HashSet<String>,
@@ -204,7 +204,7 @@ impl BlockingGraph {
 /// Check if an item is blocked given a map of states.
 ///
 /// Returns `false` if the item is not present in `states`.
-pub fn is_blocked(item_id: &str, states: &HashMap<String, WorkItemState>) -> bool {
+pub fn is_blocked<S: std::hash::BuildHasher>(item_id: &str, states: &HashMap<String, WorkItemState, S>) -> bool {
     states
         .get(item_id)
         .is_some_and(|state| !state.blocked_by.is_empty())
@@ -213,7 +213,7 @@ pub fn is_blocked(item_id: &str, states: &HashMap<String, WorkItemState>) -> boo
 /// Return the set of item IDs blocking the given item.
 ///
 /// Returns an empty set if the item is not present or has no blockers.
-pub fn get_blockers(item_id: &str, states: &HashMap<String, WorkItemState>) -> HashSet<String> {
+pub fn get_blockers<S: std::hash::BuildHasher>(item_id: &str, states: &HashMap<String, WorkItemState, S>) -> HashSet<String> {
     states
         .get(item_id)
         .map(|state| state.blocked_by_ids().into_iter().cloned().collect())
@@ -224,7 +224,7 @@ pub fn get_blockers(item_id: &str, states: &HashMap<String, WorkItemState>) -> H
 ///
 /// Iterates all items in `states` and returns those whose `blocked_by`
 /// OR-Set is empty. Order is unspecified.
-pub fn ready_items(states: &HashMap<String, WorkItemState>) -> Vec<String> {
+pub fn ready_items<S: std::hash::BuildHasher>(states: &HashMap<String, WorkItemState, S>) -> Vec<String> {
     states
         .keys()
         .filter(|id| !is_blocked(id.as_str(), states))

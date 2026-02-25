@@ -210,12 +210,12 @@ impl<'a> BitReader<'a> {
         Ok(bit)
     }
 
-    fn is_exhausted(&self) -> bool {
+    const fn is_exhausted(&self) -> bool {
         self.cursor == self.bit_len
     }
 }
 
-fn bytes_for_bits(bit_len: usize) -> usize {
+const fn bytes_for_bits(bit_len: usize) -> usize {
     bit_len.div_ceil(8)
 }
 

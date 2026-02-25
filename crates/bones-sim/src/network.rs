@@ -88,7 +88,7 @@ pub struct SimulatedNetwork {
 impl SimulatedNetwork {
     /// Create a new network with fault injection.
     #[must_use]
-    pub fn new(fault: FaultConfig) -> Self {
+    pub const fn new(fault: FaultConfig) -> Self {
         Self {
             pending: Vec::new(),
             partitioned_agents: BTreeSet::new(),
@@ -98,7 +98,7 @@ impl SimulatedNetwork {
 
     /// Return configured fault options.
     #[must_use]
-    pub fn fault_config(&self) -> FaultConfig {
+    pub const fn fault_config(&self) -> FaultConfig {
         self.fault
     }
 
@@ -119,7 +119,7 @@ impl SimulatedNetwork {
 
     /// Number of queued in-flight messages.
     #[must_use]
-    pub fn pending_len(&self) -> usize {
+    pub const fn pending_len(&self) -> usize {
         self.pending.len()
     }
 

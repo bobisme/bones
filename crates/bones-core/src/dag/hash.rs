@@ -11,7 +11,7 @@
 //! - Hash format is text-prefixed (`blake3:<payload>`) with canonical base64url
 //!   writes and legacy hex accepted for validation.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::event::Event;
 use crate::event::hash_text::decode_blake3_hash;
@@ -65,11 +65,11 @@ pub enum HashError {
 impl HashError {
     /// Return the machine-readable error code for this error.
     #[must_use]
-    pub fn code(&self) -> HashErrorCode {
+    pub const fn code(&self) -> HashErrorCode {
         match self {
-            HashError::HashMismatch { .. } => HashErrorCode::HashMismatch,
-            HashError::UnknownParent { .. } => HashErrorCode::UnknownParent,
-            HashError::Compute(_) => HashErrorCode::ComputeFailure,
+            Self::HashMismatch { .. } => HashErrorCode::HashMismatch,
+            Self::UnknownParent { .. } => HashErrorCode::UnknownParent,
+            Self::Compute(_) => HashErrorCode::ComputeFailure,
         }
     }
 }
@@ -80,8 +80,8 @@ impl HashError {
 
 /// Verify that an event's stored hash matches the hash of its content.
 ///
-/// The hash is recomputed from the event's fields 1–7 (wall_ts_us, agent,
-/// itc, parents, event_type, item_id, data) using BLAKE3, and compared
+/// The hash is recomputed from the event's fields 1-7 (`wall_ts_us`, `agent`,
+/// `itc`, `parents`, `event_type`, `item_id`, `data`) using BLAKE3, and compared
 /// against the `event_hash` field stored on the event.
 ///
 /// Returns `true` if the stored hash is valid, `false` otherwise.
@@ -92,13 +92,11 @@ impl HashError {
 /// data serialization failure).
 pub fn verify_event_hash(event: &Event) -> Result<bool, HashError> {
     let expected = compute_event_hash(event)?;
-    let stored = match decode_blake3_hash(&event.event_hash) {
-        Some(bytes) => bytes,
-        None => return Ok(false),
+    let Some(stored) = decode_blake3_hash(&event.event_hash) else {
+        return Ok(false);
     };
-    let computed = match decode_blake3_hash(&expected) {
-        Some(bytes) => bytes,
-        None => return Ok(false),
+    let Some(computed) = decode_blake3_hash(&expected) else {
+        return Ok(false);
     };
     Ok(stored == computed)
 }
@@ -127,7 +125,7 @@ pub fn verify_event_hash(event: &Event) -> Result<bool, HashError> {
 /// are checked is not guaranteed.
 pub fn verify_chain(events: &[&Event]) -> Result<(), HashError> {
     // Build a lookup table of all known event hashes in this collection.
-    let known: HashMap<&str, ()> = events.iter().map(|e| (e.event_hash.as_str(), ())).collect();
+    let known: HashSet<&str> = events.iter().map(|e| e.event_hash.as_str()).collect();
 
     for event in events {
         // 1. Verify each event's stored hash matches its computed hash.
@@ -150,7 +148,7 @@ pub fn verify_chain(events: &[&Event]) -> Result<(), HashError> {
 
         // 2. Verify every parent reference resolves to a known event.
         for parent in &event.parents {
-            if !known.contains_key(parent.as_str()) {
+            if !known.contains(parent.as_str()) {
                 return Err(HashError::UnknownParent {
                     event_hash: event.event_hash.clone(),
                     parent_hash: parent.clone(),

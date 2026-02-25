@@ -93,16 +93,16 @@ fn join_event(a: &Event, b: &Event) -> Event {
                 // a's base is higher — lift a's children by the diff,
                 // use b's base (the lower), and merge.
                 let diff = na - nb;
-                let lifted_al = (**al).clone().lift(diff);
-                let lifted_ar = (**ar).clone().lift(diff);
-                Event::branch(*nb, join_event(&lifted_al, bl), join_event(&lifted_ar, br))
+                let lifted_a_left = (**al).clone().lift(diff);
+                let lifted_a_right = (**ar).clone().lift(diff);
+                Event::branch(*nb, join_event(&lifted_a_left, bl), join_event(&lifted_a_right, br))
             } else {
                 // b's base is higher — lift b's children by the diff,
                 // use a's base (the lower), and merge.
                 let diff = nb - na;
-                let lifted_bl = (**bl).clone().lift(diff);
-                let lifted_br = (**br).clone().lift(diff);
-                Event::branch(*na, join_event(al, &lifted_bl), join_event(ar, &lifted_br))
+                let lifted_b_left = (**bl).clone().lift(diff);
+                let lifted_b_right = (**br).clone().lift(diff);
+                Event::branch(*na, join_event(al, &lifted_b_left), join_event(ar, &lifted_b_right))
             }
         }
     }
@@ -138,15 +138,15 @@ fn leq_event(a: &Event, b: &Event) -> bool {
             if na <= nb {
                 let diff = nb - na;
                 // Lift b's children by diff: al <= lift(bl, diff)
-                let lifted_bl = (**bl).clone().lift(diff);
-                let lifted_br = (**br).clone().lift(diff);
-                leq_event(al, &lifted_bl) && leq_event(ar, &lifted_br)
+                let lifted_b_left = (**bl).clone().lift(diff);
+                let lifted_b_right = (**br).clone().lift(diff);
+                leq_event(al, &lifted_b_left) && leq_event(ar, &lifted_b_right)
             } else {
                 let diff = na - nb;
                 // Lift a's children by diff: lift(al, diff) <= bl
-                let lifted_al = (**al).clone().lift(diff);
-                let lifted_ar = (**ar).clone().lift(diff);
-                leq_event(&lifted_al, bl) && leq_event(&lifted_ar, br)
+                let lifted_a_left = (**al).clone().lift(diff);
+                let lifted_a_right = (**ar).clone().lift(diff);
+                leq_event(&lifted_a_left, bl) && leq_event(&lifted_a_right, br)
             }
         }
     }
@@ -158,8 +158,7 @@ fn leq_event(a: &Event, b: &Event) -> bool {
 /// Returns `(filled_event, did_change)`.
 fn fill(id: &Id, event: &Event) -> (Event, bool) {
     match (id, event) {
-        (Id::Zero, _) => (event.clone(), false),
-        (Id::One, Event::Leaf(_)) => (event.clone(), false),
+        (Id::Zero, _) | (Id::One, Event::Leaf(_)) => (event.clone(), false),
         (Id::One, Event::Branch(n, l, r)) => {
             // Fill everything — find the max of the children and collapse
             let max_child = l.max_value().max(r.max_value());
@@ -273,15 +272,15 @@ impl Stamp {
     ///
     /// Panics if this stamp is anonymous (owns no interval to split).
     #[must_use]
-    pub fn fork(&self) -> (Stamp, Stamp) {
+    pub fn fork(&self) -> (Self, Self) {
         assert!(
             !self.id.is_zero(),
             "cannot fork an anonymous stamp (owns no interval)"
         );
         let (id_l, id_r) = split_id(&self.id);
         (
-            Stamp::new(id_l, self.event.clone()).normalize(),
-            Stamp::new(id_r, self.event.clone()).normalize(),
+            Self::new(id_l, self.event.clone()).normalize(),
+            Self::new(id_r, self.event.clone()).normalize(),
         )
     }
 
@@ -291,10 +290,10 @@ impl Stamp {
     /// Used when an agent retires and donates its interval back, or
     /// when synchronizing causality information between agents.
     #[must_use]
-    pub fn join(a: &Stamp, b: &Stamp) -> Stamp {
+    pub fn join(a: &Self, b: &Self) -> Self {
         let id = sum_id(&a.id, &b.id);
         let event = join_event(&a.event, &b.event);
-        Stamp::new(id, event).normalize()
+        Self::new(id, event).normalize()
     }
 
     /// Record a new event, inflating the event tree.
@@ -334,7 +333,7 @@ impl Stamp {
 
     /// Read the current event tree without incrementing.
     #[must_use]
-    pub fn peek(&self) -> &Event {
+    pub const fn peek(&self) -> &Event {
         &self.event
     }
 
@@ -342,7 +341,7 @@ impl Stamp {
     ///
     /// This means every event recorded by `self` is also recorded by `other`.
     #[must_use]
-    pub fn leq(&self, other: &Stamp) -> bool {
+    pub fn leq(&self, other: &Self) -> bool {
         leq_event(&self.event, &other.event)
     }
 
@@ -351,7 +350,7 @@ impl Stamp {
     /// Two stamps are concurrent if there exist events in each that the
     /// other has not observed.
     #[must_use]
-    pub fn concurrent(&self, other: &Stamp) -> bool {
+    pub fn concurrent(&self, other: &Self) -> bool {
         !self.leq(other) && !other.leq(self)
     }
 }

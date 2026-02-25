@@ -36,7 +36,7 @@ pub struct SimulatedAgent {
 impl SimulatedAgent {
     /// Create a new simulated agent with empty state.
     #[must_use]
-    pub fn new(id: AgentId) -> Self {
+    pub const fn new(id: AgentId) -> Self {
         Self {
             id,
             next_seq: 0,
@@ -46,7 +46,7 @@ impl SimulatedAgent {
 
     /// Return this agent's ID.
     #[must_use]
-    pub fn id(&self) -> AgentId {
+    pub const fn id(&self) -> AgentId {
         self.id
     }
 

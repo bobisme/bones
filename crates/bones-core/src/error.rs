@@ -246,7 +246,7 @@ pub enum BonesError {
     #[error(transparent)]
     Event(#[from] EventError),
 
-    /// SQLite projection failures (schema, query, rebuild).
+    /// `SQLite` projection failures (schema, query, rebuild).
     #[error(transparent)]
     Projection(#[from] ProjectionError),
 
@@ -270,7 +270,7 @@ pub enum BonesError {
 impl BonesError {
     /// Machine-readable error code for `--json` output (e.g., `"E2001"`).
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::Event(e) => e.error_code(),
             Self::Projection(e) => e.error_code(),
@@ -413,7 +413,7 @@ pub enum EventError {
 impl EventError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::ParseFailed { .. } => ErrorCode::EventParseFailed.code(),
             Self::UnknownType { .. } => ErrorCode::EventUnknownType.code(),
@@ -422,8 +422,9 @@ impl EventError {
             Self::ManifestMismatch { .. } => ErrorCode::ShardManifestMismatch.code(),
             Self::OversizedPayload { .. } => ErrorCode::EventOversizedPayload.code(),
             Self::HashCollision => ErrorCode::EventHashCollision.code(),
-            Self::WriteFailed { .. } => ErrorCode::EventFileWriteFailed.code(),
-            Self::SerializeFailed { .. } => ErrorCode::EventFileWriteFailed.code(),
+            Self::WriteFailed { .. } | Self::SerializeFailed { .. } => {
+                ErrorCode::EventFileWriteFailed.code()
+            }
         }
     }
 
@@ -468,7 +469,7 @@ impl EventError {
 // ProjectionError
 // ---------------------------------------------------------------------------
 
-/// Errors related to the SQLite projection layer.
+/// Errors related to the `SQLite` projection layer.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectionError {
     /// The projection database file does not exist.
@@ -530,7 +531,7 @@ pub enum ProjectionError {
 impl ProjectionError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::DbMissing { .. } => ErrorCode::DbMissing.code(),
             Self::SchemaVersion { .. } => ErrorCode::DbSchemaVersion.code(),
@@ -609,7 +610,7 @@ pub enum ConfigError {
 impl ConfigError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::NotFound { .. } => ErrorCode::NotInitialized.code(),
             Self::InvalidValue { .. } => ErrorCode::ConfigInvalidValue.code(),
@@ -684,7 +685,7 @@ pub enum IoError {
 impl IoError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::PermissionDenied { .. } => ErrorCode::PermissionDenied.code(),
             Self::DiskFull { .. } => ErrorCode::DiskFull.code(),
@@ -804,16 +805,17 @@ pub enum ModelError {
 impl ModelError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::InvalidTransition { .. } => ErrorCode::InvalidStateTransition.code(),
             Self::ItemNotFound { .. } => ErrorCode::ItemNotFound.code(),
-            Self::CircularContainment { .. } => ErrorCode::CycleDetected.code(),
+            Self::CircularContainment { .. } | Self::CycleDetected { .. } => {
+                ErrorCode::CycleDetected.code()
+            }
             Self::InvalidItemId { .. } => ErrorCode::InvalidItemId.code(),
             Self::AmbiguousId { .. } => ErrorCode::AmbiguousId.code(),
             Self::InvalidEnumValue { .. } => ErrorCode::InvalidEnumValue.code(),
             Self::DuplicateItem { .. } => ErrorCode::DuplicateItem.code(),
-            Self::CycleDetected { .. } => ErrorCode::CycleDetected.code(),
         }
     }
 
@@ -880,7 +882,7 @@ pub enum LockError {
 impl LockError {
     /// Machine-readable error code.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
+    pub const fn error_code(&self) -> &'static str {
         match self {
             Self::Timeout { .. } => ErrorCode::LockContention.code(),
             Self::AlreadyLocked { .. } => ErrorCode::LockAlreadyHeld.code(),

@@ -95,7 +95,7 @@ impl CriticalPathResult {
 
     /// Return `true` if the critical path is empty (no items in the graph).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.critical_path.is_empty()
     }
 }

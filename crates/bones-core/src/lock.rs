@@ -131,6 +131,11 @@ pub struct ShardLock {
 
 impl ShardLock {
     /// Acquire an exclusive advisory lock on the lock path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockError::Timeout`] if the lock cannot be acquired within
+    /// the given timeout, or [`LockError::IoError`] on I/O failure.
     pub fn acquire(path: &Path, timeout: Duration) -> Result<Self, LockError> {
         Ok(Self {
             guard: FileGuard::acquire(path, timeout, LockKind::Exclusive)?,
@@ -143,6 +148,7 @@ impl ShardLock {
     }
 
     /// Return the lock file path.
+    #[must_use]
     pub fn path(&self) -> &Path {
         self.guard.path()
     }
@@ -155,6 +161,11 @@ pub struct DbReadLock {
 
 impl DbReadLock {
     /// Acquire a shared advisory lock on the projection DB path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockError::Timeout`] if the lock cannot be acquired within
+    /// the given timeout, or [`LockError::IoError`] on I/O failure.
     pub fn acquire(path: &Path, timeout: Duration) -> Result<Self, LockError> {
         Ok(Self {
             guard: FileGuard::acquire(path, timeout, LockKind::Shared)?,
@@ -167,6 +178,7 @@ impl DbReadLock {
     }
 
     /// Return the lock file path.
+    #[must_use]
     pub fn path(&self) -> &Path {
         self.guard.path()
     }
@@ -179,6 +191,11 @@ pub struct DbWriteLock {
 
 impl DbWriteLock {
     /// Acquire an exclusive advisory lock on the projection DB path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockError::Timeout`] if the lock cannot be acquired within
+    /// the given timeout, or [`LockError::IoError`] on I/O failure.
     pub fn acquire(path: &Path, timeout: Duration) -> Result<Self, LockError> {
         Ok(Self {
             guard: FileGuard::acquire(path, timeout, LockKind::Exclusive)?,
@@ -191,6 +208,7 @@ impl DbWriteLock {
     }
 
     /// Return the lock file path.
+    #[must_use] 
     pub fn path(&self) -> &Path {
         self.guard.path()
     }

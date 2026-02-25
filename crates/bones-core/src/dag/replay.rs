@@ -197,6 +197,11 @@ fn events_between(dag: &EventDag, lca: &str, tip: &str) -> Vec<Event> {
 /// Same as [`replay_divergent`], but filters the merged events to only
 /// include those targeting the given `item_id`. Useful when merging
 /// state for a single work item.
+///
+/// # Errors
+///
+/// Returns [`ReplayError::Lca`] if either tip is not in the DAG, or
+/// [`ReplayError::NoDivergence`] if the tips share no common ancestor.
 pub fn replay_divergent_for_item(
     dag: &EventDag,
     tip_a: &str,

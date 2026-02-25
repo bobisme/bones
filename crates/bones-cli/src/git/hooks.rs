@@ -22,22 +22,21 @@ const PRE_COMMIT_HOOK: &str = "pre-commit";
 /// Generate the contents of `post-merge` hook.
 pub fn generate_post_merge_hook() -> String {
     format!(
-        "{marker}\n\
+        "{HOOK_MARKER}\n\
 #!/bin/sh\
 \
 if command -v bn >/dev/null 2>&1; then\n\
   bn admin rebuild --incremental\n\
 else\n\
   echo \"Warning: bn is not installed; skipping projection refresh hook\"\n\
-fi\n",
-        marker = HOOK_MARKER
+fi\n"
     )
 }
 
 /// Generate the contents of `pre-commit` hook.
 pub fn generate_pre_commit_hook() -> String {
     format!(
-        "{marker}\n\
+        "{HOOK_MARKER}\n\
 #!/bin/sh\
 \
 if command -v bn >/dev/null 2>&1; then\n\
@@ -49,8 +48,7 @@ if command -v bn >/dev/null 2>&1; then\n\
   fi\n\
 else\n\
   echo \"Warning: bn is not installed; skipping staged .events validation\"\n\
-fi\n",
-        marker = HOOK_MARKER
+fi\n"
     )
 }
 
@@ -197,7 +195,7 @@ fn staged_file_content(file: &str) -> Result<String> {
 }
 
 /// Validate one staged file and return user-friendly errors.
-pub(crate) fn validate_staged_event_file(path: &str, content: &str) -> Vec<String> {
+pub fn validate_staged_event_file(path: &str, content: &str) -> Vec<String> {
     let mut errors = Vec::new();
     for (line_no, line) in content.lines().enumerate() {
         if let Err(err) = parse_line(line) {

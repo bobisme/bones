@@ -130,13 +130,13 @@ pub struct ValidationReport {
 impl ValidationReport {
     /// Returns `true` if the shard passed all validation checks.
     #[must_use]
-    pub fn is_ok(&self) -> bool {
+    pub const fn is_ok(&self) -> bool {
         self.failed == 0 && !self.truncated
     }
 
     /// Total lines processed (passed + failed).
     #[must_use]
-    pub fn total(&self) -> usize {
+    pub const fn total(&self) -> usize {
         self.passed + self.failed
     }
 }
@@ -194,9 +194,8 @@ pub fn validate_event(line: &str, line_num: usize) -> Result<(), ValidationError
 
     // Delegate to the parser for full validation (syntax + schema + hash)
     match parser::parse_line(line) {
-        Ok(ParsedLine::Event(_)) => Ok(()),
-        Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => Ok(()),
-        Err(parse_err) => Err(parse_error_to_validation(parse_err, line_num, trimmed)),
+        Ok(ParsedLine::Event(_) | ParsedLine::Comment(_) | ParsedLine::Blank) => Ok(()),
+        Err(ref parse_err) => Err(parse_error_to_validation(parse_err, line_num, trimmed)),
     }
 }
 
@@ -225,6 +224,7 @@ pub fn validate_event(line: &str, line_num: usize) -> Result<(), ValidationError
 /// Does not panic. I/O errors produce a single `ValidationError` with
 /// `kind: InvalidUtf8` (for encoding errors) or a report with zero
 /// passed/failed (for missing files).
+#[must_use]
 pub fn validate_shard(path: &Path, manifest: Option<&ShardManifest>) -> ValidationReport {
     let mut report = ValidationReport {
         passed: 0,
@@ -310,19 +310,20 @@ pub fn validate_shard(path: &Path, manifest: Option<&ShardManifest>) -> Validati
 /// in chronological order.
 ///
 /// Non-shard files and the `current.events` symlink are skipped.
+#[must_use]
 pub fn validate_all(events_dir: &Path) -> Vec<ValidationReport> {
     let mut reports = Vec::new();
 
     // Collect and sort shard files
     let mut shard_files: Vec<PathBuf> = match fs::read_dir(events_dir) {
         Ok(entries) => entries
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .map(|e| e.path())
             .filter(|p| {
                 p.extension().and_then(|ext| ext.to_str()) == Some("events")
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .map_or(false, |n| n != "current.events")
+                        .is_some_and(|n| n != "current.events")
             })
             .collect(),
         Err(_) => return reports,
@@ -344,7 +345,7 @@ pub fn validate_all(events_dir: &Path) -> Vec<ValidationReport> {
 // ---------------------------------------------------------------------------
 
 /// Convert a [`ParseError`] into a [`ValidationError`].
-fn parse_error_to_validation(err: ParseError, line_num: usize, raw: &str) -> ValidationError {
+fn parse_error_to_validation(err: &ParseError, line_num: usize, raw: &str) -> ValidationError {
     let (kind, message) = match &err {
         ParseError::FieldCount { found, expected } => (
             ValidationErrorKind::BadFieldCount,

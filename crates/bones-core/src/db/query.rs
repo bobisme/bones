@@ -206,16 +206,28 @@ pub struct ItemFilter {
 // ---------------------------------------------------------------------------
 
 /// Count projected items grouped by `state`, excluding deleted rows.
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
 pub fn item_counts_by_state(conn: &Connection) -> Result<HashMap<String, usize>> {
     count_items_grouped(conn, "state")
 }
 
 /// Count projected items grouped by `kind`, excluding deleted rows.
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
 pub fn item_counts_by_kind(conn: &Connection) -> Result<HashMap<String, usize>> {
     count_items_grouped(conn, "kind")
 }
 
 /// Count projected items grouped by `urgency`, excluding deleted rows.
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
 pub fn item_counts_by_urgency(conn: &Connection) -> Result<HashMap<String, usize>> {
     count_items_grouped(conn, "urgency")
 }
@@ -223,6 +235,10 @@ pub fn item_counts_by_urgency(conn: &Connection) -> Result<HashMap<String, usize
 /// Count projected events by `event_type` from `projected_events`.
 ///
 /// Returns an empty map when `projected_events` is not yet available.
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
 pub fn event_counts_by_type(conn: &Connection) -> Result<HashMap<String, usize>> {
     count_grouped_events(conn, "event_type")
 }
@@ -230,6 +246,10 @@ pub fn event_counts_by_type(conn: &Connection) -> Result<HashMap<String, usize>>
 /// Count projected events by `agent` from `projected_events`.
 ///
 /// Returns an empty map when `projected_events` is not yet available.
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
 pub fn event_counts_by_agent(conn: &Connection) -> Result<HashMap<String, usize>> {
     count_grouped_events(conn, "agent")
 }

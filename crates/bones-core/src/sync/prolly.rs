@@ -43,7 +43,7 @@ fn gear_table() -> [u64; 256] {
     let mut table = [0u64; 256];
     for i in 0u16..256 {
         let h = blake3::hash(&i.to_le_bytes());
-        let bytes: [u8; 8] = h.as_bytes()[0..8].try_into().unwrap();
+        let bytes: [u8; 8] = h.as_bytes()[0..8].try_into().expect("BLAKE3 output is 32 bytes; first 8 always valid");
         table[i as usize] = u64::from_le_bytes(bytes);
     }
     table
@@ -78,7 +78,7 @@ fn hash_bytes(data: &[u8]) -> Hash {
 // ---------------------------------------------------------------------------
 
 /// Sort key for events: `(item_id, wall_ts_us, event_hash)`.
-/// The event_hash suffix makes the ordering fully deterministic even when
+/// The `event_hash` suffix makes the ordering fully deterministic even when
 /// two events share the same item and timestamp.
 fn sort_key(e: &Event) -> (String, i64, String) {
     (
@@ -105,25 +105,24 @@ pub enum ProllyNode {
     },
     Interior {
         hash: Hash,
-        children: Vec<ProllyNode>,
+        children: Vec<Self>,
     },
 }
 
 impl ProllyNode {
-    pub fn hash(&self) -> Hash {
-        match self {
-            ProllyNode::Leaf { hash, .. } => *hash,
-            ProllyNode::Interior { hash, .. } => *hash,
-        }
+    #[must_use]
+    pub const fn hash(&self) -> Hash {
+        let (Self::Leaf { hash, .. } | Self::Interior { hash, .. }) = self;
+        *hash
     }
 
     /// Collect all event hashes reachable from this node.
     pub fn collect_event_hashes(&self, out: &mut Vec<String>) {
         match self {
-            ProllyNode::Leaf { event_hashes, .. } => {
+            Self::Leaf { event_hashes, .. } => {
                 out.extend(event_hashes.iter().cloned());
             }
-            ProllyNode::Interior { children, .. } => {
+            Self::Interior { children, .. } => {
                 for child in children {
                     child.collect_event_hashes(out);
                 }
@@ -152,10 +151,11 @@ impl ProllyTree {
     ///
     /// The root hash is deterministic for any permutation of the same event
     /// set.
+    #[must_use] 
     pub fn build(events: &[Event]) -> Self {
         if events.is_empty() {
             let empty_hash = hash_bytes(b"prolly:empty");
-            return ProllyTree {
+            return Self {
                 root: ProllyNode::Leaf {
                     hash: empty_hash,
                     event_hashes: vec![],
@@ -166,7 +166,7 @@ impl ProllyTree {
 
         // Sort events deterministically.
         let mut sorted: Vec<&Event> = events.iter().collect();
-        sorted.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
+        sorted.sort_by_key(|a| sort_key(a));
 
         // Build leaf chunks using Gear hash for content-defined boundaries.
         let event_hashes: Vec<String> = sorted.iter().map(|e| e.event_hash.clone()).collect();
@@ -175,7 +175,7 @@ impl ProllyTree {
         // Build interior levels until we have a single root.
         let root = build_interior(leaves);
 
-        ProllyTree {
+        Self {
             root,
             event_count: events.len(),
         }
@@ -185,13 +185,15 @@ impl ProllyTree {
     ///
     /// Returns event hashes that are in `other` but not in `self`.
     /// Runs in O(k log N) where k is the number of differing chunks.
-    pub fn diff(&self, other: &ProllyTree) -> Vec<String> {
+    #[must_use] 
+    pub fn diff(&self, other: &Self) -> Vec<String> {
         let mut missing = Vec::new();
         diff_nodes(&self.root, &other.root, &mut missing);
         missing
     }
 
     /// All event hashes stored in this tree.
+    #[must_use] 
     pub fn event_hashes(&self) -> Vec<String> {
         let mut out = Vec::with_capacity(self.event_count);
         self.root.collect_event_hashes(&mut out);
@@ -199,6 +201,12 @@ impl ProllyTree {
     }
 
     /// Serialize to bytes for wire transfer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `serde_json` fails to serialize `ProllyTree`, which should
+    /// never happen for well-formed trees.
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         // Use bincode for compact binary serialization.
         // Fall back to JSON if bincode isn't available.
@@ -206,6 +214,11 @@ impl ProllyTree {
     }
 
     /// Deserialize from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`serde_json::Error`] if the bytes are not valid JSON or do
+    /// not match the [`ProllyTree`] schema.
     pub fn from_bytes(data: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(data)
     }
@@ -329,59 +342,57 @@ fn diff_nodes(local: &ProllyNode, other: &ProllyNode, missing: &mut Vec<String>)
         return;
     }
 
-    match (local, other) {
+    if let (
+        ProllyNode::Interior {
+            children: local_children,
+            ..
+        },
+        ProllyNode::Interior {
+            children: other_children,
+            ..
+        },
+    ) = (local, other)
+    {
         // Both interior — match children by hash and recurse.
-        (
-            ProllyNode::Interior {
-                children: local_children,
-                ..
-            },
-            ProllyNode::Interior {
-                children: other_children,
-                ..
-            },
-        ) => {
-            // Build a set of local child hashes for quick lookup.
-            let local_set: std::collections::HashSet<Hash> =
-                local_children.iter().map(|c| c.hash()).collect();
+        // Build a set of local child hashes for quick lookup.
+        let local_set: std::collections::HashSet<Hash> =
+            local_children.iter().map(ProllyNode::hash).collect();
 
-            for other_child in other_children {
-                if local_set.contains(&other_child.hash()) {
-                    // Identical subtree — skip.
-                    continue;
-                }
-                // Try to find a matching local child to recurse into.
-                // If no structural match, collect all events from other_child.
-                let local_match = local_children.iter().find(|lc| {
-                    // Heuristic: same node type and overlapping structure.
-                    matches!(
-                        (lc, other_child),
-                        (ProllyNode::Interior { .. }, ProllyNode::Interior { .. })
-                            | (ProllyNode::Leaf { .. }, ProllyNode::Leaf { .. })
-                    )
-                });
+        for other_child in other_children {
+            if local_set.contains(&other_child.hash()) {
+                // Identical subtree — skip.
+                continue;
+            }
+            // Try to find a matching local child to recurse into.
+            // If no structural match, collect all events from other_child.
+            let local_match = local_children.iter().find(|lc| {
+                // Heuristic: same node type and overlapping structure.
+                matches!(
+                    (lc, other_child),
+                    (ProllyNode::Interior { .. }, ProllyNode::Interior { .. })
+                        | (ProllyNode::Leaf { .. }, ProllyNode::Leaf { .. })
+                )
+            });
 
-                match local_match {
-                    Some(lm) => diff_nodes(lm, other_child, missing),
-                    None => other_child.collect_event_hashes(missing),
-                }
+            match local_match {
+                Some(lm) => diff_nodes(lm, other_child, missing),
+                None => other_child.collect_event_hashes(missing),
             }
         }
+    } else {
         // One or both are leaves — collect all event hashes from other
         // that aren't in local.
-        _ => {
-            let mut local_hashes = Vec::new();
-            local.collect_event_hashes(&mut local_hashes);
-            let local_set: std::collections::HashSet<&str> =
-                local_hashes.iter().map(|s| s.as_str()).collect();
+        let mut local_hashes = Vec::new();
+        local.collect_event_hashes(&mut local_hashes);
+        let local_set: std::collections::HashSet<&str> =
+            local_hashes.iter().map(std::string::String::as_str).collect();
 
-            let mut other_hashes = Vec::new();
-            other.collect_event_hashes(&mut other_hashes);
+        let mut other_hashes = Vec::new();
+        other.collect_event_hashes(&mut other_hashes);
 
-            for h in other_hashes {
-                if !local_set.contains(h.as_str()) {
-                    missing.push(h);
-                }
+        for h in other_hashes {
+            if !local_set.contains(h.as_str()) {
+                missing.push(h);
             }
         }
     }

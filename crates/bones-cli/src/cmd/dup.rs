@@ -45,16 +45,16 @@ pub struct DupArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchType {
-    /// Normalized score ≥ duplicate_threshold (default 0.85).
+    /// Normalized score ≥ `duplicate_threshold` (default 0.85).
     LikelyDuplicate,
-    /// Normalized score ≥ related_threshold (default 0.65).
+    /// Normalized score ≥ `related_threshold` (default 0.65).
     PossiblyRelated,
-    /// Normalized score below related_threshold but above the display cutoff.
+    /// Normalized score below `related_threshold` but above the display cutoff.
     MaybeRelated,
 }
 
 impl MatchType {
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
             Self::LikelyDuplicate => "likely_duplicate",
             Self::PossiblyRelated => "possibly_related",
@@ -112,51 +112,42 @@ pub fn run_dup(
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
 
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     // Resolve potentially partial ID
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found", args.id),
-                    "use `bn list` to see available items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", args.id);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{}' not found", args.id),
+                "use `bn list` to see available items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{}' not found", args.id);
     };
 
     // Fetch the source item
-    let source = match query::get_item(&conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found or deleted", resolved_id),
-                    "use `bn list` to see available items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", resolved_id);
-        }
+    let source = if let Some(item) = query::get_item(&conn, &resolved_id, false)? { item } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{resolved_id}' not found or deleted"),
+                "use `bn list` to see available items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{resolved_id}' not found");
     };
 
     // Load config for thresholds
@@ -167,16 +158,15 @@ pub fn run_dup(
     // The effective display cutoff: user override or related_threshold
     let display_threshold = args
         .threshold
-        .map(|t| t.clamp(0.0, 1.0))
-        .unwrap_or(related_threshold);
+        .map_or(related_threshold, |t| t.clamp(0.0, 1.0));
 
     // Build FTS5 query from title (and description if available)
     let fts_query = build_fts_query(&source.title, source.description.as_deref());
 
     if fts_query.is_empty() {
         let dup_output = DupOutput {
-            source_id: resolved_id.clone(),
-            source_title: source.title.clone(),
+            source_id: resolved_id,
+            source_title: source.title,
             duplicate_threshold: dup_threshold,
             related_threshold,
             count: 0,
@@ -191,8 +181,8 @@ pub fn run_dup(
 
     if hits.is_empty() {
         let dup_output = DupOutput {
-            source_id: resolved_id.clone(),
-            source_title: source.title.clone(),
+            source_id: resolved_id,
+            source_title: source.title,
             duplicate_threshold: dup_threshold,
             related_threshold,
             count: 0,

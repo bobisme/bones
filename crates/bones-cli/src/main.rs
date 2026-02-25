@@ -1,4 +1,33 @@
 #![forbid(unsafe_code)]
+#![allow(
+    clippy::manual_let_else,
+    clippy::too_many_lines,
+    clippy::option_if_let_else,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::match_same_arms,
+    clippy::items_after_statements,
+    clippy::map_unwrap_or,
+    clippy::similar_names,
+    clippy::struct_excessive_bools,
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    clippy::needless_collect,
+    clippy::float_cmp,
+    clippy::default_trait_access,
+    clippy::ref_option,
+    clippy::struct_field_names,
+    clippy::format_collect,
+    clippy::format_in_format_args,
+    clippy::large_enum_variant,
+    clippy::wrong_self_convention,
+    clippy::redundant_guards,
+    clippy::vec_init_then_push,
+    clippy::used_underscore_binding,
+    clippy::unwrap_used
+)]
 
 mod agent;
 mod cmd;
@@ -952,7 +981,7 @@ fn merge_files(
     for (line_no, line) in reader.lines().enumerate() {
         if line_no >= base_lines {
             let line_content = line?;
-            writeln!(output_file, "{}", line_content)?;
+            writeln!(output_file, "{line_content}")?;
             info!("Appended line {} from right file", line_no + 1);
         }
     }

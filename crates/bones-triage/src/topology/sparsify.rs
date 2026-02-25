@@ -8,6 +8,12 @@ pub struct SpectralSparsifier {
 }
 
 impl SpectralSparsifier {
+    /// Build a `SpectralSparsifier` from the given graph.
+    ///
+    /// # Errors
+    ///
+    /// This function does not currently return errors, but the `Result` type
+    /// is reserved for future use (e.g., if construction fails due to numerical issues).
     pub fn new<N, E>(graph: &petgraph::Graph<N, E>) -> anyhow::Result<Self> {
         let n = graph.node_count();
         if n == 0 {
@@ -53,13 +59,18 @@ impl SpectralSparsifier {
         Ok(Self { laplacian, edges })
     }
 
+    /// Compute the spectral gap (algebraic connectivity) of the graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the eigendecomposition fails.
     pub fn spectral_gap(&self) -> anyhow::Result<f64> {
         if self.laplacian.nrows() < 2 {
             return Ok(0.0);
         }
 
         let eigen = SymmetricEigen::new(self.laplacian.clone());
-        let mut eigenvalues: Vec<f64> = eigen.eigenvalues.iter().cloned().collect();
+        let mut eigenvalues: Vec<f64> = eigen.eigenvalues.iter().copied().collect();
         eigenvalues.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // The smallest eigenvalue is 0. The second smallest is the spectral gap (algebraic connectivity).
@@ -70,6 +81,11 @@ impl SpectralSparsifier {
         }
     }
 
+    /// Compute effective resistances for all edges in the graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pseudo-inverse computation fails.
     pub fn effective_resistances(&self) -> anyhow::Result<Vec<f64>> {
         let n = self.laplacian.nrows();
         if n == 0 {
@@ -85,7 +101,7 @@ impl SpectralSparsifier {
         let mut resistances = Vec::with_capacity(self.edges.len());
         for &(u, v) in &self.edges {
             // R_eff(u, v) = L+(u,u) + L+(v,v) - 2*L+(u,v)
-            let r = pinv[(u, u)] + pinv[(v, v)] - 2.0 * pinv[(u, v)];
+            let r = 2.0f64.mul_add(-pinv[(u, v)], pinv[(u, u)] + pinv[(v, v)]);
             resistances.push(r);
         }
 

@@ -24,6 +24,11 @@ pub struct SemanticSearchResult {
 ///
 /// The function computes cosine similarity between the query embedding and each
 /// stored item embedding, then returns the top `limit` items by score.
+///
+/// # Errors
+///
+/// Returns an error if the query embedding dimension mismatches or the database
+/// query fails.
 pub fn knn_search(
     db: &Connection,
     query_embedding: &[f32],
@@ -124,7 +129,7 @@ fn try_knn_search_sqlite_vec(
         }
     };
 
-    let rows = match stmt.query_map(rusqlite::params![query_json, limit as i64], |row| {
+    let rows = match stmt.query_map(rusqlite::params![query_json, i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
     }) {
         Ok(rows) => rows,
@@ -137,6 +142,7 @@ fn try_knn_search_sqlite_vec(
     let mut out = Vec::new();
     for row in rows {
         let (item_id, distance) = row.context("failed to read sqlite-vec KNN row")?;
+        #[allow(clippy::cast_possible_truncation)]
         let distance = distance as f32;
         let score = if distance <= 1.0 {
             1.0 - distance

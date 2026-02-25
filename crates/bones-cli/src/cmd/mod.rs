@@ -45,7 +45,7 @@ pub mod status;
 pub mod sync;
 pub mod tag;
 pub mod triage;
-pub(crate) mod triage_support;
+pub mod triage_support;
 pub mod undo;
 pub mod update;
 pub mod urgency;

@@ -95,15 +95,19 @@ impl CacheManager {
     /// - The stored fingerprint matches the current shard fingerprint.
     ///
     /// Returns `false` otherwise (missing, corrupt, stale, or on any error).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if computing the shard fingerprint fails.
     pub fn is_fresh(&self) -> Result<bool> {
         let current_fp = self
             .compute_fingerprint()
             .context("compute shard fingerprint")?;
 
-        match CacheReader::open(&self.cache_path) {
-            Ok(reader) => Ok(reader.created_at_us() == current_fp),
-            Err(_) => Ok(false),
-        }
+        CacheReader::open(&self.cache_path).map_or_else(
+            |_| Ok(false),
+            |reader| Ok(reader.created_at_us() == current_fp),
+        )
     }
 
     /// Load events, preferring the binary cache when fresh.
@@ -200,7 +204,10 @@ impl CacheManager {
     /// Parse TSJSON events from shards using the standard shard replay
     /// pipeline.
     fn parse_tsjson(&self) -> Result<Vec<Event>> {
-        let bones_dir = self.events_dir.parent().unwrap_or(Path::new("."));
+        let bones_dir = self
+            .events_dir
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
         let shard_mgr = ShardManager::new(bones_dir);
 
         let content = shard_mgr
@@ -247,7 +254,7 @@ impl CacheManager {
 
 /// Compute a fingerprint over `.events` files in a directory.
 ///
-/// Uses a sorted BTreeMap of (filename → (size, mtime_ns)) tuples, then
+/// Uses a sorted `BTreeMap` of (filename → (size, `mtime_ns`)) tuples, then
 /// hashes them with a simple FNV-1a-style combiner. Returns 0 if the
 /// directory doesn't exist or is empty.
 fn fingerprint_dir(dir: &Path) -> Result<u64> {
@@ -275,27 +282,29 @@ fn fingerprint_dir(dir: &Path) -> Result<u64> {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_nanos() as u64);
+            .map_or(0, |d| {
+                u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
+            });
 
         entries.insert(name, (size, mtime_ns));
     }
 
     // Hash the sorted entries
-    let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
     for (name, (size, mtime)) in &entries {
         for byte in name.bytes() {
             hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+            hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV-1a prime
         }
         // Mix in size
         for byte in size.to_le_bytes() {
             hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
         // Mix in mtime
         for byte in mtime.to_le_bytes() {
             hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     }
 
@@ -513,7 +522,7 @@ mod tests {
     fn fingerprint_empty_dir_is_zero() {
         let tmp = TempDir::new().unwrap();
         let fp = fingerprint_dir(tmp.path()).unwrap();
-        assert_eq!(fp, 0xcbf29ce484222325); // FNV offset basis with no data mixed in
+        assert_eq!(fp, 0xcbf2_9ce4_8422_2325); // FNV offset basis with no data mixed in
     }
 
     #[test]

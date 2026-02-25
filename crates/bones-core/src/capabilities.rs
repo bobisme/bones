@@ -1,6 +1,6 @@
 //! Runtime capability detection for optional bones subsystems.
 //!
-//! This module probes the active SQLite database and filesystem to determine
+//! This module probes the active `SQLite` database and filesystem to determine
 //! which optional features are available at startup. The result is a
 //! [`Capabilities`] struct that callers use to choose between full-featured
 //! and gracefully-degraded code paths — without panicking on missing deps.
@@ -21,7 +21,7 @@
 //!
 //! let conn = open_projection(Path::new(".bones/bones-projection.sqlite3")).unwrap();
 //! let caps = detect_capabilities(&conn);
-//! if !caps.fts5 {
+//! if !caps.db.fts5 {
 //!     eprintln!("FTS5 not available — falling back to LIKE queries");
 //! }
 //! for status in describe_capabilities(&caps) {
@@ -48,18 +48,35 @@ use crate::cache::CACHE_MAGIC;
 /// Each flag indicates whether a specific optional subsystem is functional.
 /// Consumers should check the relevant flag before calling into the subsystem
 /// and fall back gracefully when it is `false`.
+///
+/// Capabilities are grouped into database-derived and filesystem-derived
+/// sub-structs to keep each group small.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Capabilities {
-    /// SQLite FTS5 extension is available and index (`items_fts`) is built.
+    /// Capabilities detected by probing the `SQLite` database.
+    pub db: DbCapabilities,
+    /// Capabilities detected by probing the filesystem.
+    pub fs: FsCapabilities,
+}
+
+/// Database-derived capability flags.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DbCapabilities {
+    /// `SQLite` FTS5 extension is available and index (`items_fts`) is built.
     pub fts5: bool,
-    /// Semantic search model assets are available.
-    pub semantic: bool,
     /// sqlite-vec extension is available for vector acceleration.
     pub vectors: bool,
-    /// Binary columnar cache (`events.bin`) exists and has a valid header.
-    pub binary_cache: bool,
     /// Triage engine dependencies (petgraph, items table) are available.
     pub triage: bool,
+}
+
+/// Filesystem-derived capability flags.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FsCapabilities {
+    /// Semantic search model assets are available.
+    pub semantic: bool,
+    /// Binary columnar cache (`events.bin`) exists and has a valid header.
+    pub binary_cache: bool,
 }
 
 /// Status of a single capability for user-visible display.
@@ -83,8 +100,8 @@ pub struct CapabilityStatus {
 /// Checks performed:
 /// - **fts5**: `items_fts` virtual table present in `sqlite_master`
 /// - **vectors**: `vec_version()` SQL function is callable (sqlite-vec loaded)
-/// - **semantic**: MiniLM model+tokenizer files available on disk
-/// - **binary_cache**: `.bones/cache/events.bin` exists with valid `BNCH` magic
+/// - **semantic**: `MiniLM` model+tokenizer files available on disk
+/// - **`binary_cache`**: `.bones/cache/events.bin` exists with valid `BNCH` magic
 /// - **triage**: `items` table queryable (petgraph is always compiled in)
 ///
 /// All probes are infallible — errors are logged at `debug!` and treated as
@@ -92,28 +109,32 @@ pub struct CapabilityStatus {
 ///
 /// # Arguments
 ///
-/// * `db` — An open SQLite projection database connection.
+/// * `db` — An open `SQLite` projection database connection.
 #[must_use]
 pub fn detect_capabilities(db: &Connection) -> Capabilities {
     let fts5 = probe_fts5(db);
     let vectors = probe_vectors(db);
     let semantic = probe_semantic_model();
     let bones_dir = bones_dir_from_db(db);
-    let binary_cache = bones_dir
-        .as_deref()
-        .map(|d| probe_binary_cache(&d.join("cache").join("events.bin")))
-        .unwrap_or_else(|| {
+    let binary_cache = bones_dir.as_deref().map_or_else(
+        || {
             debug!("binary_cache probe: cannot determine .bones dir from connection, reporting unavailable");
             false
-        });
+        },
+        |d| probe_binary_cache(&d.join("cache").join("events.bin")),
+    );
     let triage = probe_triage(db);
 
     let caps = Capabilities {
-        fts5,
-        semantic,
-        vectors,
-        binary_cache,
-        triage,
+        db: DbCapabilities {
+            fts5,
+            vectors,
+            triage,
+        },
+        fs: FsCapabilities {
+            semantic,
+            binary_cache,
+        },
     };
     debug!(?caps, "capability detection complete");
     caps
@@ -129,27 +150,27 @@ pub fn describe_capabilities(caps: &Capabilities) -> Vec<CapabilityStatus> {
     vec![
         CapabilityStatus {
             name: "fts5",
-            available: caps.fts5,
+            available: caps.db.fts5,
             fallback: "`bn search` uses LIKE queries (slower, no ranking)",
         },
         CapabilityStatus {
             name: "semantic",
-            available: caps.semantic,
+            available: caps.fs.semantic,
             fallback: "`bn search` uses lexical only, warns user",
         },
         CapabilityStatus {
             name: "vectors",
-            available: caps.vectors,
+            available: caps.db.vectors,
             fallback: "semantic search uses Rust KNN (no sqlite-vec acceleration)",
         },
         CapabilityStatus {
             name: "binary_cache",
-            available: caps.binary_cache,
+            available: caps.fs.binary_cache,
             fallback: "event replay reads .events files directly (slower)",
         },
         CapabilityStatus {
             name: "triage",
-            available: caps.triage,
+            available: caps.db.triage,
             fallback: "`bn next` uses simple heuristic (urgency + age)",
         },
     ]
@@ -195,14 +216,13 @@ fn probe_vectors(db: &Connection) -> bool {
 /// `<os-cache-dir>/bones/models/minilm-l6-v2-int8.onnx`.
 fn probe_semantic_model() -> bool {
     let available = dirs::cache_dir()
-        .map(|mut p| {
+        .is_some_and(|mut p| {
             p.push("bones");
             p.push("models");
             let model = p.join("minilm-l6-v2-int8.onnx");
             let tokenizer = p.join("minilm-l6-v2-tokenizer.json");
             model.is_file() && tokenizer.is_file()
-        })
-        .unwrap_or(false);
+        });
     debug!(available, "semantic model probe");
     available
 }
@@ -217,7 +237,7 @@ fn probe_binary_cache(events_bin: &Path) -> bool {
         Ok(mut f) => {
             let mut magic = [0u8; 4];
             f.read_exact(&mut magic)
-                .map(|_| magic == CACHE_MAGIC)
+                .map(|()| magic == CACHE_MAGIC)
                 .unwrap_or(false)
         }
         Err(e) => {
@@ -425,26 +445,26 @@ mod tests {
         let (_dir, conn) = migrated_db();
         let caps = detect_capabilities(&conn);
         // FTS5 index is built by migration v2.
-        assert!(caps.fts5, "FTS5 should be available after migration");
+        assert!(caps.db.fts5, "FTS5 should be available after migration");
     }
 
     #[test]
     fn detect_on_bare_db_has_no_capabilities() {
         let conn = bare_db();
         let caps = detect_capabilities(&conn);
-        assert!(!caps.fts5, "no FTS5 on bare db");
+        assert!(!caps.db.fts5, "no FTS5 on bare db");
         // vectors may be available when sqlite-vec is auto-registered.
         // semantic may be true on developer machines where model assets are
         // present in cache; this test only asserts DB-derived capabilities.
-        assert!(!caps.binary_cache, "no binary_cache (in-memory db)");
-        assert!(!caps.triage, "no triage on bare db (no items table)");
+        assert!(!caps.fs.binary_cache, "no binary_cache (in-memory db)");
+        assert!(!caps.db.triage, "no triage on bare db (no items table)");
     }
 
     #[test]
     fn detect_triage_true_on_migrated_db() {
         let (_dir, conn) = migrated_db();
         let caps = detect_capabilities(&conn);
-        assert!(caps.triage, "triage should be true after migration");
+        assert!(caps.db.triage, "triage should be true after migration");
     }
 
     #[test]
@@ -463,7 +483,7 @@ mod tests {
 
         let caps = detect_capabilities(&conn);
         assert!(
-            caps.binary_cache,
+            caps.fs.binary_cache,
             "binary_cache should be true with valid events.bin"
         );
     }
@@ -480,7 +500,7 @@ mod tests {
 
         let caps = detect_capabilities(&conn);
         assert!(
-            !caps.binary_cache,
+            !caps.fs.binary_cache,
             "binary_cache should be false with bad magic"
         );
     }
@@ -510,11 +530,15 @@ mod tests {
     #[test]
     fn describe_available_flags_match_capabilities() {
         let caps = Capabilities {
-            fts5: true,
-            semantic: false,
-            vectors: true,
-            binary_cache: false,
-            triage: true,
+            db: DbCapabilities {
+                fts5: true,
+                vectors: true,
+                triage: true,
+            },
+            fs: FsCapabilities {
+                semantic: false,
+                binary_cache: false,
+            },
         };
         let statuses = describe_capabilities(&caps);
         let map: std::collections::HashMap<_, _> =
@@ -542,10 +566,10 @@ mod tests {
     #[test]
     fn capabilities_default_is_all_false() {
         let caps = Capabilities::default();
-        assert!(!caps.fts5);
-        assert!(!caps.semantic);
-        assert!(!caps.vectors);
-        assert!(!caps.binary_cache);
-        assert!(!caps.triage);
+        assert!(!caps.db.fts5);
+        assert!(!caps.fs.semantic);
+        assert!(!caps.db.vectors);
+        assert!(!caps.fs.binary_cache);
+        assert!(!caps.db.triage);
     }
 }

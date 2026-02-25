@@ -1,6 +1,6 @@
 //! Full projection rebuild from the event log.
 //!
-//! `bn admin rebuild` drops and recreates the entire SQLite DB from the canonical
+//! `bn admin rebuild` drops and recreates the entire `SQLite` DB from the canonical
 //! event log, proving the projection is disposable and reproducible.
 
 use std::path::Path;
@@ -47,7 +47,7 @@ pub struct RebuildReport {
 /// # Arguments
 ///
 /// * `events_dir` — Path to `.bones/events/` (the shard directory)
-/// * `db_path` — Path to `.bones/bones.db` (the SQLite projection file)
+/// * `db_path` — Path to `.bones/bones.db` (the `SQLite` projection file)
 ///
 /// # Errors
 ///
@@ -71,7 +71,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     project::ensure_tracking_table(&conn).context("create tracking table")?;
 
     // 3. Read and replay all events in streaming batches
-    let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
+    let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
 
     let shards = shard_mgr
@@ -92,9 +92,9 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
     let projector = project::Projector::new(&conn);
 
-    let mut shard_line_iter = shard_mgr.replay_lines()?.peekable();
+    let shard_line_iter = shard_mgr.replay_lines()?;
 
-    while let Some(line_res) = shard_line_iter.next() {
+    for line_res in shard_line_iter {
         let (offset, line): (usize, String) =
             line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;

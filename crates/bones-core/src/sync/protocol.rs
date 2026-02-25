@@ -25,21 +25,45 @@ pub trait SyncTransport {
     type Error: std::fmt::Debug + std::fmt::Display;
 
     /// Send a root hash to the remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the send fails.
     fn send_hash(&mut self, hash: &Hash) -> Result<(), Self::Error>;
 
     /// Receive a root hash from the remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the receive fails.
     fn recv_hash(&mut self) -> Result<Hash, Self::Error>;
 
     /// Send a list of event hashes that we want the remote to check.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the send fails.
     fn send_event_hashes(&mut self, hashes: &[String]) -> Result<(), Self::Error>;
 
     /// Receive a list of event hashes from the remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the receive fails.
     fn recv_event_hashes(&mut self) -> Result<Vec<String>, Self::Error>;
 
     /// Send events to the remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the send fails.
     fn send_events(&mut self, events: &[Event]) -> Result<(), Self::Error>;
 
     /// Receive events from the remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Self::Error` if the receive fails.
     fn recv_events(&mut self) -> Result<Vec<Event>, Self::Error>;
 }
 
@@ -62,7 +86,8 @@ pub struct SyncReport {
 
 impl SyncReport {
     /// Returns `true` if the sync was a no-op (replicas already identical).
-    pub fn is_noop(&self) -> bool {
+    #[must_use] 
+    pub const fn is_noop(&self) -> bool {
         self.events_sent == 0 && self.events_received == 0
     }
 }
@@ -85,6 +110,10 @@ impl SyncReport {
 ///
 /// After sync, the caller is responsible for persisting the received events
 /// to the local event log and rebuilding the projection.
+///
+/// # Errors
+///
+/// Returns `T::Error` if any transport operation fails.
 pub fn sync<T: SyncTransport>(
     local_events: &[Event],
     transport: &mut T,
@@ -117,33 +146,31 @@ pub fn sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute what's missing on each side.
-    let local_set: HashSet<&str> = local_hashes.iter().map(|s| s.as_str()).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(|s| s.as_str()).collect();
-
-    // Events we have that the remote doesn't.
-    let to_send: Vec<&Event> = local_events
-        .iter()
-        .filter(|e| !remote_set.contains(e.event_hash.as_str()))
-        .collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     // Event hashes the remote has that we don't.
     let need_from_remote: HashSet<&str> = remote_hashes
         .iter()
-        .map(|s| s.as_str())
+        .map(std::string::String::as_str)
         .filter(|h| !local_set.contains(h))
         .collect();
 
     // Round 3: exchange missing events.
     // Send our events that the remote lacks.
-    let events_to_send: Vec<Event> = to_send.into_iter().cloned().collect();
-    let send_size: usize = events_to_send.iter().map(|e| estimate_event_size(e)).sum();
+    let events_to_send: Vec<Event> = local_events
+        .iter()
+        .filter(|e| !remote_set.contains(e.event_hash.as_str()))
+        .cloned()
+        .collect();
+    let send_size: usize = events_to_send.iter().map(estimate_event_size).sum();
     transport.send_events(&events_to_send)?;
     report.events_sent = events_to_send.len();
     report.bytes_transferred += send_size;
 
     // Receive events from the remote that we lack.
     let received = transport.recv_events()?;
-    let recv_size: usize = received.iter().map(|e| estimate_event_size(e)).sum();
+    let recv_size: usize = received.iter().map(estimate_event_size).sum();
     report.bytes_transferred += recv_size;
     report.rounds += 1;
 
@@ -161,6 +188,10 @@ pub fn sync<T: SyncTransport>(
 ///
 /// This is the mirror of [`sync`]: it receives the initiator's data and
 /// sends back what they need.
+///
+/// # Errors
+///
+/// Returns `T::Error` if any transport operation fails.
 pub fn serve_sync<T: SyncTransport>(
     local_events: &[Event],
     transport: &mut T,
@@ -190,12 +221,12 @@ pub fn serve_sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes.iter().map(|s| s.as_str()).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(|s| s.as_str()).collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     let need_from_remote: HashSet<&str> = remote_hashes
         .iter()
-        .map(|s| s.as_str())
+        .map(std::string::String::as_str)
         .filter(|h| !local_set.contains(h))
         .collect();
 
@@ -207,10 +238,10 @@ pub fn serve_sync<T: SyncTransport>(
 
     // Round 3: exchange events (receive first, then send).
     let received = transport.recv_events()?;
-    let recv_size: usize = received.iter().map(|e| estimate_event_size(e)).sum();
+    let recv_size: usize = received.iter().map(estimate_event_size).sum();
     report.bytes_transferred += recv_size;
 
-    let send_size: usize = to_send.iter().map(|e| estimate_event_size(e)).sum();
+    let send_size: usize = to_send.iter().map(estimate_event_size).sum();
     transport.send_events(&to_send)?;
     report.events_sent = to_send.len();
     report.bytes_transferred += send_size;
@@ -275,7 +306,7 @@ impl std::fmt::Display for InMemoryError {
 
 impl InMemoryTransport {
     /// Create a new empty transport (one side of a pair).
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             tx_hashes: Vec::new(),
             rx_hashes: Vec::new(),
@@ -289,16 +320,14 @@ impl InMemoryTransport {
     /// Wire two transports together: A's tx → B's rx and vice versa.
     pub fn wire(a: &mut Self, b: &mut Self) {
         // Move A's sent data to B's receive queues.
-        b.rx_hashes.extend(a.tx_hashes.drain(..));
-        b.rx_event_hash_lists
-            .extend(a.tx_event_hash_lists.drain(..));
-        b.rx_events.extend(a.tx_events.drain(..));
+        b.rx_hashes.append(&mut a.tx_hashes);
+        b.rx_event_hash_lists.append(&mut a.tx_event_hash_lists);
+        b.rx_events.append(&mut a.tx_events);
 
         // Move B's sent data to A's receive queues.
-        a.rx_hashes.extend(b.tx_hashes.drain(..));
-        a.rx_event_hash_lists
-            .extend(b.tx_event_hash_lists.drain(..));
-        a.rx_events.extend(b.tx_events.drain(..));
+        a.rx_hashes.append(&mut b.tx_hashes);
+        a.rx_event_hash_lists.append(&mut b.tx_event_hash_lists);
+        a.rx_events.append(&mut b.tx_events);
     }
 }
 
@@ -350,6 +379,11 @@ impl SyncTransport for InMemoryTransport {
 ///
 /// Returns the new events each side received and their respective reports.
 /// This simulates the 3-round protocol by manually wiring each round.
+///
+/// # Errors
+///
+/// Returns [`InMemoryError`] if the in-memory transport encounters an
+/// unexpected state (e.g. empty receive buffer).
 pub fn sync_in_memory(
     local_events: &[Event],
     remote_events: &[Event],
@@ -406,8 +440,8 @@ pub fn sync_in_memory(
     rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes.iter().map(|s| s.as_str()).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(|s| s.as_str()).collect();
+    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
+    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
 
     let local_to_send: Vec<Event> = local_events
         .iter()
@@ -422,8 +456,8 @@ pub fn sync_in_memory(
         .collect();
 
     // --- Round 3: event exchange ---
-    let local_send_size: usize = local_to_send.iter().map(|e| estimate_event_size(e)).sum();
-    let remote_send_size: usize = remote_to_send.iter().map(|e| estimate_event_size(e)).sum();
+    let local_send_size: usize = local_to_send.iter().map(estimate_event_size).sum();
+    let remote_send_size: usize = remote_to_send.iter().map(estimate_event_size).sum();
 
     local_tx.send_events(&local_to_send)?;
     remote_tx.send_events(&remote_to_send)?;

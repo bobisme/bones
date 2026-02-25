@@ -1,7 +1,7 @@
 //! Graph-level abstractions for work-item relationships.
 //!
 //! This module groups higher-level relational functions that operate across
-//! multiple items using the SQLite projection database and CRDT state.
+//! multiple items using the `SQLite` projection database and CRDT state.
 //!
 //! ## Submodules
 //!

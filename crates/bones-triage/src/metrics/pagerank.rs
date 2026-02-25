@@ -1,14 +1,14 @@
-//! PageRank with incremental (DF-PageRank-style) updates and guarded fallback.
+//! `PageRank` with incremental (DF-PageRank-style) updates and guarded fallback.
 //!
 //! # Overview
 //!
-//! PageRank identifies items that unblock the most downstream work. Items
-//! with high PageRank are "important" in the dependency graph because many
+//! `PageRank` identifies items that unblock the most downstream work. Items
+//! with high `PageRank` are "important" in the dependency graph because many
 //! significant paths flow through them.
 //!
 //! # Algorithm
 //!
-//! Standard PageRank uses the iterative power method on the adjacency matrix:
+//! Standard `PageRank` uses the iterative power method on the adjacency matrix:
 //!
 //! ```text
 //! PR(v) = (1 - d) / N + d * Σ PR(u) / out_degree(u)   for each u → v
@@ -41,7 +41,7 @@ use crate::graph::normalize::NormalizedGraph;
 // Configuration
 // ---------------------------------------------------------------------------
 
-/// Configuration for PageRank computation.
+/// Configuration for `PageRank` computation.
 #[derive(Debug, Clone)]
 pub struct PageRankConfig {
     /// Damping factor (probability of following a link vs teleporting).
@@ -69,10 +69,10 @@ impl Default for PageRankConfig {
 // Result types
 // ---------------------------------------------------------------------------
 
-/// Result of a PageRank computation.
+/// Result of a `PageRank` computation.
 #[derive(Debug, Clone)]
 pub struct PageRankResult {
-    /// PageRank scores: item ID → score.
+    /// `PageRank` scores: item ID → score.
     pub scores: HashMap<String, f64>,
     /// Number of iterations performed.
     pub iterations: usize,
@@ -82,7 +82,7 @@ pub struct PageRankResult {
     pub method: PageRankMethod,
 }
 
-/// Which method was used to compute PageRank.
+/// Which method was used to compute `PageRank`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageRankMethod {
     /// Full recompute from scratch.
@@ -107,21 +107,22 @@ const INCREMENTAL_MAX_CHANGE_PCT: usize = 5;
 // Full PageRank
 // ---------------------------------------------------------------------------
 
-/// Compute PageRank from scratch on the condensed DAG.
+/// Compute `PageRank` from scratch on the condensed DAG.
 ///
 /// Operates on the **condensed** graph (SCCs collapsed). Items in the same
-/// SCC receive the same PageRank score.
+/// SCC receive the same `PageRank` score.
 ///
 /// # Arguments
 ///
 /// * `ng` — A [`NormalizedGraph`] containing the condensed DAG.
-/// * `config` — PageRank configuration (damping, tolerance, max_iter).
+/// * `config` — `PageRank` configuration (damping, tolerance, `max_iter`).
 ///
 /// # Returns
 ///
 /// A [`PageRankResult`] with scores for every item ID.
 #[must_use]
 #[instrument(skip(ng, config))]
+#[allow(clippy::cast_precision_loss)]
 pub fn pagerank(ng: &NormalizedGraph, config: &PageRankConfig) -> PageRankResult {
     let g = &ng.condensed;
     let n = g.node_count();
@@ -149,9 +150,7 @@ pub fn pagerank(ng: &NormalizedGraph, config: &PageRankConfig) -> PageRankResult
         iterations += 1;
 
         // Reset new_ranks to base teleportation value.
-        for r in &mut new_ranks {
-            *r = base;
-        }
+        new_ranks.fill(base);
 
         // Distribute rank from each node to its outgoing neighbors.
         for node in g.node_identifiers() {
@@ -223,7 +222,7 @@ pub enum EdgeChangeKind {
     Removed,
 }
 
-/// Incrementally update PageRank after edge changes.
+/// Incrementally update `PageRank` after edge changes.
 ///
 /// Strategy:
 /// 1. Build a frontier from changed edge endpoints.
@@ -234,20 +233,25 @@ pub enum EdgeChangeKind {
 /// # Arguments
 ///
 /// * `ng` — The **updated** [`NormalizedGraph`] (after edge changes applied).
-/// * `previous` — Previous PageRank scores (from the old graph).
+/// * `previous` — Previous `PageRank` scores (from the old graph).
 /// * `changes` — List of edge changes since the previous computation.
-/// * `config` — PageRank configuration.
+/// * `config` — `PageRank` configuration.
 ///
 /// # Returns
 ///
 /// A [`PageRankResult`] with method set to `Incremental` or
 /// `IncrementalFallback`.
 #[must_use]
-#[instrument(skip(ng, _previous, _changes, config))]
+#[instrument(skip(ng, previous, changes, config))]
+#[allow(
+    clippy::implicit_hasher,
+    clippy::cast_precision_loss,
+    clippy::too_many_lines
+)]
 pub fn pagerank_incremental(
     ng: &NormalizedGraph,
-    _previous: &HashMap<String, f64>,
-    _changes: &[EdgeChange],
+    previous: &HashMap<String, f64>,
+    changes: &[EdgeChange],
     config: &PageRankConfig,
 ) -> PageRankResult {
     let g = &ng.condensed;
@@ -263,8 +267,8 @@ pub fn pagerank_incremental(
         };
     }
 
-    if _changes.is_empty() {
-        if _previous.is_empty() {
+    if changes.is_empty() {
+        if previous.is_empty() {
             return incremental_fallback(
                 ng,
                 config,
@@ -272,7 +276,7 @@ pub fn pagerank_incremental(
             );
         }
         return PageRankResult {
-            scores: _previous.clone(),
+            scores: previous.clone(),
             iterations: 0,
             converged: true,
             method: PageRankMethod::Incremental,
@@ -290,7 +294,7 @@ pub fn pagerank_incremental(
 
     // Automatic gate: large batch changes are effectively global updates.
     let edge_count_nonzero = edge_count.max(1);
-    if _changes.len() * 100 > edge_count_nonzero * INCREMENTAL_MAX_CHANGE_PCT {
+    if changes.len() * 100 > edge_count_nonzero * INCREMENTAL_MAX_CHANGE_PCT {
         return incremental_fallback(
             ng,
             config,
@@ -300,9 +304,9 @@ pub fn pagerank_incremental(
 
     // Conservative guard: source dangling-status transitions induce global
     // effects. Instead of immediate fallback, promote to global affected set.
-    let force_global_affected = has_possible_dangling_transition(ng, _changes);
+    let force_global_affected = has_possible_dangling_transition(ng, changes);
 
-    let frontier = identify_frontier(ng, _changes);
+    let frontier = identify_frontier(ng, changes);
     if frontier.is_empty() {
         return incremental_fallback(
             ng,
@@ -311,10 +315,11 @@ pub fn pagerank_incremental(
         );
     }
 
-    let mut affected = bfs_affected(ng, &frontier);
-    if force_global_affected {
-        affected = (0..n).collect();
-    }
+    let affected = if force_global_affected {
+        (0..n).collect()
+    } else {
+        bfs_affected(ng, &frontier)
+    };
     if affected.is_empty() {
         return incremental_fallback(
             ng,
@@ -340,7 +345,7 @@ pub fn pagerank_incremental(
             let node = petgraph::graph::NodeIndex::new(i);
             g.node_weight(node)
                 .and_then(|scc| scc.members.first())
-                .and_then(|id| _previous.get(id))
+                .and_then(|id| previous.get(id))
                 .copied()
                 .unwrap_or(default_rank)
         })
@@ -422,7 +427,7 @@ pub fn pagerank_incremental(
 // Cached PageRank
 // ---------------------------------------------------------------------------
 
-/// Cached PageRank state for incremental updates.
+/// Cached `PageRank` state for incremental updates.
 #[derive(Debug, Clone)]
 pub struct PageRankCache {
     /// Cached scores from the last computation.
@@ -434,7 +439,7 @@ pub struct PageRankCache {
 impl PageRankCache {
     /// Create a new cache entry from a computation result and graph hash.
     #[must_use]
-    pub fn new(scores: HashMap<String, f64>, content_hash: String) -> Self {
+    pub const fn new(scores: HashMap<String, f64>, content_hash: String) -> Self {
         Self {
             scores,
             content_hash,
@@ -521,6 +526,7 @@ fn bfs_affected(ng: &NormalizedGraph, frontier: &HashSet<usize>) -> Vec<usize> {
 }
 
 /// Estimate whether any changed source may have toggled dangling status.
+#[allow(clippy::cast_possible_wrap)]
 fn has_possible_dangling_transition(ng: &NormalizedGraph, changes: &[EdgeChange]) -> bool {
     let pair_counts_new = scc_pair_edge_counts(ng);
     let mut pair_counts_old: HashMap<(usize, usize), isize> = pair_counts_new
@@ -613,6 +619,7 @@ fn dangling_sum(
         .sum()
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn normalize_ranks(ranks: &mut [f64]) {
     let sum: f64 = ranks.iter().sum();
     if !sum.is_finite() || sum <= 0.0 {
@@ -632,6 +639,7 @@ fn normalize_ranks(ranks: &mut [f64]) {
 }
 
 /// One global power-iteration step residual against current ranks.
+#[allow(clippy::cast_precision_loss)]
 fn global_residual_max(ng: &NormalizedGraph, ranks: &[f64], config: &PageRankConfig) -> f64 {
     let g = &ng.condensed;
     let n = g.node_count();

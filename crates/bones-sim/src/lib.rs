@@ -176,7 +176,7 @@ impl SimulationResult {
     #[must_use]
     pub fn trace_fingerprint(&self) -> u64 {
         self.trace.iter().fold(0_u64, |acc, item| {
-            let encoded = format!("{:?}", item);
+            let encoded = format!("{item:?}");
             encoded.as_bytes().iter().fold(acc, |inner, byte| {
                 inner.wrapping_mul(131).wrapping_add(u64::from(*byte))
             })

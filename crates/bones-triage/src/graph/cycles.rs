@@ -212,7 +212,6 @@ fn find_back_edges_in_scc(
         .expect("component non-empty");
 
     let mut visited: HashSet<NodeIndex> = HashSet::new();
-    let mut ancestor_stack: Vec<NodeIndex> = Vec::new(); // current DFS path
     let mut ancestor_set: HashSet<NodeIndex> = HashSet::new(); // for O(1) ancestor lookup
     let mut back_edges: Vec<(String, String)> = Vec::new();
 
@@ -220,9 +219,7 @@ fn find_back_edges_in_scc(
     let mut call_stack: Vec<(NodeIndex, Vec<NodeIndex>, usize)> = Vec::new();
 
     // Bootstrap: push the start node.
-    if !visited.contains(&start) {
-        visited.insert(start);
-        ancestor_stack.push(start);
+    if visited.insert(start) {
         ancestor_set.insert(start);
         let neighbors: Vec<NodeIndex> = graph
             .neighbors_directed(start, petgraph::Direction::Outgoing)
@@ -234,7 +231,7 @@ fn find_back_edges_in_scc(
     // Run DFS over all SCC nodes (handles disconnected sub-components).
     let mut all_starts: Vec<NodeIndex> = component.to_vec();
     all_starts.sort_unstable_by_key(|&idx| node_id(graph, idx));
-    let mut extra_starts = all_starts.into_iter().peekable();
+    let mut extra_starts = all_starts.into_iter();
 
     loop {
         if let Some(frame) = call_stack.last_mut() {
@@ -249,9 +246,7 @@ fn find_back_edges_in_scc(
                 if ancestor_set.contains(&neighbor) {
                     // Back-edge: current → neighbor (neighbor is an ancestor).
                     back_edges.push((node_id(graph, current), node_id(graph, neighbor)));
-                } else if !visited.contains(&neighbor) {
-                    visited.insert(neighbor);
-                    ancestor_stack.push(neighbor);
+                } else if visited.insert(neighbor) {
                     ancestor_set.insert(neighbor);
                     let next_neighbors: Vec<NodeIndex> = graph
                         .neighbors_directed(neighbor, petgraph::Direction::Outgoing)
@@ -260,9 +255,8 @@ fn find_back_edges_in_scc(
                     call_stack.push((neighbor, next_neighbors, 0));
                 }
             } else {
-                // Pop this frame; current node is on top of ancestor_stack.
+                // Pop this frame.
                 call_stack.pop();
-                ancestor_stack.pop(); // current is always the top when we finish it
                 ancestor_set.remove(&current);
             }
         } else {
@@ -270,9 +264,7 @@ fn find_back_edges_in_scc(
             let Some(next) = extra_starts.next() else {
                 break;
             };
-            if !visited.contains(&next) {
-                visited.insert(next);
-                ancestor_stack.push(next);
+            if visited.insert(next) {
                 ancestor_set.insert(next);
                 let neighbors: Vec<NodeIndex> = graph
                     .neighbors_directed(next, petgraph::Direction::Outgoing)

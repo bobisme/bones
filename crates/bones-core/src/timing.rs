@@ -116,7 +116,7 @@ pub fn collect_report() -> TimingReport {
 impl TimingReport {
     /// Returns true when no timing samples were recorded.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.operations.is_empty()
     }
 
@@ -152,14 +152,16 @@ impl TimingReport {
         out.push_str("--------------------------------------------------------------\n");
 
         for op in &self.operations {
-            out.push_str(&format!(
-                "{:<28} {:>6} {:>8} {:>8} {:>8}\n",
+            use std::fmt::Write;
+            let _ = writeln!(
+                out,
+                "{:<28} {:>6} {:>8} {:>8} {:>8}",
                 op.name,
                 op.count,
                 format_duration(op.p50),
                 format_duration(op.p95),
                 format_duration(op.p99)
-            ));
+            );
         }
 
         out
@@ -203,7 +205,7 @@ fn format_duration(duration: Duration) -> String {
     }
 }
 
-fn is_truthy(value: &str) -> bool {
+const fn is_truthy(value: &str) -> bool {
     value.eq_ignore_ascii_case("1")
         || value.eq_ignore_ascii_case("true")
         || value.eq_ignore_ascii_case("yes")

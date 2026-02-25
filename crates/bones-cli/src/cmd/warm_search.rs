@@ -23,19 +23,16 @@ struct WarmSearchReport {
 
 pub fn run_warm_search(project_root: &Path, output: OutputMode) -> Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     let model = match SemanticModel::load() {

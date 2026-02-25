@@ -4,7 +4,7 @@
 //! project to a consistent state after:
 //! - Partial/torn writes (process crash mid-append)
 //! - Corrupt shard data (bit flips, truncation, invalid content)
-//! - Missing or corrupt SQLite projection database
+//! - Missing or corrupt `SQLite` projection database
 //! - Missing or corrupt binary cache files
 //! - Locked database (retry with timeout)
 //!
@@ -123,10 +123,7 @@ pub fn recover_partial_write(path: &Path) -> Result<u64, RecoveryError> {
 
     // Find last newline
     let last_newline = content.iter().rposition(|&b| b == b'\n');
-    let truncate_to = match last_newline {
-        Some(pos) => pos + 1, // keep the newline
-        None => 0,            // no complete lines at all — truncate to empty
-    };
+    let truncate_to = last_newline.map_or(0, |pos| pos + 1);
 
     let bytes_removed = content.len() - truncate_to;
 
@@ -165,6 +162,16 @@ pub fn recover_partial_write(path: &Path) -> Result<u64, RecoveryError> {
 /// # Returns
 ///
 /// A [`RecoveryReport`] describing what was found and what action was taken.
+///
+/// # Panics
+///
+/// Panics if the internal `first_bad_line` index is unexpectedly `None` after
+/// a prior `is_some()` check — this should never happen.
+///
+/// # Errors
+///
+/// Returns [`RecoveryError::ShardNotFound`] if the file does not exist, or
+/// [`RecoveryError::Io`] if the file cannot be read or written.
 pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryError> {
     if !path.exists() {
         return Err(RecoveryError::ShardNotFound(path.to_path_buf()));
@@ -198,14 +205,11 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
         }
 
         // Try parsing as a TSJSON event line
-        match parser::parse_line(line) {
-            Ok(_) => {
-                events_preserved += 1;
-            }
-            Err(_) => {
-                first_bad_line = Some(i);
-                break;
-            }
+        if parser::parse_line(line).is_ok() {
+            events_preserved += 1;
+        } else {
+            first_bad_line = Some(i);
+            break;
         }
     }
 
@@ -221,7 +225,8 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
         });
     }
 
-    let bad_idx = first_bad_line.unwrap();
+    // SAFETY: we checked `first_bad_line.is_none()` above and returned early.
+    let bad_idx = first_bad_line.expect("checked is_some above");
     let events_discarded = lines[bad_idx..]
         .iter()
         .filter(|l| {
@@ -239,11 +244,19 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
 
     // Quarantine: write corrupt tail to backup
     let backup_path = path.with_extension("corrupt");
-    let corrupt_content: String = lines[bad_idx..].iter().map(|l| format!("{l}\n")).collect();
+    let corrupt_content: String = lines[bad_idx..].iter().fold(String::new(), |mut acc, l| {
+        use std::fmt::Write;
+        let _ = writeln!(acc, "{l}");
+        acc
+    });
     fs::write(&backup_path, &corrupt_content)?;
 
     // Truncate original to valid prefix
-    let valid_content: String = lines[..bad_idx].iter().map(|l| format!("{l}\n")).collect();
+    let valid_content: String = lines[..bad_idx].iter().fold(String::new(), |mut acc, l| {
+        use std::fmt::Write;
+        let _ = writeln!(acc, "{l}");
+        acc
+    });
     fs::write(path, &valid_content)?;
 
     tracing::warn!(
@@ -268,7 +281,7 @@ pub fn recover_corrupt_shard(path: &Path) -> Result<RecoveryReport, RecoveryErro
 // Missing DB recovery
 // ---------------------------------------------------------------------------
 
-/// Recover from a missing or corrupt SQLite projection by triggering a full
+/// Recover from a missing or corrupt `SQLite` projection by triggering a full
 /// rebuild from the event log.
 ///
 /// This is the "auto-heal" path when `bones.db` is absent, corrupt, or
@@ -346,6 +359,10 @@ pub fn recover_missing_db(
 /// # Returns
 ///
 /// `true` if a cache file was deleted, `false` if it didn't exist.
+///
+/// # Errors
+///
+/// Returns [`RecoveryError::Io`] if the cache file cannot be deleted.
 pub fn recover_corrupt_cache(cache_path: &Path) -> Result<bool, RecoveryError> {
     if !cache_path.exists() {
         return Ok(false);
@@ -365,7 +382,7 @@ pub fn recover_corrupt_cache(cache_path: &Path) -> Result<bool, RecoveryError> {
 // Locked DB retry
 // ---------------------------------------------------------------------------
 
-/// Attempt to open a SQLite database with retry and timeout for lock contention.
+/// Attempt to open a `SQLite` database with retry and timeout for lock contention.
 ///
 /// If the database is locked by another process, retries with exponential
 /// backoff up to `timeout`. Returns the connection on success or a
@@ -373,7 +390,7 @@ pub fn recover_corrupt_cache(cache_path: &Path) -> Result<bool, RecoveryError> {
 ///
 /// # Arguments
 ///
-/// * `db_path` — Path to the SQLite database.
+/// * `db_path` — Path to the `SQLite` database.
 /// * `timeout` — Maximum time to wait for the lock.
 ///
 /// # Errors
@@ -402,8 +419,7 @@ pub fn open_db_with_retry(
                         );
                     }
                     Err(e) => {
-                        return Err(RecoveryError::Io(io::Error::new(
-                            io::ErrorKind::Other,
+                        return Err(RecoveryError::Io(io::Error::other(
                             e.to_string(),
                         )));
                     }
@@ -417,8 +433,7 @@ pub fn open_db_with_retry(
                         "database locked on open, retrying..."
                     );
                 } else {
-                    return Err(RecoveryError::Io(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Err(RecoveryError::Io(io::Error::other(
                         err_str,
                     )));
                 }
@@ -436,17 +451,14 @@ pub fn open_db_with_retry(
 
 /// Check if a rusqlite error is a lock/busy error.
 fn is_locked_error(e: &rusqlite::Error) -> bool {
-    match e {
-        rusqlite::Error::SqliteFailure(err, _) => {
-            matches!(
-                err.code,
-                rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked
-            )
-        }
-        _ => {
-            let s = e.to_string();
-            s.contains("locked") || s.contains("busy")
-        }
+    if let rusqlite::Error::SqliteFailure(err, _) = e {
+        matches!(
+            err.code,
+            rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked
+        )
+    } else {
+        let s = e.to_string();
+        s.contains("locked") || s.contains("busy")
     }
 }
 
@@ -477,12 +489,17 @@ pub struct HealthCheckResult {
 ///
 /// 1. Verify `.bones/` directory exists.
 /// 2. Recover torn writes on all shard files.
-/// 3. Check if SQLite DB exists and is valid; rebuild if not.
+/// 3. Check if `SQLite` DB exists and is valid; rebuild if not.
 /// 4. Clean corrupt cache files.
 ///
 /// # Arguments
 ///
 /// * `bones_dir` — Path to the `.bones/` directory.
+///
+/// # Errors
+///
+/// Returns a [`RecoveryError`] if a critical recovery step fails.
+/// Non-fatal issues are recorded in `HealthCheckResult::warnings`.
 pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError> {
     let mut result = HealthCheckResult {
         project_valid: false,
@@ -532,18 +549,11 @@ pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError
 
     // 3. Check/rebuild SQLite DB
     if events_dir.exists() {
-        let need_rebuild = if db_path.exists() {
-            // Quick integrity check
-            match crate::db::open_projection(&db_path) {
-                Ok(conn) => {
-                    // Try a simple query to verify DB isn't corrupt
-                    conn.execute_batch("SELECT COUNT(*) FROM items").is_err()
-                }
-                Err(_) => true,
-            }
-        } else {
-            true
-        };
+        let need_rebuild = !db_path.exists()
+            || crate::db::open_projection(&db_path).map_or(true, |conn| {
+                // Try a simple query to verify DB isn't corrupt
+                conn.execute_batch("SELECT COUNT(*) FROM items").is_err()
+            });
 
         if need_rebuild {
             match recover_missing_db(&events_dir, &db_path) {

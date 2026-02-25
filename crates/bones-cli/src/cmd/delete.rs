@@ -70,7 +70,19 @@ fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
         return Ok(exact);
     }
 
-    if !input.starts_with("bn-") {
+    if input.starts_with("bn-") {
+        let like_pattern = format!("{input}%");
+        let prefix: Option<String> = conn
+            .query_row(
+                "SELECT item_id FROM items WHERE item_id LIKE ?1 ORDER BY item_id LIMIT 1",
+                params![like_pattern],
+                |row| row.get(0),
+            )
+            .ok();
+        if prefix.is_some() {
+            return Ok(prefix);
+        }
+    } else {
         let with_prefix = format!("bn-{input}");
         let exact2: Option<String> = conn
             .query_row(
@@ -94,18 +106,6 @@ fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
         if prefix.is_some() {
             return Ok(prefix);
         }
-    } else {
-        let like_pattern = format!("{input}%");
-        let prefix: Option<String> = conn
-            .query_row(
-                "SELECT item_id FROM items WHERE item_id LIKE ?1 ORDER BY item_id LIMIT 1",
-                params![like_pattern],
-                |row| row.get(0),
-            )
-            .ok();
-        if prefix.is_some() {
-            return Ok(prefix);
-        }
     }
 
     Ok(None)
@@ -116,7 +116,7 @@ fn confirm_delete(id: &str, title: &str) -> anyhow::Result<bool> {
         return Ok(true);
     }
 
-    eprint!("Delete {} '{}'? [y/N] ", id, title);
+    eprint!("Delete {id} '{title}'? [y/N] ");
     std::io::stderr().flush()?;
 
     let mut input = String::new();
@@ -150,24 +150,21 @@ fn run_delete_single(
     validate::validate_item_id(raw_id)
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
-    let resolved_id = match resolve_item_id(conn, raw_id)? {
-        Some(id) => id,
-        None => {
-            if let Some(any_id) = resolve_any_item_id(conn, raw_id)?
-                && let Some(item) = query::get_item(conn, &any_id, true)?
-                && item.is_deleted
-            {
-                anyhow::bail!("item '{}' is already deleted", item.item_id);
-            }
-            anyhow::bail!("item '{}' not found", raw_id);
+    let resolved_id = if let Some(id) = resolve_item_id(conn, raw_id)? { id } else {
+        if let Some(any_id) = resolve_any_item_id(conn, raw_id)?
+            && let Some(item) = query::get_item(conn, &any_id, true)?
+            && item.is_deleted
+        {
+            anyhow::bail!("item '{}' is already deleted", item.item_id);
         }
+        anyhow::bail!("item '{raw_id}' not found");
     };
 
     let item = query::get_item(conn, &resolved_id, false)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{resolved_id}' not found"))?;
 
     if !force && !confirm_delete(&resolved_id, &item.title)? {
-        anyhow::bail!("deletion of '{}' cancelled", resolved_id);
+        anyhow::bail!("deletion of '{resolved_id}' cancelled");
     }
 
     let mut event = Event {
@@ -253,7 +250,7 @@ pub fn run_delete(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     let db_path = bones_dir.join("bones.db");

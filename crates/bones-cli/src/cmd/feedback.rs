@@ -103,7 +103,7 @@ fn run_feedback(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 3. Open projection DB
@@ -112,20 +112,17 @@ fn run_feedback(
     let _ = project::ensure_tracking_table(&conn);
 
     // 4. Resolve item ID (supports partial IDs)
-    let resolved_id = match resolve_item_id(&conn, id)? {
-        Some(resolved) => resolved,
-        None => {
-            let msg = format!("item '{}' not found", id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let resolved_id = if let Some(resolved) = resolve_item_id(&conn, id)? { resolved } else {
+        let msg = format!("item '{id}' not found");
+        render_error(
+            output,
+            &CliError::with_details(
+                &msg,
+                "Check the item ID with 'bn list' or 'bn show'",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
     // 5. Build timestamp (seconds since Unix epoch)
@@ -155,7 +152,7 @@ fn run_feedback(
     };
 
     let result = FeedbackOutput {
-        id: resolved_id.clone(),
+        id: resolved_id,
         action: action.to_string(),
         agent,
         ts,

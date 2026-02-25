@@ -27,7 +27,7 @@ const MAX_ORPHAN_ITEM_SAMPLES: usize = 20;
 /// Execute `bn diagnose`.
 ///
 /// Produces a health report over raw `.events` shards and compares that state
-/// against the SQLite projection cursor/tracking tables.
+/// against the `SQLite` projection cursor/tracking tables.
 pub fn run_diagnose(output: OutputMode, project_root: &Path) -> Result<()> {
     let report = build_report(project_root)?;
     render(output, &report, |r, w| render_human(r, w))
@@ -304,8 +304,7 @@ fn build_report(project_root: &Path) -> Result<DiagnoseReport> {
 
     if parse_error_count > 0 {
         warnings.push(format!(
-            "{} malformed line(s) were skipped while computing diagnostics",
-            parse_error_count
+            "{parse_error_count} malformed line(s) were skipped while computing diagnostics"
         ));
     }
     if hash_anomalies.unknown_parent_refs > 0 {
@@ -316,8 +315,7 @@ fn build_report(project_root: &Path) -> Result<DiagnoseReport> {
     }
     if orphan_event_count > 0 {
         warnings.push(format!(
-            "{} event(s) reference item IDs without any item.create event",
-            orphan_event_count
+            "{orphan_event_count} event(s) reference item IDs without any item.create event"
         ));
     }
 
@@ -357,7 +355,7 @@ fn build_report(project_root: &Path) -> Result<DiagnoseReport> {
         &db_path,
         &events_dir,
         total_bytes,
-        expected_last_hash.clone(),
+        expected_last_hash,
         event_stats.unique_event_hashes,
     );
 
@@ -373,7 +371,7 @@ fn build_report(project_root: &Path) -> Result<DiagnoseReport> {
     })
 }
 
-fn classify_parse_error(error: &ParseError, anomalies: &mut HashAnomalies) {
+const fn classify_parse_error(error: &ParseError, anomalies: &mut HashAnomalies) {
     match error {
         ParseError::InvalidEventHash(_) => anomalies.invalid_event_hash_lines += 1,
         ParseError::HashMismatch { .. } => anomalies.hash_mismatch_lines += 1,
@@ -438,8 +436,7 @@ fn collect_projection_report(
             report.cursor_offset_matches_log = Some(offset_matches);
             if !offset_matches {
                 report.drift_indicators.push(format!(
-                    "projection cursor offset {} differs from log byte size {}",
-                    offset, expected_offset
+                    "projection cursor offset {offset} differs from log byte size {expected_offset}"
                 ));
             }
 
@@ -475,8 +472,7 @@ fn collect_projection_report(
             report.projected_events_match_log = Some(matches);
             if !matches {
                 report.drift_indicators.push(format!(
-                    "projected_events has {count} row(s) but log has {} unique hash(es)",
-                    unique_event_hashes
+                    "projected_events has {count} row(s) but log has {unique_event_hashes} unique hash(es)"
                 ));
             }
         }

@@ -185,15 +185,13 @@ fn collect_redacted_hashes(bones_dir: &Path) -> HashSet<String> {
     let db_path = bones_dir.join("bones.db");
     let mut hashes = HashSet::new();
 
-    if let Ok(Some(conn)) = query::try_open_projection(&db_path) {
-        if let Ok(mut stmt) = conn.prepare("SELECT target_event_hash FROM event_redactions") {
-            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+    if let Ok(Some(conn)) = query::try_open_projection(&db_path)
+        && let Ok(mut stmt) = conn.prepare("SELECT target_event_hash FROM event_redactions")
+            && let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                 for hash in rows.flatten() {
                     hashes.insert(hash);
                 }
             }
-        }
-    }
 
     hashes
 }

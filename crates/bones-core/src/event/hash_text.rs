@@ -111,7 +111,7 @@ fn decode_base64_url_no_pad(raw: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn decode_base64_url_digit(raw: u8) -> Option<u8> {
+const fn decode_base64_url_digit(raw: u8) -> Option<u8> {
     match raw {
         b'A'..=b'Z' => Some(raw - b'A'),
         b'a'..=b'z' => Some(raw - b'a' + 26),
@@ -138,7 +138,7 @@ fn decode_hex(raw: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn decode_hex_nibble(raw: u8) -> Option<u8> {
+const fn decode_hex_nibble(raw: u8) -> Option<u8> {
     match raw {
         b'0'..=b'9' => Some(raw - b'0'),
         b'a'..=b'f' => Some(raw - b'a' + 10),

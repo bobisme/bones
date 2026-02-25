@@ -169,6 +169,11 @@ impl std::error::Error for ParseError {}
 /// this version cannot handle. The error message instructs the user to
 /// upgrade.
 ///
+/// # Errors
+///
+/// Returns an error string if the header is missing, malformed, has an
+/// unparseable version number, or the version exceeds [`CURRENT_VERSION`].
+///
 /// # Backward compatibility
 ///
 /// All prior format versions are guaranteed to be readable by this version.
@@ -177,28 +182,25 @@ pub fn detect_version(first_line: &str) -> Result<u32, String> {
     let line = first_line.trim();
     if !line.starts_with(HEADER_PREFIX) {
         return Err(format!(
-            "Invalid event log header: expected '{}N', got '{}'.\n\
+            "Invalid event log header: expected '{HEADER_PREFIX}N', got '{line}'.\n\
              This file may not be a bones event log, or it may be from \
-             a version of bones that predates format versioning.",
-            HEADER_PREFIX, line
+             a version of bones that predates format versioning."
         ));
     }
     let version_str = &line[HEADER_PREFIX.len()..];
     let version: u32 = version_str.parse().map_err(|_| {
         format!(
-            "Invalid version number '{}' in event log header.\n\
-             Expected a positive integer after '{}'.",
-            version_str, HEADER_PREFIX
+            "Invalid version number '{version_str}' in event log header.\n\
+             Expected a positive integer after '{HEADER_PREFIX}'."
         )
     })?;
     if version > CURRENT_VERSION {
         return Err(format!(
-            "Event log version {} is newer than this version of bones \
-             (supports up to v{}).\n\
+            "Event log version {version} is newer than this version of bones \
+             (supports up to v{CURRENT_VERSION}).\n\
              Please upgrade bones: cargo install bones-cli\n\
              Or download the latest release from: \
-             https://github.com/bobisme/bones/releases",
-            version, CURRENT_VERSION
+             https://github.com/bobisme/bones/releases"
         ));
     }
     Ok(version)
@@ -499,7 +501,7 @@ where
     I: Iterator<Item = String>,
 {
     /// Create a new streaming parser from a line iterator.
-    pub fn new(lines: I) -> Self {
+    pub const fn new(lines: I) -> Self {
         Self {
             lines,
             version_checked: false,
@@ -539,14 +541,13 @@ where
                         )));
                     }
                 },
-                Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => continue,
+                Ok(ParsedLine::Comment(_) | ParsedLine::Blank) => {}
                 Err(ParseError::InvalidEventType(raw)) => {
                     warn!(
                         line = self.line_no,
                         event_type = %raw,
                         "skipping line with unknown event type (forward-compatibility)"
                     );
-                    continue;
                 }
                 Err(e) => return Some(Err((self.line_no, e))),
             }

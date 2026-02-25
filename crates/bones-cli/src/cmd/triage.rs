@@ -39,19 +39,16 @@ pub fn run_triage(
     project_root: &Path,
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     let snapshot = build_triage_snapshot(&conn, chrono::Utc::now().timestamp_micros())?;
@@ -427,7 +424,7 @@ fn format_score(score: f64) -> String {
 }
 
 fn is_small_size(size: Option<&str>) -> bool {
-    matches!(size, Some("xs") | Some("s"))
+    matches!(size, Some("xs" | "s"))
 }
 
 #[cfg(test)]

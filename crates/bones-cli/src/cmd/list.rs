@@ -81,8 +81,8 @@ pub struct ListArgs {
 
     /// Sort order: priority, created, updated, state.
     ///
-    /// Legacy values are also accepted: created_desc, created_asc,
-    /// updated_desc, updated_asc.
+    /// Legacy values are also accepted: `created_desc`, `created_asc`,
+    /// `updated_desc`, `updated_asc`.
     #[arg(long, default_value = "updated")]
     pub sort: String,
 }
@@ -174,33 +174,30 @@ pub fn run_list(
     let db_path = project_root.join(".bones/bones.db");
 
     // Gracefully handle missing / corrupt projection
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            if output.is_json() {
-                let response = ListResponse {
-                    items: Vec::new(),
-                    total: 0,
-                    limit: effective_limit(args.limit, 0, args.offset),
-                    offset: args.offset,
-                    has_more: false,
-                };
-                return render(output, &response, |_, _| Ok(()));
-            }
-
-            let items: Vec<ListItem> = Vec::new();
-            return render_mode(
-                output,
-                &items,
-                |_, w| writeln!(w, "advice  projection-missing  run `bn admin rebuild`"),
-                |_, w| {
-                    writeln!(
-                        w,
-                        "(projection not found — run `bn admin rebuild` to initialize)"
-                    )
-                },
-            );
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+        if output.is_json() {
+            let response = ListResponse {
+                items: Vec::new(),
+                total: 0,
+                limit: effective_limit(args.limit, 0, args.offset),
+                offset: args.offset,
+                has_more: false,
+            };
+            return render(output, &response, |_, _| Ok(()));
         }
+
+        let items: Vec<ListItem> = Vec::new();
+        return render_mode(
+            output,
+            &items,
+            |_, w| writeln!(w, "advice  projection-missing  run `bn admin rebuild`"),
+            |_, w| {
+                writeln!(
+                    w,
+                    "(projection not found — run `bn admin rebuild` to initialize)"
+                )
+            },
+        );
     };
 
     // Validate sort order
@@ -219,18 +216,16 @@ pub fn run_list(
         }
     };
 
-    if let Some(ref state) = args.state {
-        if let Err(e) = validate::validate_state(state) {
+    if let Some(ref state) = args.state
+        && let Err(e) = validate::validate_state(state) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
-    if let Some(ref kind) = args.kind {
-        if let Err(e) = validate::validate_kind(kind) {
+    if let Some(ref kind) = args.kind
+        && let Err(e) = validate::validate_kind(kind) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
     let all_labels = args.all_labels();
     for label in &all_labels {
         if let Err(e) = validate::validate_label(label) {
@@ -238,8 +233,8 @@ pub fn run_list(
             anyhow::bail!("{}", e.reason);
         }
     }
-    if let Some(ref urgency) = args.urgency {
-        if urgency.parse::<Urgency>().is_err() {
+    if let Some(ref urgency) = args.urgency
+        && urgency.parse::<Urgency>().is_err() {
             render_error(
                 output,
                 &CliError::with_details(
@@ -250,52 +245,43 @@ pub fn run_list(
             )?;
             anyhow::bail!("invalid urgency");
         }
-    }
-    if let Some(ref parent) = args.parent {
-        if let Err(e) = validate::validate_item_id(parent) {
+    if let Some(ref parent) = args.parent
+        && let Err(e) = validate::validate_item_id(parent) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
-    if let Some(ref assignee) = args.assignee {
-        if let Err(e) = validate::validate_agent(assignee) {
+    if let Some(ref assignee) = args.assignee
+        && let Err(e) = validate::validate_agent(assignee) {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
 
     let since_us = match args.since.as_deref() {
-        Some(raw) => match parse_datetime_to_micros(raw) {
-            Some(value) => Some(value),
-            None => {
-                render_error(
-                    output,
-                    &CliError::with_details(
-                        format!("invalid --since value '{raw}'"),
-                        "use RFC3339, epoch seconds, or epoch microseconds",
-                        "invalid_datetime",
-                    ),
-                )?;
-                anyhow::bail!("invalid --since value");
-            }
+        Some(raw) => if let Some(value) = parse_datetime_to_micros(raw) { Some(value) } else {
+            render_error(
+                output,
+                &CliError::with_details(
+                    format!("invalid --since value '{raw}'"),
+                    "use RFC3339, epoch seconds, or epoch microseconds",
+                    "invalid_datetime",
+                ),
+            )?;
+            anyhow::bail!("invalid --since value");
         },
         None => None,
     };
 
     let until_us = match args.until.as_deref() {
-        Some(raw) => match parse_datetime_to_micros(raw) {
-            Some(value) => Some(value),
-            None => {
-                render_error(
-                    output,
-                    &CliError::with_details(
-                        format!("invalid --until value '{raw}'"),
-                        "use RFC3339, epoch seconds, or epoch microseconds",
-                        "invalid_datetime",
-                    ),
-                )?;
-                anyhow::bail!("invalid --until value");
-            }
+        Some(raw) => if let Some(value) = parse_datetime_to_micros(raw) { Some(value) } else {
+            render_error(
+                output,
+                &CliError::with_details(
+                    format!("invalid --until value '{raw}'"),
+                    "use RFC3339, epoch seconds, or epoch microseconds",
+                    "invalid_datetime",
+                ),
+            )?;
+            anyhow::bail!("invalid --until value");
         },
         None => None,
     };
@@ -501,7 +487,7 @@ fn parse_datetime_to_micros(raw: &str) -> Option<i64> {
         .map(|dt| dt.timestamp_micros())
 }
 
-fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
+const fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
     if limit == 0 {
         total.saturating_sub(offset)
     } else {

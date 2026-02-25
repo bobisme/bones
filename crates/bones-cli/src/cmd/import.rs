@@ -34,7 +34,7 @@ pub struct ImportArgs {
     #[arg(long, value_name = "PATH")]
     pub input: Option<PathBuf>,
 
-    /// GitHub API token (optional). Falls back to GITHUB_TOKEN env var.
+    /// GitHub API token (optional). Falls back to `GITHUB_TOKEN` env var.
     #[arg(long)]
     pub token: Option<String>,
 }
@@ -159,14 +159,14 @@ struct GitHubClient {
 }
 
 impl GitHubClient {
-    fn new(token: Option<String>) -> Self {
+    const fn new(token: Option<String>) -> Self {
         Self {
             token,
             requests: Cell::new(0),
         }
     }
 
-    fn request_count(&self) -> usize {
+    const fn request_count(&self) -> usize {
         self.requests.get()
     }
 

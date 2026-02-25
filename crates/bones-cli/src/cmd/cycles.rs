@@ -27,19 +27,16 @@ pub fn run_cycles(
     project_root: &Path,
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     let raw = RawGraph::from_sqlite(&conn)

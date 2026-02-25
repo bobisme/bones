@@ -50,7 +50,12 @@ impl State {
     /// - `done -> archived`
     /// - `done -> open` (reopen)
     /// - `archived -> open` (reopen)
-    pub fn can_transition_to(&self, target: State) -> Result<(), InvalidTransition> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidTransition`] if the transition is a no-op or not
+    /// allowed by the lifecycle rules.
+    pub fn can_transition_to(&self, target: Self) -> Result<(), InvalidTransition> {
         if *self == target {
             return Err(InvalidTransition {
                 from: *self,
@@ -61,13 +66,10 @@ impl State {
 
         let allowed = matches!(
             (*self, target),
-            (Self::Open, State::Doing)
-                | (Self::Open, State::Done)
-                | (Self::Doing, State::Done)
-                | (Self::Doing, State::Open)
-                | (Self::Done, State::Archived)
-                | (Self::Done, State::Open)
-                | (Self::Archived, State::Open)
+            (Self::Open, Self::Doing | Self::Done)
+                | (Self::Doing, Self::Done | Self::Open)
+                | (Self::Done, Self::Archived | Self::Open)
+                | (Self::Archived, Self::Open)
         );
 
         if allowed {
@@ -83,18 +85,13 @@ impl State {
 }
 
 /// Human override for computed priority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Urgency {
     Urgent,
+    #[default]
     Default,
     Punt,
-}
-
-impl Default for Urgency {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl Urgency {
@@ -128,11 +125,11 @@ impl<'de> serde::Deserialize<'de> for Size {
     {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
-            "xxs" | "xs" => Ok(Size::Xs),
-            "s" => Ok(Size::S),
-            "m" => Ok(Size::M),
-            "l" => Ok(Size::L),
-            "xxl" | "xl" => Ok(Size::Xl),
+            "xxs" | "xs" => Ok(Self::Xs),
+            "s" => Ok(Self::S),
+            "m" => Ok(Self::M),
+            "l" => Ok(Self::L),
+            "xxl" | "xl" => Ok(Self::Xl),
             other => Err(serde::de::Error::unknown_variant(
                 other,
                 &["xs", "s", "m", "l", "xl"],

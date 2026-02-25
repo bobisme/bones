@@ -156,13 +156,10 @@ pub fn run_move(
         }
 
         // Validate parent exists and is a goal
-        let parent_item = match get_item(&conn, parent_id.as_str(), false)? {
-            Some(item) => item,
-            None => {
-                let err = anyhow::anyhow!("parent item not found: {}", parent_id.as_str());
-                render_error(output, &CliError::new(err.to_string()))?;
-                return Err(err);
-            }
+        let parent_item = if let Some(item) = get_item(&conn, parent_id.as_str(), false)? { item } else {
+            let err = anyhow::anyhow!("parent item not found: {}", parent_id.as_str());
+            render_error(output, &CliError::new(err.to_string()))?;
+            return Err(err);
         };
 
         if parent_item.kind != "goal" {
@@ -179,17 +176,16 @@ pub fn run_move(
     } else {
         // Moving to top-level: still validate the item itself exists if DB is available
         let db_path = project_root.join(".bones").join("bones.db");
-        if let Some(conn) = try_open_projection(&db_path)? {
-            if !bones_core::db::query::item_exists(&conn, item_id.as_str())? {
+        if let Some(conn) = try_open_projection(&db_path)?
+            && !bones_core::db::query::item_exists(&conn, item_id.as_str())? {
                 let err = anyhow::anyhow!("item not found: {}", item_id.as_str());
                 render_error(output, &CliError::new(err.to_string()))?;
                 return Err(err);
             }
-        }
     }
 
     // Emit the parent update event
-    let parent_str = new_parent.as_ref().map(|p| p.as_str());
+    let parent_str = new_parent.as_ref().map(bones_core::model::item_id::ItemId::as_str);
     if let Err(e) = emit_parent_event(project_root, &agent, &item_id, parent_str) {
         render_error(output, &CliError::new(e.to_string()))?;
         return Err(e);

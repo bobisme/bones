@@ -54,19 +54,16 @@ pub fn run_status(
     project_root: &Path,
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     // Try to resolve agent identity (optional — status works without it).
@@ -150,7 +147,7 @@ pub fn run_status(
 fn count_blocked_items(conn: &rusqlite::Connection) -> u64 {
     // item_dependencies: item_id depends_on depends_on_item_id
     // link_type = 'blocks' means depends_on_item_id blocks item_id
-    let sql = r#"
+    let sql = r"
         SELECT COUNT(DISTINCT d.item_id)
         FROM item_dependencies d
         JOIN items blocker ON blocker.item_id = d.depends_on_item_id
@@ -160,7 +157,7 @@ fn count_blocked_items(conn: &rusqlite::Connection) -> u64 {
           AND blocker.is_deleted = 0
           AND blocked.state NOT IN ('done', 'archived')
           AND blocked.is_deleted = 0
-    "#;
+    ";
 
     conn.query_row(sql, [], |row| row.get::<_, u64>(0))
         .unwrap_or(0)
@@ -216,7 +213,7 @@ fn render_status_human(report: &StatusOutput, w: &mut dyn Write) -> std::io::Res
 
 fn render_status_text(report: &StatusOutput, w: &mut dyn Write) -> std::io::Result<()> {
     if let Some(ref agent) = report.agent {
-        writeln!(w, "agent  {}", agent)?;
+        writeln!(w, "agent  {agent}")?;
     } else {
         writeln!(w, "agent  (none)")?;
     }

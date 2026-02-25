@@ -101,51 +101,42 @@ pub fn run_show(
     let db_path = project_root.join(".bones/bones.db");
 
     // Gracefully handle missing / corrupt projection
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     // Resolve the ID (possibly partial)
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found", args.id),
-                    "use `bn list` to see available items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", args.id);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{}' not found", args.id),
+                "use `bn list` to see available items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{}' not found", args.id);
     };
 
     // Fetch item
-    let item = match query::get_item(&conn, &resolved_id, false)? {
-        Some(i) => i,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found", resolved_id),
-                    "the item may have been deleted; use `bn list --state done` to find closed items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", resolved_id);
-        }
+    let item = if let Some(i) = query::get_item(&conn, &resolved_id, false)? { i } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{resolved_id}' not found"),
+                "the item may have been deleted; use `bn list --state done` to find closed items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{resolved_id}' not found");
     };
 
     // Fetch related data
@@ -259,10 +250,10 @@ fn render_show_text(item: &ShowItem, w: &mut dyn Write) -> std::io::Result<()> {
     writeln!(w, "state:       {}", item.state)?;
     writeln!(w, "urgency:     {}", item.urgency)?;
     if let Some(ref size) = item.size {
-        writeln!(w, "size:        {}", size)?;
+        writeln!(w, "size:        {size}")?;
     }
     if let Some(ref parent) = item.parent_id {
-        writeln!(w, "parent:      {}", parent)?;
+        writeln!(w, "parent:      {parent}")?;
     }
     if !item.labels.is_empty() {
         writeln!(w, "labels:      {}", item.labels.join(", "))?;
@@ -333,7 +324,13 @@ pub fn resolve_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
     }
 
     // 2. Try prefixing "bn-" if not already present
-    if !input.starts_with("bn-") {
+    if input.starts_with("bn-") {
+        // 3b. Prefix match on "{input}%" (already has "bn-")
+        let like_pattern = format!("{input}%");
+        if let Some(resolved) = resolve_prefix_match(conn, input, &like_pattern)? {
+            return Ok(Some(resolved));
+        }
+    } else {
         let with_prefix = format!("bn-{input}");
         let exact2: Option<String> = conn
             .query_row(
@@ -348,12 +345,6 @@ pub fn resolve_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
 
         // 3a. Prefix match on "bn-{input}%"
         let like_pattern = format!("bn-{input}%");
-        if let Some(resolved) = resolve_prefix_match(conn, input, &like_pattern)? {
-            return Ok(Some(resolved));
-        }
-    } else {
-        // 3b. Prefix match on "{input}%" (already has "bn-")
-        let like_pattern = format!("{input}%");
         if let Some(resolved) = resolve_prefix_match(conn, input, &like_pattern)? {
             return Ok(Some(resolved));
         }

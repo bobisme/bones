@@ -151,13 +151,13 @@ impl CacheColumns {
 
     /// Return the number of events (rows) in this column set.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.timestamps.len()
     }
 
     /// Return `true` if there are no events in this column set.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.timestamps.is_empty()
     }
 }
@@ -165,7 +165,7 @@ impl CacheColumns {
 /// A single row extracted from the column arrays.
 ///
 /// Useful for inspecting individual events without rebuilding a full [`Event`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnRow {
     /// Wall-clock timestamp.
     pub wall_ts_us: i64,

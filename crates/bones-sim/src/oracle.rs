@@ -19,7 +19,7 @@ pub struct OracleResult {
 impl OracleResult {
     /// Construct a passing result.
     #[must_use]
-    fn pass() -> Self {
+    const fn pass() -> Self {
         Self {
             passed: true,
             violations: Vec::new(),
@@ -28,7 +28,7 @@ impl OracleResult {
 
     /// Construct a failing result from one or more violations.
     #[must_use]
-    fn fail(violations: Vec<InvariantViolation>) -> Self {
+    const fn fail(violations: Vec<InvariantViolation>) -> Self {
         Self {
             passed: false,
             violations,
@@ -37,7 +37,7 @@ impl OracleResult {
 
     /// Merge another result into this one (failures accumulate).
     #[must_use]
-    fn merge(mut self, other: OracleResult) -> Self {
+    fn merge(mut self, other: Self) -> Self {
         if !other.passed {
             self.passed = false;
             self.violations.extend(other.violations);
@@ -361,8 +361,8 @@ impl ConvergenceOracle {
                 }
 
                 // The first sequence must be 0 (can't have seq=N without seq=0).
-                if let Some(&first) = seqs.first() {
-                    if first != 0 {
+                if let Some(&first) = seqs.first()
+                    && first != 0 {
                         violations.push(InvariantViolation::CausalConsistency {
                             observer_agent: state.id,
                             source_agent,
@@ -370,7 +370,6 @@ impl ConvergenceOracle {
                             present_higher_seq: first,
                         });
                     }
-                }
             }
         }
 
@@ -460,11 +459,9 @@ impl ConvergenceOracle {
         let commutativity = Self::check_commutativity(events, rng, 8);
 
         // For idempotence, use the first state (all are identical after convergence).
-        let idempotence = if let Some(first) = states.first() {
-            Self::check_idempotence(first, events)
-        } else {
-            OracleResult::pass()
-        };
+        let idempotence = states
+            .first()
+            .map_or_else(OracleResult::pass, |first| Self::check_idempotence(first, events));
 
         let causality = Self::check_causality(states);
 
@@ -481,20 +478,21 @@ impl ConvergenceOracle {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Decode the source agent from an event_id encoded as `(source << 32) | seq`.
+/// Decode the source agent from an `event_id` encoded as `(source << 32) | seq`.
 #[inline]
 fn decode_source(event_id: u64) -> usize {
     usize::try_from(event_id >> 32).unwrap_or(usize::MAX)
 }
 
-/// Decode the per-agent sequence from an event_id.
+/// Decode the per-agent sequence from an `event_id`.
 #[inline]
-fn decode_seq(event_id: u64) -> u64 {
+const fn decode_seq(event_id: u64) -> u64 {
     event_id & 0xFFFF_FFFF
 }
 
 /// Compute triage coverage score in `[0.0, 1.0]`.
 #[inline]
+#[allow(clippy::cast_precision_loss)]
 fn triage_score(known: usize, total: usize) -> f64 {
     if total == 0 {
         0.0

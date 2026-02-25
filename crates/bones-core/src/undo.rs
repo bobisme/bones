@@ -249,7 +249,7 @@ fn initial_create_field_value(create: &CreateData, field: &str) -> Option<serde_
             .map(|d| serde_json::Value::String(d.clone())),
         "size" => create
             .size
-            .map(|s| serde_json::to_value(s).unwrap_or_else(|_| serde_json::Value::Null)),
+            .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null)),
         "urgency" => serde_json::to_value(create.urgency).ok(),
         "labels" => Some(serde_json::Value::Array(
             create

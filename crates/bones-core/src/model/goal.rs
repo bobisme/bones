@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-/// SQLite projection handle used by goal model helpers.
+/// `SQLite` projection handle used by goal model helpers.
 pub type Db = Connection;
 
 /// Safety cap for containment-depth validation.
@@ -47,7 +47,7 @@ impl GoalPolicy {
     /// `goals.auto_complete = true` enables both auto-close and auto-reopen.
     /// `goals.auto_complete = false` disables both.
     #[must_use]
-    pub fn from_project_config(config: &ProjectConfig) -> Self {
+    pub const fn from_project_config(config: &ProjectConfig) -> Self {
         let enabled = config.goals.auto_complete;
         Self {
             auto_close: enabled,
@@ -87,11 +87,11 @@ pub struct GoalProgress {
 }
 
 impl GoalProgress {
-    fn active_children(self) -> usize {
+    const fn active_children(self) -> usize {
         self.open_count + self.doing_count
     }
 
-    fn all_active_complete(self) -> bool {
+    const fn all_active_complete(self) -> bool {
         self.total_children > 0 && self.active_children() == 0
     }
 }
@@ -124,16 +124,16 @@ pub fn goal_policy_override_from_labels(labels: &[String]) -> GoalPolicyOverride
             _ => {}
         }
 
-        if let Some(value) = normalized.strip_prefix("goal:auto-close=") {
-            if let Some(parsed) = parse_policy_bool(value) {
-                override_policy.auto_close = Some(parsed);
-            }
+        if let Some(value) = normalized.strip_prefix("goal:auto-close=")
+            && let Some(parsed) = parse_policy_bool(value)
+        {
+            override_policy.auto_close = Some(parsed);
         }
 
-        if let Some(value) = normalized.strip_prefix("goal:auto-reopen=") {
-            if let Some(parsed) = parse_policy_bool(value) {
-                override_policy.auto_reopen = Some(parsed);
-            }
+        if let Some(value) = normalized.strip_prefix("goal:auto-reopen=")
+            && let Some(parsed) = parse_policy_bool(value)
+        {
+            override_policy.auto_reopen = Some(parsed);
         }
     }
 
@@ -160,6 +160,10 @@ pub fn check_auto_close(goal_id: &str, db: &Db) -> Option<Event> {
 }
 
 /// Evaluate whether a goal should auto-close under the provided project policy.
+///
+/// # Errors
+///
+/// Returns an error if the goal cannot be loaded or is not a goal kind.
 pub fn check_auto_close_with_policy(
     goal_id: &str,
     db: &Db,
@@ -201,6 +205,10 @@ pub fn check_auto_reopen(goal_id: &str, db: &Db) -> Option<Event> {
 }
 
 /// Evaluate whether a goal should auto-reopen under the provided project policy.
+///
+/// # Errors
+///
+/// Returns an error if the goal cannot be loaded or is not a goal kind.
 pub fn check_auto_reopen_with_policy(
     goal_id: &str,
     db: &Db,
@@ -229,6 +237,11 @@ pub fn check_auto_reopen_with_policy(
 }
 
 /// Compute direct-child progress summary for a goal.
+///
+/// # Errors
+///
+/// Returns an error if the goal cannot be loaded, is not a goal kind,
+/// or the children query fails.
 pub fn goal_progress(goal_id: &str, db: &Db) -> Result<GoalProgress> {
     require_goal(db, goal_id)?;
 
@@ -254,6 +267,12 @@ pub fn goal_progress(goal_id: &str, db: &Db) -> Result<GoalProgress> {
 
 /// Validate that adding `child_id` under `parent_id` will not create circular
 /// containment, and that the ancestry depth stays under a safety threshold.
+///
+/// # Errors
+///
+/// Returns an error if circular containment is detected, the parent is not
+/// a goal, items cannot be loaded, or the containment depth exceeds the
+/// safety limit.
 pub fn check_circular_containment(parent_id: &str, child_id: &str, db: &Db) -> Result<()> {
     check_circular_containment_with_limit(parent_id, child_id, db, MAX_CONTAINMENT_DEPTH)
 }

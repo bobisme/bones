@@ -31,7 +31,7 @@ const URGENT_CHAIN_MAX_DEPTH: usize = 6;
 const PAGERANK_CACHE_FILE: &str = "triage_pagerank.json";
 
 #[derive(Debug, Clone)]
-pub(crate) struct RankedItem {
+pub struct RankedItem {
     pub id: String,
     pub title: String,
     pub size: Option<String>,
@@ -44,7 +44,7 @@ pub(crate) struct RankedItem {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TriageSnapshot {
+pub struct TriageSnapshot {
     pub ranked: Vec<RankedItem>,
     pub unblocked_ranked: Vec<RankedItem>,
     pub needs_decomposition: Vec<RankedItem>,
@@ -65,7 +65,7 @@ struct PageRankDiskCache {
     edges: Vec<(String, String)>,
 }
 
-pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSnapshot> {
+pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSnapshot> {
     let all_items = query::list_items(
         conn,
         &ItemFilter {
@@ -134,8 +134,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             critical_path
                 .item_timings
                 .get(id)
-                .map(|timing| timing.earliest_finish as f64)
-                .unwrap_or(0.0)
+                .map_or(0.0, |timing| timing.earliest_finish as f64)
         })
         .collect();
     let pr_raw: Vec<f64> = ids
@@ -170,8 +169,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
         .map(|id| {
             urgent_chain_pressure
                 .get(id)
-                .map(|r| r.pressure)
-                .unwrap_or(0.0)
+                .map_or(0.0, |r| r.pressure)
         })
         .collect();
     let urgent_chain_norm = normalize_metric(&urgent_chain_raw);
@@ -206,9 +204,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             );
             let topology_signal = (hub_norm[idx] + auth_norm[idx] + eigen_norm[idx]) / 3.0;
             let score = if score.is_finite() {
-                score
-                    + (TOPOLOGY_BLEND_WEIGHT * topology_signal)
-                    + (URGENT_CHAIN_BLEND_WEIGHT * urgent_chain_norm[idx])
+                URGENT_CHAIN_BLEND_WEIGHT.mul_add(urgent_chain_norm[idx], TOPOLOGY_BLEND_WEIGHT.mul_add(topology_signal, score))
             } else {
                 score
             };
@@ -221,8 +217,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
                 .unwrap_or(0);
             let chain_result = urgent_chain_pressure.get(&item.item_id);
 
-            let mut drivers = vec![
-                ("critical-path", weights.alpha * cp_norm[idx]),
+            let mut drivers = [("critical-path", weights.alpha * cp_norm[idx]),
                 ("pagerank", weights.beta * pr_norm[idx]),
                 ("betweenness", weights.gamma * bc_norm[idx]),
                 ("topology", TOPOLOGY_BLEND_WEIGHT * topology_signal),
@@ -231,16 +226,14 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
                     URGENT_CHAIN_BLEND_WEIGHT * urgent_chain_norm[idx],
                 ),
                 ("urgency", weights.delta * urgency_component(urgency)),
-                ("decay", weights.epsilon * decay_component(decay_days)),
-            ];
+                ("decay", weights.epsilon * decay_component(decay_days))];
             drivers.sort_by(|a, b| b.1.total_cmp(&a.1));
 
-            let driver_a = drivers.first().map(|(name, _)| *name).unwrap_or("priority");
-            let driver_b = drivers.get(1).map(|(name, _)| *name).unwrap_or("signal");
+            let driver_a = drivers.first().map_or("priority", |(name, _)| *name);
+            let driver_b = drivers.get(1).map_or("signal", |(name, _)| *name);
 
             let has_urgent_sources = chain_result
-                .map(|r| !r.urgent_sources.is_empty())
-                .unwrap_or(false);
+                .is_some_and(|r| !r.urgent_sources.is_empty());
 
             let explanation = if urgency == Urgency::Urgent {
                 format!(
@@ -321,7 +314,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
     let mut needs_decomposition: Vec<RankedItem> = ranked
         .iter()
         .filter(|item| {
-            matches!(item.size.as_deref(), Some("l") | Some("xl"))
+            matches!(item.size.as_deref(), Some("l" | "xl"))
                 && !ids_with_children.contains(item.id.as_str())
         })
         .filter(|item| {
@@ -329,8 +322,7 @@ pub(crate) fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<Tr
             active_items
                 .iter()
                 .find(|ai| ai.item_id == item.id)
-                .map(|ai| ai.kind != "goal")
-                .unwrap_or(true)
+                .is_none_or(|ai| ai.kind != "goal")
         })
         .cloned()
         .collect();
@@ -437,7 +429,7 @@ fn compute_pagerank(conn: &Connection, normalized: &NormalizedGraph) -> PageRank
     result
 }
 
-fn pagerank_method_label(method: PageRankMethod) -> &'static str {
+const fn pagerank_method_label(method: PageRankMethod) -> &'static str {
     match method {
         PageRankMethod::Full => "full",
         PageRankMethod::Incremental => "incremental",
@@ -793,7 +785,7 @@ fn compute_direct_urgent_unblocks(
     counts
 }
 
-fn urgent_chain_seed(urgency: Urgency) -> f64 {
+const fn urgent_chain_seed(urgency: Urgency) -> f64 {
     match urgency {
         Urgency::Urgent => 1.0,
         Urgency::Default => 0.15,
@@ -801,7 +793,7 @@ fn urgent_chain_seed(urgency: Urgency) -> f64 {
     }
 }
 
-fn urgency_component(urgency: Urgency) -> f64 {
+const fn urgency_component(urgency: Urgency) -> f64 {
     match urgency {
         Urgency::Urgent => 1.0,
         Urgency::Default => 0.5,

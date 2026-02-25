@@ -3,7 +3,7 @@
 //! Emits an `item.move` event transitioning the bone to the Open state.
 //! Valid source states: done→open, archived→open.
 //!
-//! Reopening uses the EpochPhase CRDT semantics: the new epoch ensures
+//! Reopening uses the `EpochPhase` CRDT semantics: the new epoch ensures
 //! the reopen wins against concurrent operations in the prior epoch.
 //! The event carries `{"reopen": true}` in its extra fields to signal
 //! epoch-increment intent to CRDT-aware projectors.
@@ -95,20 +95,19 @@ fn run_reopen_single(
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
     let resolved_id = resolve_item_id(conn, raw_id)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{raw_id}' not found"))?;
 
     let item = query::get_item(conn, &resolved_id, false)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{resolved_id}' not found"))?;
 
     let current_state: State = item.state.parse().map_err(|_| {
         anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
     })?;
 
     match current_state {
-        State::Open => anyhow::bail!("cannot reopen '{}': item is already open", resolved_id),
+        State::Open => anyhow::bail!("cannot reopen '{resolved_id}': item is already open"),
         State::Doing => anyhow::bail!(
-            "cannot reopen '{}': item is in progress (doing)",
-            resolved_id
+            "cannot reopen '{resolved_id}': item is in progress (doing)"
         ),
         State::Done | State::Archived => {}
     }
@@ -208,7 +207,7 @@ pub fn run_reopen(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     let db_path = bones_dir.join("bones.db");

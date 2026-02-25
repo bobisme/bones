@@ -2,6 +2,12 @@ use nalgebra::DMatrix;
 use petgraph::visit::EdgeRef;
 use std::collections::HashMap;
 
+/// Compute Betti numbers (H0, H1) for the given graph.
+///
+/// # Errors
+///
+/// Returns an error if the graph has more than 2000 nodes or 5000 edges
+/// (too large for the homology calculation).
 pub fn compute_betti_numbers<N, E>(graph: &petgraph::Graph<N, E>) -> anyhow::Result<(usize, usize)>
 where
     N: std::hash::Hash + Eq + Clone,
@@ -11,9 +17,7 @@ where
 
     if n > 2000 || m > 5000 {
         return Err(anyhow::anyhow!(
-            "Graph too large for homology calculation (nodes={}, edges={})",
-            n,
-            m
+            "Graph too large for homology calculation (nodes={n}, edges={m})"
         ));
     }
 
@@ -65,8 +69,7 @@ where
 
     if t > 50000 {
         return Err(anyhow::anyhow!(
-            "Too many triangles for homology calculation ({})",
-            t
+            "Too many triangles for homology calculation ({t})"
         ));
     }
 
@@ -75,9 +78,9 @@ where
     let mut d2 = DMatrix::<f64>::zeros(m, t);
 
     for (col, (e1_id, e2_id, e3_id)) in triangles.iter().enumerate() {
-        let r1 = edge_map[&e1_id]; // +1
-        let r2 = edge_map[&e2_id]; // +1
-        let r3 = edge_map[&e3_id]; // -1
+        let r1 = edge_map[e1_id]; // +1
+        let r2 = edge_map[e2_id]; // +1
+        let r3 = edge_map[e3_id]; // -1
 
         d2[(r1, col)] += 1.0;
         d2[(r2, col)] += 1.0;
@@ -91,15 +94,12 @@ where
     let dim_ker_d1 = cycle_space_dimension(m, n, betti_0);
 
     // dim(H_1) = dim(Ker(d_1)) - rank(d_2)
-    let betti_1 = if dim_ker_d1 >= rank_d2 {
-        dim_ker_d1 - rank_d2
-    } else {
-        0
-    };
+    let betti_1 = dim_ker_d1.saturating_sub(rank_d2);
 
     Ok((betti_0, betti_1))
 }
 
+#[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 fn cycle_space_dimension(edges: usize, nodes: usize, components: usize) -> usize {
     let dim = (edges as isize) - (nodes as isize) + (components as isize);
     dim.max(0) as usize

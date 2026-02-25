@@ -16,6 +16,10 @@ pub type RawEvent = Event;
 /// Apply version-specific transforms to an event parsed from an older format.
 ///
 /// Returns the event upgraded to the current-version representation.
+///
+/// # Errors
+///
+/// Returns an error if `from_version` is not a recognized format version.
 pub fn migrate_event(event: RawEvent, from_version: u32) -> Result<Event> {
     match from_version {
         1 => migrate_v1_to_current(event),
@@ -27,7 +31,7 @@ pub fn migrate_event(event: RawEvent, from_version: u32) -> Result<Event> {
 /// V1 -> current migration.
 ///
 /// Currently a no-op passthrough because v1 is the active format.
-fn migrate_v1_to_current(event: RawEvent) -> Result<Event> {
+const fn migrate_v1_to_current(event: RawEvent) -> Result<Event> {
     Ok(event)
 }
 

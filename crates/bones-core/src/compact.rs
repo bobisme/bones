@@ -124,11 +124,14 @@ pub struct SnapshotPayload {
 
     // -- Audit metadata --
     /// Number of original events that were compacted into this snapshot.
-    pub _compacted_from: usize,
+    #[serde(rename = "_compacted_from")]
+    pub compacted_from: usize,
     /// Wall-clock timestamp (microseconds) of the earliest original event.
-    pub _earliest_ts: i64,
+    #[serde(rename = "_earliest_ts")]
+    pub earliest_ts: i64,
     /// Wall-clock timestamp (microseconds) of the latest original event.
-    pub _latest_ts: i64,
+    #[serde(rename = "_latest_ts")]
+    pub latest_ts: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +143,7 @@ impl WorkItemState {
     ///
     /// This captures per-field clock metadata needed for correct lattice
     /// merge when the snapshot is applied on another replica.
+    #[must_use] 
     pub fn to_snapshot_payload(
         &self,
         item_id: &str,
@@ -164,9 +168,9 @@ impl WorkItemState {
             comments: self.comments.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
-            _compacted_from: compacted_from,
-            _earliest_ts: earliest_ts,
-            _latest_ts: latest_ts,
+            compacted_from,
+            earliest_ts,
+            latest_ts,
         }
     }
 
@@ -175,6 +179,7 @@ impl WorkItemState {
     /// The resulting state can be merged with other states via the normal
     /// `WorkItemState::merge` — this is how snapshots participate in the
     /// lattice.
+    #[must_use] 
     pub fn from_snapshot_payload(payload: &SnapshotPayload) -> Self {
         Self {
             title: LwwRegister::from(&payload.title),
@@ -234,11 +239,17 @@ pub struct CompactionReport {
 ///
 /// `Some(Event)` with the snapshot, or `None` if the item has redacted events
 /// (compaction must not reintroduce redacted content).
-pub fn compact_item(
+///
+/// # Panics
+///
+/// Panics if the `SnapshotPayload` cannot be serialized to JSON. This should
+/// never happen with valid CRDT state.
+#[must_use]
+pub fn compact_item<S: ::std::hash::BuildHasher>(
     item_id: &str,
     events: &[Event],
     agent: &str,
-    redacted_hashes: &HashSet<String>,
+    redacted_hashes: &HashSet<String, S>,
 ) -> Option<Event> {
     if events.is_empty() {
         return None;
@@ -322,6 +333,7 @@ pub fn compact_item(
 /// * `state` — The current CRDT state of the item.
 /// * `min_age_days` — Minimum days in done/archived before compaction.
 /// * `now_us` — Current wall-clock time in microseconds.
+#[must_use] 
 pub fn is_eligible(state: &WorkItemState, min_age_days: u32, now_us: i64) -> bool {
     // Must be in a terminal phase.
     let phase = state.phase();
@@ -335,7 +347,7 @@ pub fn is_eligible(state: &WorkItemState, min_age_days: u32, now_us: i64) -> boo
     }
 
     // Check age: updated_at represents when the item last changed state.
-    let age_us = now_us.saturating_sub(state.updated_at as i64);
+    let age_us = now_us.saturating_sub(state.updated_at.cast_signed());
     let min_age_us = i64::from(min_age_days) * 24 * 60 * 60 * 1_000_000;
 
     age_us >= min_age_us
@@ -345,7 +357,7 @@ pub fn is_eligible(state: &WorkItemState, min_age_days: u32, now_us: i64) -> boo
 ///
 /// # Arguments
 ///
-/// * `events_by_item` — Map from item_id to all events for that item.
+/// * `events_by_item` — Map from `item_id` to all events for that item.
 /// * `agent` — Agent identifier for snapshot events.
 /// * `min_age_days` — Minimum days in done/archived before compaction.
 /// * `now_us` — Current wall-clock time in microseconds.
@@ -353,13 +365,13 @@ pub fn is_eligible(state: &WorkItemState, min_age_days: u32, now_us: i64) -> boo
 ///
 /// # Returns
 ///
-/// A tuple of (snapshot_events, report).
-pub fn compact_items(
+/// A tuple of (`snapshot_events`, report).
+pub fn compact_items<S: ::std::hash::BuildHasher>(
     events_by_item: &BTreeMap<String, Vec<Event>>,
     agent: &str,
     min_age_days: u32,
     now_us: i64,
-    redacted_hashes: &HashSet<String>,
+    redacted_hashes: &HashSet<String, S>,
 ) -> (Vec<Event>, CompactionReport) {
     let mut snapshots = Vec::new();
     let mut report = CompactionReport {
@@ -420,6 +432,11 @@ pub fn compact_items(
 ///
 /// `Ok(true)` if the states match, `Ok(false)` if they diverge,
 /// or `Err` if the snapshot event cannot be parsed.
+///
+/// # Errors
+///
+/// Returns an error if the snapshot event cannot be deserialized into a
+/// `SnapshotPayload`.
 pub fn verify_compaction(
     item_id: &str,
     original_events: &[Event],
@@ -447,6 +464,10 @@ pub fn verify_compaction(
 /// If compaction is correct, the snapshot is the join of all events, so
 /// merging the snapshot with the original state should produce identical
 /// state (idempotency of join with self's join).
+///
+/// # Errors
+///
+/// Returns an error if the snapshot event cannot be deserialized.
 pub fn verify_lattice_join(original_events: &[Event], snapshot_event: &Event) -> Result<bool> {
     // Build original state.
     let mut original_state = WorkItemState::new();
@@ -466,6 +487,11 @@ pub fn verify_lattice_join(original_events: &[Event], snapshot_event: &Event) ->
 }
 
 /// Extract and deserialize the [`SnapshotPayload`] from an `item.snapshot` event.
+///
+/// # Errors
+///
+/// Returns an error if the event is not a snapshot type or if the payload
+/// cannot be deserialized.
 pub fn extract_snapshot_payload(event: &Event) -> Result<SnapshotPayload> {
     if event.event_type != EventType::Snapshot {
         bail!("expected item.snapshot event, got {}", event.event_type);
@@ -740,9 +766,9 @@ mod tests {
         let snapshot = compact_item("bn-test1", &events, "compactor", &redacted).unwrap();
         let payload = extract_snapshot_payload(&snapshot).unwrap();
 
-        assert_eq!(payload._compacted_from, 6);
-        assert_eq!(payload._earliest_ts, 1_000_000);
-        assert_eq!(payload._latest_ts, 6_000_000);
+        assert_eq!(payload.compacted_from, 6);
+        assert_eq!(payload.earliest_ts, 1_000_000);
+        assert_eq!(payload.latest_ts, 6_000_000);
     }
 
     #[test]
@@ -805,7 +831,7 @@ mod tests {
 
         assert_eq!(roundtripped.item_id, payload.item_id);
         assert_eq!(roundtripped.title.value, payload.title.value);
-        assert_eq!(roundtripped._compacted_from, payload._compacted_from);
+        assert_eq!(roundtripped.compacted_from, payload.compacted_from);
     }
 
     #[test]

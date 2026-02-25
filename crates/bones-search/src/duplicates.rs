@@ -8,7 +8,7 @@
 //! 3. **Structural search** — matches items with similar metadata/graph structure (optional)
 //!
 //! Results are fused using Reciprocal Rank Fusion (RRF) and classified into
-//! risk levels (likely_duplicate, possibly_related, maybe_related, none).
+//! risk levels (`likely_duplicate`, `possibly_related`, `maybe_related`, none).
 
 use crate::fusion::{DupCandidate, SearchConfig, classify_risk, hybrid_search_with_graph};
 use crate::semantic::SemanticModel;
@@ -21,6 +21,10 @@ use rusqlite::Connection;
 /// Runs hybrid search and converts results into duplicate candidates with
 /// risk classifications. Falls back gracefully to lexical-only when semantic
 /// model loading or inference is unavailable.
+///
+/// # Errors
+///
+/// Returns an error if the underlying search or database query fails.
 pub fn find_duplicates(
     query_title: &str,
     db: &Connection,
@@ -41,6 +45,10 @@ pub fn find_duplicates(
 /// Find potential duplicate candidates using an already loaded semantic model.
 ///
 /// This avoids repeated model loads across batch workflows.
+///
+/// # Errors
+///
+/// Returns an error if the underlying search or database query fails.
 pub fn find_duplicates_with_model(
     query_title: &str,
     db: &Connection,
@@ -54,6 +62,7 @@ pub fn find_duplicates_with_model(
     let has_semantic = fused.iter().any(|c| c.semantic_rank != usize::MAX);
     let has_structural = fused.iter().any(|c| c.structural_rank != usize::MAX);
     let active_layers = 1 + usize::from(has_semantic) + usize::from(has_structural);
+    #[allow(clippy::cast_precision_loss)]
     let max_rrf = active_layers as f32 / (config.rrf_k as f32 + 1.0);
     let normalize_rrf = |score: f32| {
         if max_rrf <= f32::EPSILON {

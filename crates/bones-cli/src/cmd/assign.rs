@@ -74,20 +74,17 @@ fn resolve_existing_item_id(
     raw_id: &str,
     output: OutputMode,
 ) -> anyhow::Result<String> {
-    match resolve_item_id(conn, raw_id)? {
-        Some(id) => Ok(id),
-        None => {
-            let msg = format!("item '{raw_id}' not found");
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!(msg);
-        }
+    if let Some(id) = resolve_item_id(conn, raw_id)? { Ok(id) } else {
+        let msg = format!("item '{raw_id}' not found");
+        render_error(
+            output,
+            &CliError::with_details(
+                &msg,
+                "Check the item ID with 'bn list' or 'bn show'",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!(msg);
     }
 }
 
@@ -208,7 +205,7 @@ fn run_assign_action(
 
     let result = AssignOutput {
         ok: true,
-        item_id: item_id.clone(),
+        item_id,
         agent: assignee.to_string(),
         action: action.to_string(),
         event_hash: event.event_hash,

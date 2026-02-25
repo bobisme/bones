@@ -24,9 +24,9 @@
 //!
 //! | Score Range       | Classification     |
 //! |-------------------|--------------------|
-//! | >= 0.90           | LikelyDuplicate    |
-//! | 0.70..0.89        | PossiblyRelated    |
-//! | 0.50..0.69        | MaybeRelated       |
+//! | >= 0.90           | `LikelyDuplicate`    |
+//! | 0.70..0.89        | `PossiblyRelated`    |
+//! | 0.50..0.69        | `MaybeRelated`       |
 //! | < 0.50            | None               |
 //!
 //! Thresholds are configurable via project config (`.bones/config.toml`).
@@ -155,6 +155,8 @@ pub struct DupCandidate {
 /// let result = rrf_fuse(&lex, &sem, &str, 60);
 /// assert!(!result.is_empty());
 /// ```
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
 pub fn rrf_fuse(
     lexical: &[&str],
     semantic: &[&str],
@@ -240,6 +242,7 @@ pub fn rrf_fuse(
 ///     println!("{}: {} ({})", cand.item_id, cand.composite_score, cand.risk);
 /// }
 /// ```
+#[must_use] 
 pub fn build_dup_candidates(
     fused: &[(String, f32)],
     lexical: &[&str],
@@ -325,6 +328,7 @@ pub fn build_dup_candidates(
 /// assert_eq!(classify_risk(0.95, &config), DuplicateRisk::LikelyDuplicate);
 /// assert_eq!(classify_risk(0.75, &config), DuplicateRisk::PossiblyRelated);
 /// ```
+#[must_use] 
 pub fn classify_risk(score: f32, config: &SearchConfig) -> DuplicateRisk {
     if score >= config.likely_duplicate_threshold {
         DuplicateRisk::LikelyDuplicate
@@ -347,15 +351,15 @@ pub struct SearchConfig {
     #[serde(default = "default_rrf_k")]
     pub rrf_k: usize,
 
-    /// Score threshold for LikelyDuplicate classification (default 0.90).
+    /// Score threshold for `LikelyDuplicate` classification (default 0.90).
     #[serde(default = "default_likely_duplicate_threshold")]
     pub likely_duplicate_threshold: f32,
 
-    /// Score threshold for PossiblyRelated classification (default 0.70).
+    /// Score threshold for `PossiblyRelated` classification (default 0.70).
     #[serde(default = "default_possibly_related_threshold")]
     pub possibly_related_threshold: f32,
 
-    /// Score threshold for MaybeRelated classification (default 0.50).
+    /// Score threshold for `MaybeRelated` classification (default 0.50).
     #[serde(default = "default_maybe_related_threshold")]
     pub maybe_related_threshold: f32,
 }

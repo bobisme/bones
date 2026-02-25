@@ -62,7 +62,7 @@ impl Phase {
     }
 
     /// All phases in rank order.
-    pub const ALL: [Phase; 4] = [Self::Open, Self::Doing, Self::Done, Self::Archived];
+    pub const ALL: [Self; 4] = [Self::Open, Self::Doing, Self::Done, Self::Archived];
 }
 
 impl PartialOrd for Phase {
@@ -116,7 +116,7 @@ pub struct EpochPhaseState {
 impl EpochPhaseState {
     /// Create a new state at epoch 0, phase Open.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             epoch: 0,
             phase: Phase::Open,
@@ -125,7 +125,7 @@ impl EpochPhaseState {
 
     /// Create a state with specific epoch and phase.
     #[must_use]
-    pub fn with(epoch: u64, phase: Phase) -> Self {
+    pub const fn with(epoch: u64, phase: Phase) -> Self {
         Self { epoch, phase }
     }
 
@@ -133,6 +133,11 @@ impl EpochPhaseState {
     ///
     /// Returns `Err` if the target phase has a lower rank than the current
     /// phase (within the same epoch, phases only move forward).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateError::InvalidTransition`] if the target phase has
+    /// a rank equal to or lower than the current phase.
     pub fn advance(&mut self, target: Phase) -> Result<(), StateError> {
         if target <= self.phase {
             return Err(StateError::InvalidTransition {
@@ -149,7 +154,7 @@ impl EpochPhaseState {
     ///
     /// This is valid from any phase. The epoch increment ensures
     /// this reopen wins against concurrent operations in the old epoch.
-    pub fn reopen(&mut self) {
+    pub const fn reopen(&mut self) {
         self.epoch += 1;
         self.phase = Phase::Open;
     }

@@ -98,51 +98,42 @@ pub fn run_similar(
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
 
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(c) => c,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     // Resolve potentially partial ID
-    let resolved_id = match resolve_item_id(&conn, &args.id)? {
-        Some(id) => id,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found", args.id),
-                    "use `bn list` to see available items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", args.id);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{}' not found", args.id),
+                "use `bn list` to see available items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{}' not found", args.id);
     };
 
     // Fetch the source item
-    let source = match query::get_item(&conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("item '{}' not found or deleted", resolved_id),
-                    "use `bn list` to see available items",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("item '{}' not found", resolved_id);
-        }
+    let source = if let Some(item) = query::get_item(&conn, &resolved_id, false)? { item } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("item '{resolved_id}' not found or deleted"),
+                "use `bn list` to see available items",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("item '{resolved_id}' not found");
     };
 
     // Build a sanitized FTS query from title + optional description.

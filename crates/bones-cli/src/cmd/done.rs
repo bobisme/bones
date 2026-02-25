@@ -2,7 +2,7 @@
 //!
 //! Validates the bone exists and is in a valid source state (open→done or
 //! doing→done), emits an `item.move` event with `{state: "done"}`, projects
-//! the state change into SQLite, and outputs the result.
+//! the state change into `SQLite`, and outputs the result.
 //!
 //! Supports `--reason` flag for recording why the bone is done. When a goal's
 //! last open/doing child is completed, goal auto-complete emits an additional
@@ -167,10 +167,10 @@ fn run_done_single(
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
     let resolved_id = resolve_item_id(conn, raw_id)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{raw_id}' not found"))?;
 
     let item = query::get_item(conn, &resolved_id, false)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", resolved_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{resolved_id}' not found"))?;
 
     let current_state: State = item.state.parse().map_err(|_| {
         anyhow::anyhow!("item '{}' has invalid state '{}'", resolved_id, item.state)
@@ -239,8 +239,7 @@ fn run_done_single(
             let parent_move_data = MoveData {
                 state: State::Done,
                 reason: Some(format!(
-                    "auto-completed: all children of {} are done",
-                    parent_id
+                    "auto-completed: all children of {parent_id} are done"
                 )),
                 extra: BTreeMap::new(),
             };
@@ -339,7 +338,7 @@ pub fn run_done(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 3. Open projection DB

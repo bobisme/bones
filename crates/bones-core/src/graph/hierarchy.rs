@@ -66,7 +66,7 @@ pub struct GoalProgress {
 
 impl GoalProgress {
     /// Create a new zeroed `GoalProgress`.
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self {
             done: 0,
             in_progress: 0,
@@ -81,16 +81,17 @@ impl GoalProgress {
         if self.total == 0 {
             return 100.0;
         }
-        (self.done as f32 / self.total as f32) * 100.0
+        #[allow(clippy::cast_precision_loss)]
+        { (self.done as f32 / self.total as f32) * 100.0 }
     }
 
     /// Returns `true` if all children are done (or there are no children).
-    pub fn is_complete(&self) -> bool {
+    pub const fn is_complete(&self) -> bool {
         self.total == 0 || self.done == self.total
     }
 
     /// Number of children that are not yet done.
-    pub fn remaining(&self) -> u32 {
+    pub const fn remaining(&self) -> u32 {
         self.total.saturating_sub(self.done)
     }
 }
@@ -295,18 +296,18 @@ pub fn get_ancestors(conn: &Connection, item_id: &str) -> Result<Vec<QueryItem>,
 
     let mut current_parent_id = start.parent_id;
 
-    while let Some(parent_id) = current_parent_id {
+    while let Some(ref parent_id) = current_parent_id {
         if parent_id.is_empty() {
             break;
         }
         if !visited.insert(parent_id.clone()) {
             break; // cycle guard
         }
-        let parent = query::get_item(conn, &parent_id, false)
+        let parent = query::get_item(conn, parent_id, false)
             .with_context(|| format!("get_item '{parent_id}'"))?
             .ok_or_else(|| HierarchyError::ItemNotFound(parent_id.clone()))?;
 
-        current_parent_id = parent.parent_id.clone();
+        current_parent_id.clone_from(&parent.parent_id);
         ancestors.push(parent);
     }
 
@@ -373,7 +374,7 @@ fn require_goal(conn: &Connection, item_id: &str) -> Result<QueryItem, Hierarchy
     if item.kind != "goal" {
         return Err(HierarchyError::NotAGoal {
             item_id: item_id.to_string(),
-            actual_kind: item.kind.clone(),
+            actual_kind: item.kind,
         });
     }
 

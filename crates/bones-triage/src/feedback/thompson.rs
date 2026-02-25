@@ -141,7 +141,7 @@ impl From<FeedbackEntry> for FeedbackEvent {
 /// `feedback.weights_used`.
 pub fn update_from_feedback(profile: &mut AgentProfile, feedback: &FeedbackEvent) {
     if profile.agent_id != feedback.agent_id {
-        profile.agent_id = feedback.agent_id.clone();
+        profile.agent_id.clone_from(&feedback.agent_id);
     }
 
     let max_contribution = [
@@ -213,6 +213,10 @@ pub fn sample_weights(profile: &AgentProfile, rng: &mut impl Rng) -> CompositeWe
 }
 
 /// Append one feedback event to `.bones/feedback.jsonl`.
+///
+/// # Errors
+///
+/// Returns an error if the log file cannot be opened or written to.
 pub fn append_feedback_event(project_root: &Path, feedback: &FeedbackEvent) -> Result<()> {
     let log_path = feedback_log_path(project_root);
 
@@ -238,6 +242,10 @@ pub fn append_feedback_event(project_root: &Path, feedback: &FeedbackEvent) -> R
 }
 
 /// Load all feedback events from `.bones/feedback.jsonl`.
+///
+/// # Errors
+///
+/// Returns an error if the log file cannot be read or parsed.
 pub fn load_feedback_events(project_root: &Path) -> Result<Vec<FeedbackEvent>> {
     let log_path = feedback_log_path(project_root);
     if !log_path.exists() {
@@ -277,6 +285,10 @@ pub fn load_feedback_events(project_root: &Path) -> Result<Vec<FeedbackEvent>> {
 /// Load one agent profile from `.bones/agent_profiles/<agent>.json`.
 ///
 /// If no profile exists, returns a fresh profile with uniform priors.
+///
+/// # Errors
+///
+/// Returns an error if the profile file cannot be read or parsed.
 pub fn load_agent_profile(project_root: &Path, agent_id: &str) -> Result<AgentProfile> {
     let path = agent_profile_path(project_root, agent_id);
     if !path.exists() {
@@ -295,6 +307,10 @@ pub fn load_agent_profile(project_root: &Path, agent_id: &str) -> Result<AgentPr
 }
 
 /// Persist one agent profile to `.bones/agent_profiles/<agent>.json`.
+///
+/// # Errors
+///
+/// Returns an error if the profile cannot be serialized or written to disk.
 pub fn save_agent_profile(project_root: &Path, profile: &AgentProfile) -> Result<()> {
     let path = agent_profile_path(project_root, &profile.agent_id);
 
@@ -321,17 +337,26 @@ pub fn save_agent_profile(project_root: &Path, profile: &AgentProfile) -> Result
 }
 
 /// Record a complete feedback event (append log + update profile).
-pub fn record_feedback_event(project_root: &Path, feedback: FeedbackEvent) -> Result<()> {
-    append_feedback_event(project_root, &feedback)?;
+///
+/// # Errors
+///
+/// Returns an error if appending the log or saving the profile fails.
+pub fn record_feedback_event(project_root: &Path, feedback: &FeedbackEvent) -> Result<()> {
+    append_feedback_event(project_root, feedback)?;
 
     let mut profile = load_agent_profile(project_root, &feedback.agent_id)?;
-    update_from_feedback(&mut profile, &feedback);
+    update_from_feedback(&mut profile, feedback);
     save_agent_profile(project_root, &profile)
 }
 
 /// Record feedback using the legacy `(kind, item, agent, ts)` shape.
 ///
 /// This function resolves project root from the current directory.
+///
+/// # Errors
+///
+/// Returns an error if the current directory cannot be resolved or the feedback
+/// cannot be persisted.
 pub fn record_feedback(
     kind: FeedbackKind,
     item_id: ItemId,
@@ -351,6 +376,11 @@ pub fn record_feedback(
 
 /// Record feedback using the legacy `(kind, item, agent, ts)` shape at a
 /// caller-provided project root.
+///
+/// # Errors
+///
+/// Returns an error if loading the profile, appending the event, or saving
+/// the updated profile fails.
 pub fn record_feedback_at(project_root: &Path, entry: FeedbackEntry) -> Result<()> {
     let mut profile = load_agent_profile(project_root, &entry.agent)?;
     let mut rng = rand::thread_rng();
@@ -457,7 +487,7 @@ fn unix_seconds_to_datetime(seconds: u64) -> DateTime<Utc> {
     let seconds = if seconds > i64::MAX as u64 {
         i64::MAX
     } else {
-        seconds as i64
+        seconds.cast_signed()
     };
 
     Utc.timestamp_opt(seconds, 0)
@@ -611,7 +641,7 @@ mod tests {
             },
         };
 
-        record_feedback_event(temp.path(), feedback.clone()).expect("record should succeed");
+        record_feedback_event(temp.path(), &feedback.clone()).expect("record should succeed");
 
         let events = load_feedback_events(temp.path()).expect("load should succeed");
         assert_eq!(events, vec![feedback]);

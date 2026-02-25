@@ -20,6 +20,11 @@ pub struct ClockSkewWarning {
 pub const DEFAULT_SKEW_THRESHOLD_SECS: u64 = 300;
 
 /// Get the current wall-clock time as Unix epoch seconds.
+///
+/// # Panics
+///
+/// Panics if the system clock is before the Unix epoch.
+#[must_use]
 pub fn wall_clock_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -32,19 +37,19 @@ pub fn wall_clock_now() -> u64 {
 ///
 /// Called during event write (before appending to shard) to warn the user.
 /// Events are NEVER rejected due to clock skew — ITC ordering is authoritative.
+#[must_use]
 pub fn check_clock_skew(
     event_ts: u64,
     wall_ts: u64,
     threshold_secs: u64,
 ) -> Option<ClockSkewWarning> {
-    let skew_secs = event_ts as i64 - wall_ts as i64;
-    let abs_skew = skew_secs.abs() as u64;
+    let skew_secs = event_ts.cast_signed() - wall_ts.cast_signed();
+    let abs_skew = skew_secs.unsigned_abs();
 
     if abs_skew > threshold_secs {
         let direction = if skew_secs > 0 { "future" } else { "past" };
         let message = format!(
-            "Clock skew detected: event is {} seconds in the {}, threshold is {} seconds",
-            abs_skew, direction, threshold_secs
+            "Clock skew detected: event is {abs_skew} seconds in the {direction}, threshold is {threshold_secs} seconds"
         );
 
         Some(ClockSkewWarning {

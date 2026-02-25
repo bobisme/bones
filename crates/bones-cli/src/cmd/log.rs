@@ -101,9 +101,7 @@ fn parse_since_micros(input: &str) -> anyhow::Result<i64> {
 }
 
 fn micros_to_rfc3339(us: i64) -> String {
-    DateTime::<Utc>::from_timestamp_micros(us)
-        .map(|ts| ts.to_rfc3339())
-        .unwrap_or_else(|| us.to_string())
+    DateTime::<Utc>::from_timestamp_micros(us).map_or_else(|| us.to_string(), |ts| ts.to_rfc3339())
 }
 
 fn collect_events<F>(project_root: &Path, mut keep: F) -> anyhow::Result<Vec<Event>>
@@ -223,8 +221,7 @@ fn collect_log_rows(project_root: &Path, args: &LogArgs) -> anyhow::Result<Vec<E
     let mut rows: Vec<EventRow> = collect_events(project_root, |partial| {
         partial.item_id_raw == args.id
             && since_us
-                .map(|cutoff| partial.wall_ts_us >= cutoff)
-                .unwrap_or(true)
+                .is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
     })?
     .iter()
     .map(to_event_row)
@@ -244,13 +241,11 @@ fn collect_history_rows(project_root: &Path, args: &HistoryArgs) -> anyhow::Resu
 
     let mut rows: Vec<EventRow> = collect_events(project_root, |partial| {
         since_us
-            .map(|cutoff| partial.wall_ts_us >= cutoff)
-            .unwrap_or(true)
+            .is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
             && args
                 .agent
                 .as_deref()
-                .map(|agent| partial.agent == agent)
-                .unwrap_or(true)
+                .is_none_or(|agent| partial.agent == agent)
     })?
     .iter()
     .map(to_event_row)
@@ -272,7 +267,6 @@ fn event_field_changes(event: &Event) -> Vec<(String, Value)> {
             .and_then(|v| match v {
                 Value::Object(obj) => Some(
                     obj.into_iter()
-                        .map(|(k, v)| (k.to_string(), v))
                         .collect::<Vec<_>>(),
                 ),
                 _ => None,

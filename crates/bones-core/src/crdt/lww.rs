@@ -49,7 +49,7 @@ pub struct LwwRegister<T> {
 
 impl<T> LwwRegister<T> {
     /// Create a new LWW register with the given value and metadata.
-    pub fn new(value: T, stamp: Stamp, wall_ts: u64, agent_id: String, event_hash: String) -> Self {
+    pub const fn new(value: T, stamp: Stamp, wall_ts: u64, agent_id: String, event_hash: String) -> Self {
         Self {
             value,
             stamp,
@@ -77,8 +77,8 @@ impl<T: Clone> LwwRegister<T> {
             self.value = other.value.clone();
             self.stamp = other.stamp.clone();
             self.wall_ts = other.wall_ts;
-            self.agent_id = other.agent_id.clone();
-            self.event_hash = other.event_hash.clone();
+            self.agent_id.clone_from(&other.agent_id);
+            self.event_hash.clone_from(&other.event_hash);
         }
     }
 
@@ -126,8 +126,8 @@ impl<T: Clone> LwwRegister<T> {
             self.value = other.value.clone();
             self.stamp = other.stamp.clone();
             self.wall_ts = other.wall_ts;
-            self.agent_id = other.agent_id.clone();
-            self.event_hash = other.event_hash.clone();
+            self.agent_id.clone_from(&other.agent_id);
+            self.event_hash.clone_from(&other.event_hash);
         }
 
         trace
@@ -152,12 +152,9 @@ impl<T: Clone> LwwRegister<T> {
                 // self causally dominates other → self wins
                 return (true, TieBreakStep::ItcCausal);
             }
-            (true, true) => {
-                // They are equal (both leq each other).
-                // Fall through to tie-breaking to ensure convergence if other metadata differs.
-            }
-            (false, false) => {
-                // Concurrent — fall through to tie-breaking
+            (true, true) | (false, false) => {
+                // Either equal (both leq each other) or concurrent.
+                // Fall through to tie-breaking to ensure convergence.
             }
         }
 

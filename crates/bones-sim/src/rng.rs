@@ -11,7 +11,7 @@ pub struct DeterministicRng {
 impl DeterministicRng {
     /// Create a new deterministic RNG from a seed.
     #[must_use]
-    pub fn new(seed: u64) -> Self {
+    pub const fn new(seed: u64) -> Self {
         Self {
             state: seed ^ 0x9E37_79B9_7F4A_7C15,
         }
@@ -19,7 +19,7 @@ impl DeterministicRng {
 
     /// Next pseudo-random `u64`.
     #[must_use]
-    pub fn next_u64(&mut self) -> u64 {
+    pub const fn next_u64(&mut self) -> u64 {
         self.state = self
             .state
             .wrapping_mul(6_364_136_223_846_793_005)
@@ -29,7 +29,7 @@ impl DeterministicRng {
 
     /// Next value in `[0, upper_exclusive)`.
     #[must_use]
-    pub fn next_bounded(&mut self, upper_exclusive: u64) -> u64 {
+    pub const fn next_bounded(&mut self, upper_exclusive: u64) -> u64 {
         if upper_exclusive == 0 {
             return 0;
         }

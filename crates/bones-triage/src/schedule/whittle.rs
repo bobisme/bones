@@ -48,7 +48,7 @@ pub struct WhittleIndex {
 /// Detailed breakdown of a Whittle Index computation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhittleBreakdown {
-    /// Base composite score (V_i).
+    /// Base composite score (`V_i`).
     pub base_value: f64,
     /// Additional value from unblocking downstream items.
     pub unblock_value: f64,
@@ -59,7 +59,7 @@ pub struct WhittleBreakdown {
 }
 
 /// Result of an indexability check.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexabilityResult {
     /// Whether the workload satisfies Whittle indexability conditions.
     pub indexable: bool,
@@ -93,12 +93,10 @@ impl Default for WhittleConfig {
 /// `m=2`, `l=4`, `xl=8`. Unknown sizes default to `2` (medium).
 fn size_to_time(size: Option<&str>) -> f64 {
     match size {
-        Some("xs") => 1.0,
-        Some("s") => 1.0,
-        Some("m") => 2.0,
+        Some("xs" | "s") => 1.0,
         Some("l") => 4.0,
         Some("xl") => 8.0,
-        _ => 2.0, // default to medium
+        _ => 2.0, // default to medium (m, unknown, or None)
     }
 }
 
@@ -193,6 +191,7 @@ pub fn check_indexability(graph: &DiGraph) -> IndexabilityResult {
 ///
 /// Does not panic. Gracefully handles missing data with defaults.
 #[must_use]
+#[allow(clippy::implicit_hasher, clippy::similar_names)]
 pub fn compute_whittle_indices(
     graph: &DiGraph,
     scores: &HashMap<String, f64>,
@@ -281,6 +280,7 @@ pub fn compute_whittle_indices(
 ///   `V_j * P(unblock_j | complete item_idx)`
 ///
 /// where `P(unblock) = 1 / num_unsatisfied_blockers(j)`.
+#[allow(clippy::similar_names)]
 fn compute_unblock_value(
     graph: &DiGraph,
     item_idx: NodeIndex,
@@ -325,6 +325,7 @@ fn compute_unblock_value(
 
         // P(unblock) = 1 if this item is the last remaining blocker,
         // otherwise 1/(unsatisfied + 1) since completing this item removes one.
+        #[allow(clippy::cast_precision_loss)]
         let p_unblock = if unsatisfied_blockers == 0 {
             1.0 // This item is the sole remaining blocker
         } else {

@@ -54,7 +54,7 @@ pub struct UntagArgs {
 /// - reject `/`
 /// - segments must start with ASCII alphanumeric and then contain only
 ///   ASCII alphanumeric, `-`, or `_`
-pub(crate) fn normalize_label(input: &str) -> Result<String, validate::ValidationError> {
+pub fn normalize_label(input: &str) -> Result<String, validate::ValidationError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(validate::ValidationError::new(
@@ -235,7 +235,7 @@ fn run_tag_single(
     normalized_labels: &[String],
 ) -> anyhow::Result<serde_json::Value> {
     let item_id = ItemId::parse(raw_id)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", raw_id, e))?;
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
 
     let conn = open_db(project_root)?;
 
@@ -410,7 +410,7 @@ fn run_untag_single(
     normalized_labels: &[String],
 ) -> anyhow::Result<serde_json::Value> {
     let item_id = ItemId::parse(raw_id)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", raw_id, e))?;
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{raw_id}': {e}"))?;
 
     let conn = open_db(project_root)?;
 

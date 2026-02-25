@@ -22,7 +22,8 @@ pub struct MergeTrace {
 }
 
 impl MergeTrace {
-    pub fn disabled() -> Self {
+    #[must_use] 
+    pub const fn disabled() -> Self {
         Self {
             field: String::new(),
             values: (String::new(), String::new()),
@@ -39,14 +40,14 @@ impl MergeTrace {
 /// Enabled when either:
 /// - `BONES_DEBUG_MERGE=1|true|yes|on`
 /// - `BONES_LOG` contains `debug` or `trace`
+#[must_use] 
 pub fn merge_tracing_enabled() -> bool {
     let debug_merge = std::env::var("BONES_DEBUG_MERGE")
         .ok()
-        .map(|v| {
+        .is_some_and(|v| {
             let lowered = v.trim().to_ascii_lowercase();
             matches!(lowered.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false);
+        });
 
     if debug_merge {
         return true;
@@ -54,9 +55,8 @@ pub fn merge_tracing_enabled() -> bool {
 
     std::env::var("BONES_LOG")
         .ok()
-        .map(|v| {
+        .is_some_and(|v| {
             let lowered = v.to_ascii_lowercase();
             lowered.contains("debug") || lowered.contains("trace")
         })
-        .unwrap_or(false)
 }

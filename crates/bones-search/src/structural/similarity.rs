@@ -100,6 +100,7 @@ const MAX_HOPS: usize = 5;
 /// assert!((sim - 0.5).abs() < 1e-6);
 /// ```
 #[must_use]
+#[allow(clippy::implicit_hasher, clippy::cast_precision_loss)]
 pub fn jaccard<T: Eq + std::hash::Hash>(a: &HashSet<T>, b: &HashSet<T>) -> f32 {
     if a.is_empty() && b.is_empty() {
         return 0.0;
@@ -115,20 +116,20 @@ pub fn jaccard<T: Eq + std::hash::Hash>(a: &HashSet<T>, b: &HashSet<T>) -> f32 {
 
 /// Compute structural similarity between two items.
 ///
-/// Queries SQLite for item metadata (labels, assignees, parent goal) and uses
+/// Queries `SQLite` for item metadata (labels, assignees, parent goal) and uses
 /// the pre-built dependency graph for neighbour-set and BFS-proximity
 /// computations.
 ///
 /// # Parameters
 ///
 /// - `a`, `b` — item IDs (e.g. `"bn-001"`).
-/// - `db` — SQLite connection to the bones projection database.
+/// - `db` — `SQLite` connection to the bones projection database.
 /// - `graph` — directed dependency graph where an edge `X → Y` means "X
 ///   blocks Y".  Typically built with `bones_triage::graph::build::RawGraph`.
 ///
 /// # Errors
 ///
-/// Returns an error if any SQLite query fails.
+/// Returns an error if any `SQLite` query fails.
 pub fn structural_similarity(
     a: &str,
     b: &str,
@@ -144,6 +145,11 @@ pub fn structural_similarity(
 /// graph to avoid rebuilding the `node_map` repeatedly (O(N) vs O(1)).
 ///
 /// If `node_map` is `None`, it will be built internally (O(N)).
+///
+/// # Errors
+///
+/// Returns an error if any `SQLite` query fails.
+#[allow(clippy::implicit_hasher, clippy::cast_precision_loss, clippy::option_if_let_else)]
 pub fn structural_similarity_with_map(
     a: &str,
     b: &str,
@@ -179,15 +185,12 @@ pub fn structural_similarity_with_map(
     // 4. Build node lookup from petgraph (if not provided)
     // -----------------------------------------------------------------------
     let built_map;
-    let map_ref = match node_map {
-        Some(m) => m,
-        None => {
-            built_map = graph
-                .node_indices()
-                .filter_map(|idx| graph.node_weight(idx).map(|s| (s.as_str(), idx)))
-                .collect();
-            &built_map
-        }
+    let map_ref = if let Some(m) = node_map { m } else {
+        built_map = graph
+            .node_indices()
+            .filter_map(|idx| graph.node_weight(idx).map(|s| (s.as_str(), idx)))
+            .collect();
+        &built_map
     };
 
     // -----------------------------------------------------------------------
@@ -200,10 +203,9 @@ pub fn structural_similarity_with_map(
     // -----------------------------------------------------------------------
     // 6. Graph proximity — BFS in undirected view, up to MAX_HOPS
     // -----------------------------------------------------------------------
-    let graph_proximity = match bfs_distance(graph, map_ref, a, b, MAX_HOPS) {
-        Some(dist) => 1.0_f32 / (1.0_f32 + dist as f32),
-        None => 0.0_f32,
-    };
+    #[allow(clippy::cast_precision_loss)]
+    let graph_proximity = bfs_distance(graph, map_ref, a, b, MAX_HOPS)
+        .map_or(0.0_f32, |dist| 1.0_f32 / (1.0_f32 + dist as f32));
 
     Ok(StructuralScore {
         label_sim,

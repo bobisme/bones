@@ -33,6 +33,11 @@ pub struct TopologyResult {
 }
 
 /// Run topological analysis on the graph.
+///
+/// # Errors
+///
+/// Returns an error if advanced topology analysis fails (e.g., numerical
+/// computation errors from spectral analysis or homology calculation).
 pub fn analyze<N, E>(
     graph: &petgraph::Graph<N, E>,
     mode: TopologyMode,
@@ -111,7 +116,7 @@ where
     })
 }
 
-fn basic_result(messages: Vec<String>) -> TopologyResult {
+const fn basic_result(messages: Vec<String>) -> TopologyResult {
     TopologyResult {
         mode: TopologyMode::Basic,
         advanced_applied: false,

@@ -40,6 +40,10 @@ pub struct HybridSearchResult {
 }
 
 /// Run hybrid search for a free-text query and fuse ranked lists with RRF.
+///
+/// # Errors
+///
+/// Returns an error if the lexical search or database query fails.
 pub fn hybrid_search(
     query: &str,
     db: &Connection,
@@ -51,6 +55,10 @@ pub fn hybrid_search(
 }
 
 /// Run hybrid search using a caller-provided dependency graph for structural scoring.
+///
+/// # Errors
+///
+/// Returns an error if the lexical search or database query fails.
 pub fn hybrid_search_with_graph(
     query: &str,
     db: &Connection,
@@ -75,11 +83,11 @@ fn hybrid_search_inner(
         return Ok(Vec::new());
     }
 
-    let lexical_hits = search_bm25(db, query, limit as u32).context("lexical search failed")?;
+    let lexical_hits = search_bm25(db, query, u32::try_from(limit).unwrap_or(u32::MAX)).context("lexical search failed")?;
     let lexical_ranked_owned: Vec<String> = lexical_hits.into_iter().map(|h| h.item_id).collect();
     let lexical_ranked: Vec<&str> = lexical_ranked_owned.iter().map(String::as_str).collect();
 
-    let semantic_ranked_owned = if let Some(model) = model {
+    let semantic_ranked_owned = model.map_or_else(Vec::new, |model| {
         match sync_projection_embeddings(db, model)
             .and_then(|_| model.embed(query))
             .and_then(|embedding| knn_search(db, &embedding, limit))
@@ -92,9 +100,7 @@ fn hybrid_search_inner(
                 Vec::new()
             }
         }
-    } else {
-        Vec::new()
-    };
+    });
 
     let semantic_ranked: Vec<&str> = semantic_ranked_owned.iter().map(String::as_str).collect();
 
@@ -168,6 +174,7 @@ fn hybrid_search_inner(
     Ok(out)
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn rank_to_score(rank: usize, k: usize) -> f32 {
     if rank == usize::MAX {
         0.0
@@ -191,6 +198,7 @@ fn semantic_ranked_items(hits: Vec<SemanticSearchResult>, lexical_is_empty: bool
         .collect()
 }
 
+#[allow(clippy::similar_names)]
 fn derive_structural_ranked(
     db: &Connection,
     lexical_ranked: &[String],
@@ -291,6 +299,7 @@ fn derive_structural_ranked(
         .collect()
 }
 
+#[allow(clippy::similar_names)]
 fn build_dependency_graph(db: &Connection) -> Result<DiGraph<String, ()>> {
     let mut graph = DiGraph::<String, ()>::new();
     let mut node_map: HashMap<String, NodeIndex> = HashMap::new();

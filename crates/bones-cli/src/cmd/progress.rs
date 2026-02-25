@@ -60,19 +60,16 @@ pub fn run_progress(
     project_root: &Path,
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     // Resolve the item ID (partial ID support).
@@ -109,7 +106,7 @@ fn resolve_item_id(conn: &rusqlite::Connection, partial: &str) -> anyhow::Result
     let mut stmt = conn.prepare(sql)?;
     let mut matches: Vec<String> = stmt
         .query_map([&pattern], |row| row.get::<_, String>(0))?
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
 
     if matches.is_empty() {
@@ -117,7 +114,7 @@ fn resolve_item_id(conn: &rusqlite::Connection, partial: &str) -> anyhow::Result
         let pattern2 = format!("bn-{partial}%");
         matches = stmt
             .query_map([&pattern2], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
     }
 

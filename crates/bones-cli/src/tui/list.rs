@@ -5,6 +5,23 @@
 //! - Right-side detail pane
 //! - Key bindings: j/k navigate or scroll, / search, F filter, a add bone, D show/hide done, q quit
 
+#![allow(
+    clippy::similar_names,
+    clippy::match_same_arms,
+    clippy::manual_let_else,
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::assigning_clones,
+    clippy::items_after_statements,
+    clippy::option_if_let_else,
+    clippy::needless_pass_by_ref_mut,
+    clippy::struct_excessive_bools,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::map_unwrap_or
+)]
+
 use crate::agent;
 use anyhow::{Context, Result};
 use bones_core::config::load_project_config;
@@ -53,7 +70,7 @@ pub struct FilterState {
 
 impl FilterState {
     /// Returns true if no filter criteria are active.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.state.is_none()
             && self.kind.is_none()
             && self.label.is_none()
@@ -74,26 +91,22 @@ impl FilterState {
 
     /// Returns true if the item satisfies all active filter criteria.
     pub fn matches(&self, item: &WorkItem) -> bool {
-        if let Some(ref state) = self.state {
-            if item.state != *state {
+        if let Some(ref state) = self.state
+            && item.state != *state {
                 return false;
             }
-        }
-        if let Some(ref kind) = self.kind {
-            if item.kind != *kind {
+        if let Some(ref kind) = self.kind
+            && item.kind != *kind {
                 return false;
             }
-        }
-        if let Some(ref urgency) = self.urgency {
-            if item.urgency != *urgency {
+        if let Some(ref urgency) = self.urgency
+            && item.urgency != *urgency {
                 return false;
             }
-        }
-        if let Some(ref label) = self.label {
-            if !item.labels.iter().any(|l| l.contains(label.as_str())) {
+        if let Some(ref label) = self.label
+            && !item.labels.iter().any(|l| l.contains(label.as_str())) {
                 return false;
             }
-        }
         if !self.search_query.is_empty() {
             let q = self.search_query.to_ascii_lowercase();
             if !item.title.to_ascii_lowercase().contains(&q)
@@ -113,16 +126,16 @@ pub enum SortField {
     /// using priority as the tie-breaker among ready items.
     #[default]
     Execution,
-    /// Sort by priority: urgent → default → punt, then updated_at desc.
+    /// Sort by priority: urgent → default → punt, then `updated_at` desc.
     Priority,
-    /// Sort by created_at descending (newest first).
+    /// Sort by `created_at` descending (newest first).
     Created,
-    /// Sort by updated_at descending (most recently changed first).
+    /// Sort by `updated_at` descending (most recently changed first).
     Updated,
 }
 
 impl SortField {
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
             Self::Execution => "execution",
             Self::Priority => "priority",
@@ -131,7 +144,7 @@ impl SortField {
         }
     }
 
-    fn next(self) -> Self {
+    const fn next(self) -> Self {
         match self {
             Self::Execution => Self::Priority,
             Self::Priority => Self::Created,
@@ -474,15 +487,14 @@ fn build_dependency_order(
     let mut hierarchy_children: HashMap<String, Vec<String>> = HashMap::new();
     let mut has_hierarchy_parent: HashSet<String> = HashSet::new();
     for item_id in &sorted_ids {
-        if let Some(Some(pid)) = parent_map.get(item_id) {
-            if id_set.contains(pid) {
+        if let Some(Some(pid)) = parent_map.get(item_id)
+            && id_set.contains(pid) {
                 hierarchy_children
                     .entry(pid.clone())
                     .or_default()
                     .push(item_id.clone());
                 has_hierarchy_parent.insert(item_id.clone());
             }
-        }
     }
     // Sort hierarchy children by their execution rank so they appear in
     // the right relative order under their parent.
@@ -493,11 +505,10 @@ fn build_dependency_order(
     // Build a lookup: item_id -> parent_id (for items that have a hierarchy parent).
     let mut item_parent: HashMap<String, String> = HashMap::new();
     for item_id in &sorted_ids {
-        if let Some(Some(pid)) = parent_map.get(item_id) {
-            if id_set.contains(pid) {
+        if let Some(Some(pid)) = parent_map.get(item_id)
+            && id_set.contains(pid) {
                 item_parent.insert(item_id.clone(), pid.clone());
             }
-        }
     }
 
     // Build dependency nesting.  Items with a hierarchy parent can still nest
@@ -566,7 +577,7 @@ fn build_dependency_order(
             .filter(|kid| !primary_blocker.contains_key((*kid).as_str()))
             .cloned()
             .collect();
-        top_kids.extend(entry.drain(..));
+        top_kids.append(entry);
         *entry = top_kids;
     }
 
@@ -688,7 +699,7 @@ enum FilterField {
 }
 
 impl FilterField {
-    fn next(self) -> Self {
+    const fn next(self) -> Self {
         match self {
             Self::State => Self::Kind,
             Self::Kind => Self::Urgency,
@@ -697,7 +708,7 @@ impl FilterField {
         }
     }
 
-    fn prev(self) -> Self {
+    const fn prev(self) -> Self {
         match self {
             Self::State => Self::Label,
             Self::Kind => Self::State,
@@ -719,7 +730,7 @@ enum CreateField {
 }
 
 impl CreateField {
-    fn next(self) -> Self {
+    const fn next(self) -> Self {
         match self {
             Self::Title => Self::Description,
             Self::Description => Self::Kind,
@@ -730,7 +741,7 @@ impl CreateField {
         }
     }
 
-    fn prev(self) -> Self {
+    const fn prev(self) -> Self {
         match self {
             Self::Title => Self::Labels,
             Self::Description => Self::Title,
@@ -800,7 +811,7 @@ impl CreateModalState {
         modal.description = detail
             .description
             .as_deref()
-            .map(|d| d.lines().map(|line| line.to_string()).collect::<Vec<_>>())
+            .map(|d| d.lines().map(std::string::ToString::to_string).collect::<Vec<_>>())
             .filter(|lines| !lines.is_empty())
             .unwrap_or_else(|| vec![String::new()]);
         modal.desc_row = modal.description.len().saturating_sub(1);
@@ -817,7 +828,7 @@ impl CreateModalState {
         modal
     }
 
-    fn kind(&self) -> &str {
+    const fn kind(&self) -> &str {
         match self.kind_idx {
             0 => "task",
             1 => "goal",
@@ -826,7 +837,7 @@ impl CreateModalState {
         }
     }
 
-    fn size_options() -> [&'static str; 6] {
+    const fn size_options() -> [&'static str; 6] {
         ["(none)", "xs", "s", "m", "l", "xl"]
     }
 
@@ -849,7 +860,7 @@ impl CreateModalState {
         }
     }
 
-    fn urgency_options() -> [&'static str; 3] {
+    const fn urgency_options() -> [&'static str; 3] {
         ["none", "urgent", "punted"]
     }
 
@@ -861,7 +872,7 @@ impl CreateModalState {
         }
     }
 
-    fn urgency_raw(&self) -> &'static str {
+    const fn urgency_raw(&self) -> &'static str {
         match self.urgency_idx {
             1 => "urgent",
             2 => "punt",
@@ -869,7 +880,7 @@ impl CreateModalState {
         }
     }
 
-    fn urgency_display(&self) -> &'static str {
+    const fn urgency_display(&self) -> &'static str {
         Self::urgency_options()[self.urgency_idx]
     }
 
@@ -950,10 +961,10 @@ impl CreateModalState {
                 self.edit_description(key);
             }
             CreateField::Kind => match key.code {
-                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
                     self.kind_idx = self.kind_idx.saturating_sub(1);
                 }
-                KeyCode::Right | KeyCode::Down | KeyCode::Char('l') | KeyCode::Char('j') => {
+                KeyCode::Right | KeyCode::Down | KeyCode::Char('l' | 'j') => {
                     self.kind_idx = (self.kind_idx + 1).min(2);
                 }
                 KeyCode::Char('t') => self.kind_idx = 0,
@@ -962,7 +973,7 @@ impl CreateModalState {
                 _ => {}
             },
             CreateField::Size => match key.code {
-                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
                     self.size_idx = self.size_idx.saturating_sub(1);
                 }
                 KeyCode::Right | KeyCode::Down | KeyCode::Char('j') => {
@@ -977,7 +988,7 @@ impl CreateModalState {
                 _ => {}
             },
             CreateField::Urgency => match key.code {
-                KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
                     self.urgency_idx = self.urgency_idx.saturating_sub(1);
                 }
                 KeyCode::Right | KeyCode::Down | KeyCode::Char('j') => {
@@ -1013,7 +1024,7 @@ impl CreateModalState {
     fn handle_paste(&mut self, text: &str) {
         match self.focus {
             CreateField::Title => {
-                insert_single_line_text(&mut self.title, &mut self.title_cursor, text)
+                insert_single_line_text(&mut self.title, &mut self.title_cursor, text);
             }
             CreateField::Description => paste_multiline_text(
                 &mut self.description,
@@ -1022,7 +1033,7 @@ impl CreateModalState {
                 text,
             ),
             CreateField::Labels => {
-                insert_single_line_text(&mut self.labels, &mut self.labels_cursor, text)
+                insert_single_line_text(&mut self.labels, &mut self.labels_cursor, text);
             }
             _ => {}
         }
@@ -1204,7 +1215,7 @@ fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key
             backspace_multiline(lines, row, col);
         }
         KeyCode::Delete => delete_multiline(lines, row, col),
-        KeyCode::Char('\n') | KeyCode::Char('\r') => insert_newline(lines, row, col),
+        KeyCode::Char('\n' | '\r') => insert_newline(lines, row, col),
         KeyCode::Char(c) => {
             if !ctrl && !alt {
                 insert_char_at(&mut lines[*row], *col, c);
@@ -1425,8 +1436,7 @@ fn byte_index_at_char(value: &str, char_idx: usize) -> usize {
     value
         .char_indices()
         .nth(char_idx)
-        .map(|(idx, _)| idx)
-        .unwrap_or(value.len())
+        .map_or(value.len(), |(idx, _)| idx)
 }
 
 fn insert_char_at(value: &mut String, char_idx: usize, ch: char) {
@@ -1575,17 +1585,14 @@ impl ListView {
     pub fn new(db_path: PathBuf) -> Result<Self> {
         let project_root = db_path
             .parent()
-            .and_then(Path::parent)
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .and_then(Path::parent).map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
         let agent = agent::require_agent(None).unwrap_or_else(|_| "tui".to_string());
 
         let semantic_enabled = db_path
             .parent()
             .and_then(std::path::Path::parent)
             .and_then(|root| load_project_config(root).ok())
-            .map(|cfg| cfg.search.semantic)
-            .unwrap_or(true);
+            .is_none_or(|cfg| cfg.search.semantic);
         let semantic_model = if semantic_enabled {
             match SemanticModel::load() {
                 Ok(model) => Some(model),
@@ -1648,21 +1655,18 @@ impl ListView {
 
     /// Load (or reload) all items from the projection database.
     pub fn reload(&mut self) -> Result<()> {
-        let conn = match query::try_open_projection(&self.db_path)? {
-            Some(c) => c,
-            None => {
-                self.all_items.clear();
-                self.visible_items.clear();
-                self.visible_depths.clear();
-                self.done_start_idx = None;
-                self.parent_map.clear();
-                self.blocker_map.clear();
-                self.detail_item = None;
-                self.detail_item_id = None;
-                self.detail_scroll = 0;
-                self.last_refresh = Instant::now();
-                return Ok(());
-            }
+        let conn = if let Some(c) = query::try_open_projection(&self.db_path)? { c } else {
+            self.all_items.clear();
+            self.visible_items.clear();
+            self.visible_depths.clear();
+            self.done_start_idx = None;
+            self.parent_map.clear();
+            self.blocker_map.clear();
+            self.detail_item = None;
+            self.detail_item_id = None;
+            self.detail_scroll = 0;
+            self.last_refresh = Instant::now();
+            return Ok(());
         };
 
         let filter = ItemFilter {
@@ -1863,7 +1867,7 @@ impl ListView {
             .and_then(|i| self.visible_items.get(i))
     }
 
-    fn detail_visible_height(&self) -> usize {
+    const fn detail_visible_height(&self) -> usize {
         self.detail_area.height.saturating_sub(2) as usize
     }
 
@@ -1915,14 +1919,14 @@ impl ListView {
         self.visible_items.len() + usize::from(self.done_start_idx.is_some())
     }
 
-    fn table_row_from_visible_index(&self, visible_idx: usize) -> usize {
+    const fn table_row_from_visible_index(&self, visible_idx: usize) -> usize {
         match self.done_start_idx {
             Some(done_idx) if visible_idx >= done_idx => visible_idx + 1,
             _ => visible_idx,
         }
     }
 
-    fn visible_index_from_table_row(&self, table_row: usize) -> Option<usize> {
+    const fn visible_index_from_table_row(&self, table_row: usize) -> Option<usize> {
         match self.done_start_idx {
             Some(done_idx) if table_row == done_idx => None,
             Some(done_idx) if table_row > done_idx => Some(table_row - 1),
@@ -2033,7 +2037,7 @@ impl ListView {
                     }
                 }
             }
-            KeyCode::PageUp | KeyCode::Char('u') | KeyCode::Char('b') => {
+            KeyCode::PageUp | KeyCode::Char('u' | 'b') => {
                 if self.show_detail {
                     self.scroll_detail_by(-10);
                 } else {
@@ -2390,7 +2394,7 @@ impl ListView {
                 self.filter_field = self.filter_field.prev();
             }
             // Cycle enum values for state/kind/urgency, or enter text for label
-            KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+            KeyCode::Right | KeyCode::Char('l' | ' ') => {
                 self.cycle_filter_field_forward();
             }
             KeyCode::Left | KeyCode::Char('h') => {
@@ -2597,7 +2601,7 @@ impl ListView {
     }
 
     /// Returns true if the list view has been asked to quit (e.g. 'q' key).
-    pub fn should_quit(&self) -> bool {
+    pub const fn should_quit(&self) -> bool {
         self.should_quit
     }
 
@@ -3619,14 +3623,13 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
 /// Build the status bar line from current filter state.
 fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
     // Show a transient status message if recent (< 3 seconds).
-    if let Some((ref msg, at)) = app.status_msg {
-        if at.elapsed() < Duration::from_secs(3) {
+    if let Some((ref msg, at)) = app.status_msg
+        && at.elapsed() < Duration::from_secs(3) {
             return Line::from(vec![Span::styled(
                 msg.clone(),
                 Style::default().fg(Color::Cyan),
             )]);
         }
-    }
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 

@@ -46,6 +46,7 @@ pub struct UrgentChainResult {
 /// An [`UrgentChainResult`] with the chain front items sorted by score
 /// descending for deterministic assignment.
 #[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn find_urgent_chain_front(
     graph: &DiGraph,
     scores: &HashMap<String, f64>,

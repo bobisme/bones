@@ -36,7 +36,7 @@ pub struct ArchiveArgs {
     #[arg(long)]
     pub auto: bool,
 
-    /// Days threshold for --auto. Defaults to [archive].auto_days in
+    /// Days threshold for --auto. Defaults to [archive].`auto_days` in
     /// .bones/config.toml, or 30 when not configured.
     #[arg(long)]
     pub days: Option<u32>,
@@ -187,32 +187,26 @@ fn run_archive_single(
         anyhow::bail!("{}", e.reason);
     }
 
-    let resolved_id = match resolve_item_id(conn, id)? {
-        Some(id) => id,
-        None => {
-            let msg = format!("item '{}' not found", id);
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID with 'bn list' or 'bn show'",
-                    "item_not_found",
-                ),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let resolved_id = if let Some(id) = resolve_item_id(conn, id)? { id } else {
+        let msg = format!("item '{id}' not found");
+        render_error(
+            output,
+            &CliError::with_details(
+                &msg,
+                "Check the item ID with 'bn list' or 'bn show'",
+                "item_not_found",
+            ),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
-    let item = match query::get_item(conn, &resolved_id, false)? {
-        Some(item) => item,
-        None => {
-            let msg = format!("item '{}' not found", resolved_id);
-            render_error(
-                output,
-                &CliError::with_details(&msg, "The item may have been deleted", "item_not_found"),
-            )?;
-            anyhow::bail!("{}", msg);
-        }
+    let item = if let Some(item) = query::get_item(conn, &resolved_id, false)? { item } else {
+        let msg = format!("item '{resolved_id}' not found");
+        render_error(
+            output,
+            &CliError::with_details(&msg, "The item may have been deleted", "item_not_found"),
+        )?;
+        anyhow::bail!("{msg}");
     };
 
     let current_state: State = item.state.parse().map_err(|_| {
@@ -235,7 +229,7 @@ fn run_archive_single(
             output,
             &CliError::with_details(&msg, &suggestion, "invalid_transition"),
         )?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     let event_hash = append_archive_event(project_root, shard_mgr, conn, agent, &resolved_id)?;
@@ -265,7 +259,7 @@ fn run_archive_auto(
     shard_mgr: &ShardManager,
 ) -> anyhow::Result<()> {
     let now_us = chrono::Utc::now().timestamp_micros();
-    let threshold_us = now_us.saturating_sub(days as i64 * 24 * 60 * 60 * 1_000_000);
+    let threshold_us = now_us.saturating_sub(i64::from(days) * 24 * 60 * 60 * 1_000_000);
 
     let done_items = query::list_items(
         conn,
@@ -372,7 +366,7 @@ pub fn run_archive(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     let db_path = bones_dir.join("bones.db");

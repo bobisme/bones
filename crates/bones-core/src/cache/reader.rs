@@ -73,12 +73,12 @@ impl CacheReader {
     /// Return the number of events (rows) in the cache file without decoding.
     #[must_use]
     pub fn event_count(&self) -> usize {
-        self.header.row_count as usize
+        usize::try_from(self.header.row_count).unwrap_or(usize::MAX)
     }
 
     /// Return a reference to the cache header.
     #[must_use]
-    pub fn header(&self) -> &CacheHeader {
+    pub const fn header(&self) -> &CacheHeader {
         &self.header
     }
 
@@ -119,19 +119,19 @@ impl CacheReader {
 
     /// Return the creation timestamp of the cache file (µs since epoch).
     #[must_use]
-    pub fn created_at_us(&self) -> u64 {
+    pub const fn created_at_us(&self) -> u64 {
         self.header.created_at_us
     }
 
     /// Return the stored CRC-64 checksum of the column data.
     #[must_use]
-    pub fn data_crc64(&self) -> u64 {
+    pub const fn data_crc64(&self) -> u64 {
         self.header.data_crc64
     }
 
     /// Return the total size of the raw cache data in bytes.
     #[must_use]
-    pub fn file_size(&self) -> usize {
+    pub const fn file_size(&self) -> usize {
         self.data.len()
     }
 }

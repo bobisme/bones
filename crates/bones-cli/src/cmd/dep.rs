@@ -2,7 +2,7 @@
 //!
 //! Subcommands:
 //! - `bn triage dep add <from> --blocks <to>` — emit `item.link` with type "blocks"
-//! - `bn triage dep add <from> --relates <to>` — emit `item.link` with type "related_to"
+//! - `bn triage dep add <from> --relates <to>` — emit `item.link` with type "`related_to`"
 //! - `bn triage dep rm <from> <to>` — emit `item.unlink` removing the dependency
 
 use std::collections::BTreeMap;
@@ -219,7 +219,7 @@ fn run_dep_add(
     } else {
         let msg = "must provide --blocks <to> or --relates <to>";
         render_error(output, &CliError::new(msg))?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     };
 
     // 3. Validate item IDs
@@ -235,12 +235,12 @@ fn run_dep_add(
     let from_id = ItemId::parse(&args.from)
         .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.from, e))?;
     let to_id = ItemId::parse(&to_raw)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", to_raw, e))?;
+        .map_err(|e| anyhow::anyhow!("invalid item ID '{to_raw}': {e}"))?;
 
     if from_id == to_id {
         let msg = "cannot link an item to itself";
         render_error(output, &CliError::new(msg))?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     // 4. Find .bones dir and DB
@@ -255,7 +255,7 @@ fn run_dep_add(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     let db_path = bones_dir.join("bones.db");
@@ -263,29 +263,28 @@ fn run_dep_add(
     // 5. Verify both items exist
     if let Some(conn) = try_open_projection(&db_path)? {
         if !item_exists(&conn, from_id.as_str())? {
-            let msg = format!("item not found: {}", from_id);
+            let msg = format!("item not found: {from_id}");
             render_error(output, &CliError::new(&msg))?;
-            anyhow::bail!("{}", msg);
+            anyhow::bail!("{msg}");
         }
         if !item_exists(&conn, to_id.as_str())? {
-            let msg = format!("item not found: {}", to_id);
+            let msg = format!("item not found: {to_id}");
             render_error(output, &CliError::new(&msg))?;
-            anyhow::bail!("{}", msg);
+            anyhow::bail!("{msg}");
         }
 
         // 6. Cycle check for blocking links
-        if link_type == "blocks" {
-            if let Err(cycle_msg) =
+        if link_type == "blocks"
+            && let Err(cycle_msg) =
                 check_would_create_cycle(&conn, from_id.as_str(), to_id.as_str())
             {
                 render_error(output, &CliError::new(&cycle_msg))?;
-                anyhow::bail!("{}", cycle_msg);
+                anyhow::bail!("{cycle_msg}");
             }
-        }
     } else {
         let msg = "projection database not found; run `bn admin rebuild` first";
         render_error(output, &CliError::new(msg))?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     // 7. Emit event: item_id = to (blocked), target = from (blocker)
@@ -415,7 +414,7 @@ fn run_dep_rm(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 4. Emit unlink event: item_id = to (blocked), target = from (blocker)

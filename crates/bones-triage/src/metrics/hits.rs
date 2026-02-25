@@ -67,6 +67,7 @@ pub struct HitsResult {
 /// (approximately `1/sqrt(n)`).
 #[must_use]
 #[instrument(skip(ng))]
+#[allow(clippy::many_single_char_names)]
 pub fn hits(ng: &NormalizedGraph, max_iter: usize, tolerance: f64) -> HitsResult {
     let g = &ng.condensed;
     let n = g.node_count();

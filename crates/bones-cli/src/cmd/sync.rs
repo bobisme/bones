@@ -268,7 +268,7 @@ fn run_rebuild(repo_dir: &Path) -> Result<()> {
         .status();
 
     match status {
-        Ok(s) if s.success() => return Ok(()),
+        Ok(s) if s.success() => Ok(()),
         Ok(s) => {
             anyhow::bail!(
                 "bn admin rebuild exited with code {}",

@@ -23,7 +23,7 @@ use std::time::Duration;
 /// Transition an item to "doing" state.
 ///
 /// Opens the projection DB, validates the transition, writes the event to the
-/// shard, and projects the new state into SQLite.
+/// shard, and projects the new state into `SQLite`.
 #[allow(dead_code)]
 pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) -> Result<()> {
     let conn = Connection::open(db_path).context("open projection db")?;
@@ -32,7 +32,7 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
 
     let current_item = query::get_item(&conn, item_id, false)
         .context("look up item")?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", item_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{item_id}' not found"))?;
 
     let current_state: State = current_item.state.parse().map_err(|_| {
         anyhow::anyhow!(
@@ -90,7 +90,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
 
     let current_item = query::get_item(&conn, item_id, false)
         .context("look up item")?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", item_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{item_id}' not found"))?;
 
     let current_state: State = current_item.state.parse().map_err(|_| {
         anyhow::anyhow!(
@@ -332,7 +332,7 @@ pub fn move_item_state(
 
     let current_item = query::get_item(&conn, item_id, false)
         .context("look up item")?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", item_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{item_id}' not found"))?;
     let current_state: State = current_item.state.parse().map_err(|_| {
         anyhow::anyhow!(
             "item '{}' has invalid state '{}'",
@@ -344,9 +344,7 @@ pub fn move_item_state(
     if reopen {
         if !matches!(current_state, State::Done | State::Archived) {
             anyhow::bail!(
-                "cannot reopen '{}': item is in '{}'",
-                item_id,
-                current_state
+                "cannot reopen '{item_id}': item is in '{current_state}'"
             );
         }
     } else {

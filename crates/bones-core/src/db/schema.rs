@@ -1,4 +1,4 @@
-//! Canonical SQLite projection schema for bones.
+//! Canonical `SQLite` projection schema for bones.
 //!
 //! The schema is normalized for queryability and deterministic replay:
 //! - `items` keeps the latest aggregate fields for each work item
@@ -8,7 +8,7 @@
 //! - `projection_meta` tracks replay cursor metadata for incremental rebuilds
 
 /// Migration v1: core normalized tables plus projection metadata.
-pub const MIGRATION_V1_SQL: &str = r#"
+pub const MIGRATION_V1_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS items (
     item_id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -83,10 +83,10 @@ INSERT OR IGNORE INTO projection_meta (
     last_event_hash,
     last_rebuild_at_us
 ) VALUES (1, 1, 0, NULL, 0);
-"#;
+";
 
 /// Migration v2: read-path indexes and FTS5 table/triggers.
-pub const MIGRATION_V2_SQL: &str = r#"
+pub const MIGRATION_V2_SQL: &str = r"
 CREATE INDEX IF NOT EXISTS idx_items_state_urgency_updated
     ON items(state, urgency, updated_at_us DESC);
 
@@ -170,7 +170,7 @@ FROM items;
 UPDATE projection_meta
 SET schema_version = 2
 WHERE id = 1;
-"#;
+";
 
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[

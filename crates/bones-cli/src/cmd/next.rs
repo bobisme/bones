@@ -82,19 +82,16 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
     };
 
     let db_path = project_root.join(".bones/bones.db");
-    let conn = match query::try_open_projection(&db_path)? {
-        Some(conn) => conn,
-        None => {
-            render_error(
-                output,
-                &CliError::with_details(
-                    "projection database not found",
-                    "run `bn admin rebuild` to initialize the projection",
-                    "projection_missing",
-                ),
-            )?;
-            anyhow::bail!("projection not found");
-        }
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+        render_error(
+            output,
+            &CliError::with_details(
+                "projection database not found",
+                "run `bn admin rebuild` to initialize the projection",
+                "projection_missing",
+            ),
+        )?;
+        anyhow::bail!("projection not found");
     };
 
     let snapshot = build_triage_snapshot(&conn, chrono::Utc::now().timestamp_micros())?;
@@ -143,20 +140,17 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             }
         }
 
-        let top = match chosen {
-            Some(item) => item,
-            None => {
-                // Every unblocked item needs decomposition — tell the agent.
-                let empty = EmptyNext {
-                    message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
-                };
-                return render(output, &empty, |_, w| {
-                    writeln!(
-                        w,
-                        "advice  decompose-first  All unblocked items are L/XL without subtasks. Decompose them before starting work."
-                    )
-                });
-            }
+        let top = if let Some(item) = chosen { item } else {
+            // Every unblocked item needs decomposition — tell the agent.
+            let empty = EmptyNext {
+                message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
+            };
+            return render(output, &empty, |_, w| {
+                writeln!(
+                    w,
+                    "advice  decompose-first  All unblocked items are L/XL without subtasks. Decompose them before starting work."
+                )
+            });
         };
 
         let next = NextPick {

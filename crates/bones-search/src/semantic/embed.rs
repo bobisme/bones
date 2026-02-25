@@ -23,12 +23,20 @@ pub struct EmbeddingPipeline<'a> {
 
 impl<'a> EmbeddingPipeline<'a> {
     /// Construct a pipeline and ensure semantic tables exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database schema creation fails.
     pub fn new(model: &'a SemanticModel, db: &'a Connection) -> Result<Self> {
         ensure_embedding_schema(db)?;
         Ok(Self { model, db })
     }
 
     /// Embed a single item and upsert its vector if content changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if inference or the database upsert fails.
     pub fn embed_item(&self, item: &WorkItemFields) -> Result<bool> {
         let content = item_content(item);
         let content_hash = content_hash_hex(&content);
@@ -46,6 +54,10 @@ impl<'a> EmbeddingPipeline<'a> {
     }
 
     /// Batch-embed multiple items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if batch inference or any database upsert fails.
     pub fn embed_all(&self, items: &[WorkItemFields]) -> Result<usize> {
         let mut pending = Vec::new();
 
@@ -88,6 +100,10 @@ impl<'a> EmbeddingPipeline<'a> {
 ///
 /// This is safe to call before every semantic search request: when no new
 /// events were projected, it returns quickly without recomputing embeddings.
+///
+/// # Errors
+///
+/// Returns an error if the database query or embedding inference fails.
 pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Result<SyncStats> {
     ensure_embedding_schema(db)?;
 
@@ -152,6 +168,10 @@ pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Res
 /// This is useful for maintenance flows that want predictable schema state
 /// (for example after a projection rebuild) while deferring embedding work
 /// until a semantic query is actually executed.
+///
+/// # Errors
+///
+/// Returns an error if the database schema creation fails.
 pub fn ensure_semantic_index_schema(db: &Connection) -> Result<()> {
     ensure_embedding_schema(db)
 }

@@ -63,7 +63,13 @@ impl CacheWriter {
         let compression_ratio = if source_bytes == 0 {
             1.0
         } else {
-            bytes.len() as f64 / source_bytes as f64
+            {
+                // Saturate to u32 for lossless f64 conversion; cache files
+                // are always well under 4 GiB so no information is lost.
+                let num = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
+                let den = u32::try_from(source_bytes).unwrap_or(u32::MAX);
+                f64::from(num) / f64::from(den)
+            }
         };
 
         Ok(CacheStats {
@@ -105,7 +111,7 @@ impl CacheWriter {
 ///
 /// Returns an error if shard replay, parsing, encoding, or file I/O fails.
 pub fn rebuild_cache(events_dir: &Path, cache_path: &Path) -> Result<CacheStats> {
-    let bones_dir = events_dir.parent().unwrap_or(Path::new("."));
+    let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
 
     let content = shard_mgr
@@ -133,7 +139,7 @@ fn estimated_source_bytes(events: &[Event]) -> usize {
 fn now_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_micros() as u64)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
 #[cfg(test)]

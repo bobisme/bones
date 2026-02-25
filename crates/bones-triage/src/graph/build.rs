@@ -1,8 +1,8 @@
-//! Graph construction from SQLite projection database.
+//! Graph construction from `SQLite` projection database.
 //!
 //! # Overview
 //!
-//! This module queries the `item_dependencies` table in the SQLite projection
+//! This module queries the `item_dependencies` table in the `SQLite` projection
 //! database and builds a [`petgraph`] directed graph suitable for triage
 //! computations (centrality metrics, cycle detection, scheduling analysis).
 //!
@@ -43,7 +43,7 @@ use tracing::instrument;
 // RawGraph
 // ---------------------------------------------------------------------------
 
-/// A directed dependency graph built from SQLite.
+/// A directed dependency graph built from `SQLite`.
 ///
 /// Nodes are item IDs (strings). An edge `A → B` means "A blocks B".
 ///
@@ -74,8 +74,9 @@ impl RawGraph {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite query fails.
+    /// Returns an error if the `SQLite` query fails.
     #[instrument(skip(conn))]
+    #[allow(clippy::similar_names)]
     pub fn from_sqlite(conn: &Connection) -> Result<Self> {
         // Step 1: load all non-deleted item IDs as graph nodes.
         let item_ids = load_item_ids(conn)?;
@@ -165,6 +166,7 @@ fn load_item_ids(conn: &Connection) -> Result<Vec<String>> {
 /// Load blocking dependency edges from `item_dependencies`.
 ///
 /// Returns `Vec<(blocker_id, blocked_id)>` where `blocker_id → blocked_id`.
+#[allow(clippy::similar_names)]
 fn load_blocking_edges(conn: &Connection) -> Result<Vec<(String, String)>> {
     // link_type 'blocks': depends_on_item_id blocks item_id
     // link_type 'blocked_by': item_id is blocked_by depends_on_item_id

@@ -8,12 +8,12 @@ use bones_core::event::Event;
 
 const AGENT_DEPTH_BITS: usize = 32;
 
-pub(crate) fn assign_next_itc(project_root: &Path, event: &mut Event) -> Result<()> {
+pub fn assign_next_itc(project_root: &Path, event: &mut Event) -> Result<()> {
     event.itc = next_itc(project_root, &event.agent)?;
     Ok(())
 }
 
-pub(crate) fn next_itc(project_root: &Path, agent: &str) -> Result<String> {
+pub fn next_itc(project_root: &Path, agent: &str) -> Result<String> {
     let state_path = itc_state_path(project_root, agent);
     if let Some(parent) = state_path.parent() {
         fs::create_dir_all(parent)

@@ -89,14 +89,13 @@ pub fn topological_layers(graph: &DiGraph, scope: Option<&str>) -> Vec<Vec<Strin
 
             for edge in condensed.edges_directed(idx, Direction::Outgoing) {
                 let target = edge.target();
-                if let Some(entry) = indegree.get_mut(&target) {
-                    if *entry > 0 {
+                if let Some(entry) = indegree.get_mut(&target)
+                    && *entry > 0 {
                         *entry -= 1;
                         if *entry == 0 {
                             next_ready.push(target);
                         }
                     }
-                }
             }
 
             indegree.remove(&idx);
@@ -179,17 +178,17 @@ pub fn find_sccs(graph: &DiGraph) -> Vec<Vec<String>> {
 }
 
 fn scoped_node_ids(graph: &DiGraph, scope: Option<&str>) -> BTreeSet<String> {
-    match scope {
-        None => graph.node_weights().cloned().collect(),
-        Some(scope_id) => {
+    scope.map_or_else(
+        || graph.node_weights().cloned().collect(),
+        |scope_id| {
             let child_prefix = format!("{scope_id}.");
             graph
                 .node_weights()
                 .filter(|id| id.as_str() == scope_id || id.starts_with(&child_prefix))
                 .cloned()
                 .collect()
-        }
-    }
+        },
+    )
 }
 
 fn build_scoped_graph(graph: &DiGraph, scoped_ids: &BTreeSet<String>) -> DiGraph {
@@ -236,8 +235,7 @@ fn representative(graph: &PetDiGraph<Vec<String>, ()>, idx: NodeIndex) -> &str {
     graph
         .node_weight(idx)
         .and_then(|members| members.iter().min())
-        .map(String::as_str)
-        .unwrap_or("")
+        .map_or("", String::as_str)
 }
 
 fn graph_content_hash(graph: &DiGraph) -> String {

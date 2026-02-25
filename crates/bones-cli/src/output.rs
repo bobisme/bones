@@ -166,19 +166,19 @@ impl OutputMode {
     pub const Table: Self = Self::Text;
 
     /// Returns `true` if JSON output was requested.
-    pub fn is_json(self) -> bool {
+    pub const fn is_json(self) -> bool {
         matches!(self, Self::Json)
     }
 
     /// Returns `true` if pretty output was requested.
     #[allow(dead_code)]
-    pub fn is_pretty(self) -> bool {
+    pub const fn is_pretty(self) -> bool {
         matches!(self, Self::Pretty)
     }
 
     /// Returns `true` if text output was requested.
     #[allow(dead_code)]
-    pub fn is_text(self) -> bool {
+    pub const fn is_text(self) -> bool {
         matches!(self, Self::Text)
     }
 }
@@ -365,7 +365,7 @@ pub struct CliError {
     /// Optional suggestion for how to fix the error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
-    /// Machine-readable error code (e.g. "missing_agent", "invalid_state").
+    /// Machine-readable error code (e.g. "`missing_agent`", "`invalid_state`").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
 }

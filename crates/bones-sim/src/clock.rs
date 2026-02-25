@@ -47,7 +47,7 @@ pub struct SimulatedClock {
 impl SimulatedClock {
     /// Create a simulated clock from an assigned spec.
     #[must_use]
-    pub fn new(spec: ClockSpec) -> Self {
+    pub const fn new(spec: ClockSpec) -> Self {
         Self {
             spec,
             frozen_at: None,
@@ -56,7 +56,7 @@ impl SimulatedClock {
 
     /// Return the assigned spec.
     #[must_use]
-    pub fn spec(&self) -> ClockSpec {
+    pub const fn spec(&self) -> ClockSpec {
         self.spec
     }
 
@@ -86,13 +86,13 @@ impl SimulatedClock {
     }
 
     /// Unfreeze this clock.
-    pub fn unfreeze(&mut self) {
+    pub const fn unfreeze(&mut self) {
         self.frozen_at = None;
     }
 
     /// Whether this clock is currently frozen.
     #[must_use]
-    pub fn is_frozen(&self) -> bool {
+    pub const fn is_frozen(&self) -> bool {
         self.frozen_at.is_some()
     }
 }

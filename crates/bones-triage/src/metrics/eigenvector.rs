@@ -71,6 +71,7 @@ pub struct EigenvectorResult {
 /// An [`EigenvectorResult`] with scores for each item ID.
 #[must_use]
 #[instrument(skip(ng))]
+#[allow(clippy::cast_precision_loss)]
 pub fn eigenvector_centrality(
     ng: &NormalizedGraph,
     max_iter: usize,
@@ -128,7 +129,7 @@ pub fn eigenvector_centrality(
         // Normalize to unit L2 norm.
         let norm: f64 = new_scores.iter().map(|x| x * x).sum::<f64>().sqrt();
         if norm > 0.0 {
-            for x in new_scores.iter_mut() {
+            for x in &mut new_scores {
                 *x /= norm;
             }
         }

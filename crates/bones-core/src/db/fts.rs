@@ -43,7 +43,7 @@ pub const BM25_WEIGHT_LABELS: f64 = 1.0;
 ///
 /// # Arguments
 ///
-/// * `conn` — SQLite connection with the projection database open
+/// * `conn` — `SQLite` connection with the projection database open
 /// * `query` — FTS5 query string (supports stemming, prefix `*`, boolean ops)
 /// * `limit` — Maximum number of results
 ///

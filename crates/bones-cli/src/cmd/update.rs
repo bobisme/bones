@@ -120,7 +120,7 @@ fn run_update_single(
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
     let resolved_id = resolve_item_id(conn, raw_id)?
-        .ok_or_else(|| anyhow::anyhow!("item '{}' not found", raw_id))?;
+        .ok_or_else(|| anyhow::anyhow!("item '{raw_id}' not found"))?;
 
     let projector = project::Projector::new(conn);
     let mut applied: Vec<FieldUpdate> = Vec::new();
@@ -226,57 +226,48 @@ pub fn run_update(
             output,
             &CliError::with_details(msg, "Specify at least one field to update", "no_fields"),
         )?;
-        anyhow::bail!("{}", msg);
+        anyhow::bail!("{msg}");
     }
 
     // 3. Validate field values before touching the DB
     let validated_size: Option<Size> = if let Some(ref s) = args.size {
-        match s.parse::<Size>() {
-            Ok(sz) => Some(sz),
-            Err(_) => {
-                let msg = format!("invalid size '{}': expected xs|s|m|l|xl", s);
-                render_error(
-                    output,
-                    &CliError::with_details(&msg, "Valid sizes: xs s m l xl", "invalid_size"),
-                )?;
-                anyhow::bail!("{}", msg);
-            }
+        if let Ok(sz) = s.parse::<Size>() { Some(sz) } else {
+            let msg = format!("invalid size '{s}': expected xs|s|m|l|xl");
+            render_error(
+                output,
+                &CliError::with_details(&msg, "Valid sizes: xs s m l xl", "invalid_size"),
+            )?;
+            anyhow::bail!("{msg}");
         }
     } else {
         None
     };
 
     let validated_urgency: Option<Urgency> = if let Some(ref u) = args.urgency {
-        match u.parse::<Urgency>() {
-            Ok(urg) => Some(urg),
-            Err(_) => {
-                let msg = format!("invalid urgency '{}': expected punt|default|urgent", u);
-                render_error(
-                    output,
-                    &CliError::with_details(
-                        &msg,
-                        "Valid urgencies: punt default urgent",
-                        "invalid_urgency",
-                    ),
-                )?;
-                anyhow::bail!("{}", msg);
-            }
+        if let Ok(urg) = u.parse::<Urgency>() { Some(urg) } else {
+            let msg = format!("invalid urgency '{u}': expected punt|default|urgent");
+            render_error(
+                output,
+                &CliError::with_details(
+                    &msg,
+                    "Valid urgencies: punt default urgent",
+                    "invalid_urgency",
+                ),
+            )?;
+            anyhow::bail!("{msg}");
         }
     } else {
         None
     };
 
     let validated_kind: Option<Kind> = if let Some(ref k) = args.kind {
-        match k.parse::<Kind>() {
-            Ok(knd) => Some(knd),
-            Err(_) => {
-                let msg = format!("invalid kind '{}': expected task|bug|goal", k);
-                render_error(
-                    output,
-                    &CliError::with_details(&msg, "Valid kinds: task bug goal", "invalid_kind"),
-                )?;
-                anyhow::bail!("{}", msg);
-            }
+        if let Ok(knd) = k.parse::<Kind>() { Some(knd) } else {
+            let msg = format!("invalid kind '{k}': expected task|bug|goal");
+            render_error(
+                output,
+                &CliError::with_details(&msg, "Valid kinds: task bug goal", "invalid_kind"),
+            )?;
+            anyhow::bail!("{msg}");
         }
     } else {
         None
@@ -294,7 +285,7 @@ pub fn run_update(
             ),
         )
         .ok();
-        anyhow::anyhow!("{}", msg)
+        anyhow::anyhow!("{msg}")
     })?;
 
     // 5. Open projection DB
@@ -313,7 +304,7 @@ pub fn run_update(
                 output,
                 &CliError::with_details(msg, "Provide a non-empty title", "empty_title"),
             )?;
-            anyhow::bail!("{}", msg);
+            anyhow::bail!("{msg}");
         }
         pending.push((
             "title".to_string(),
@@ -380,7 +371,7 @@ pub fn run_update(
         writeln!(w, "{:-<88}", "")?;
         for result in &r.results {
             if result.ok {
-                let count = result.updates.as_ref().map(|u| u.len()).unwrap_or(0);
+                let count = result.updates.as_ref().map_or(0, std::vec::Vec::len);
                 writeln!(w, "ok    {:<16}  {} field(s) updated", result.id, count)?;
                 if let Some(ref updates) = result.updates {
                     for u in updates {
