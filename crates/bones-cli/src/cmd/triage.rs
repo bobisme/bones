@@ -146,6 +146,7 @@ pub fn run_triage(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_rows(
     top_picks: &[&RankedItem],
     actionable_blockers: &[&RankedItem],

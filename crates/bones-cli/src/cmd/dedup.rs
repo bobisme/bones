@@ -89,7 +89,7 @@ pub fn run_dedup(
 
     if open_items.is_empty() {
         let empty: Vec<DedupGroupOutput> = Vec::new();
-        return render(output, &empty, render_human);
+        return render(output, &empty, |g, w| render_human(g, w));
     }
 
     let open_set: HashSet<String> = open_items.iter().map(|i| i.item_id.clone()).collect();
@@ -227,10 +227,10 @@ pub fn run_dedup(
         })
         .collect();
 
-    render(output, &rendered, render_human)
+    render(output, &rendered, |g, w| render_human(g, w))
 }
 
-fn render_human(groups: &Vec<DedupGroupOutput>, w: &mut dyn Write) -> std::io::Result<()> {
+fn render_human(groups: &[DedupGroupOutput], w: &mut dyn Write) -> std::io::Result<()> {
     if groups.is_empty() {
         writeln!(w, "No duplicate groups found.")?;
         return Ok(());

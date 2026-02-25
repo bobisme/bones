@@ -140,6 +140,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
 ///
 /// Generates a unique item ID, writes the create event, and projects it.
 /// Returns the generated item ID string.
+#[allow(clippy::too_many_arguments)]
 pub fn create_item(
     project_root: &Path,
     db_path: &Path,

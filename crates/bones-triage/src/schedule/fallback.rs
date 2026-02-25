@@ -255,8 +255,8 @@ fn least_loaded_agent(load: &[usize]) -> usize {
 /// Enforce fairness: steal the lowest-priority item from over-loaded agents
 /// and give it to any agent with zero items, when items >= `agent_count`.
 fn enforce_fairness(
-    assignments: &mut Vec<Assignment>,
-    load: &mut Vec<usize>,
+    assignments: &mut [Assignment],
+    load: &mut [usize],
     agent_count: usize,
     scores: &HashMap<String, f64>,
 ) {

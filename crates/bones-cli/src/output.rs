@@ -137,9 +137,9 @@ pub fn pretty_table(w: &mut dyn Write, headers: &[&str], rows: &[Vec<String>]) -
 
     for row in rows {
         write!(w, "│")?;
-        for idx in 0..headers.len() {
+        for (idx, width) in widths.iter().enumerate() {
             let value = row.get(idx).map_or("", String::as_str);
-            write!(w, " {value:<width$} ", width = widths[idx])?;
+            write!(w, " {value:<width$} ")?;
             write!(w, "│")?;
         }
         writeln!(w)?;
