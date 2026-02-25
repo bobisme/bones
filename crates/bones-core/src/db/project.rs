@@ -56,8 +56,13 @@ pub struct Projector<'conn> {
 
 impl<'conn> Projector<'conn> {
     /// Create a new projector backed by the given connection.
-    #[allow(clippy::missing_const_for_fn)]
+    ///
+    /// Ensures the `projected_events` tracking table exists before any
+    /// projection work is attempted.
     pub fn new(conn: &'conn Connection) -> Self {
+        // Best-effort: if the DDL fails (e.g. read-only DB) we'll still
+        // attempt projection and let it fail at the INSERT instead.
+        let _ = ensure_tracking_table(conn);
         let has_agent_column = projected_events_has_agent_column(conn).unwrap_or(false);
         Self {
             conn,
@@ -1911,5 +1916,27 @@ mod tests {
         let item = query::get_item(&conn, "bn-late", false).unwrap().unwrap();
         assert_eq!(item.title, "Real Title");
         assert_eq!(item.created_at_us, 900);
+    }
+
+    /// Regression: Projector::new() must create the projected_events table
+    /// on a migrated DB that never had ensure_tracking_table() called.
+    /// Without this, fresh installs fail with "record projected event hash".
+    #[test]
+    fn projector_new_creates_tracking_table_on_fresh_db() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        migrations::migrate(&mut conn).expect("migrate");
+        // Do NOT call ensure_tracking_table — simulate fresh install.
+
+        // Projector::new should create the table automatically.
+        let projector = Projector::new(&conn);
+        let event = make_create("bn-fresh", "Fresh item", "h1", 1000);
+        projector
+            .project_event(&event)
+            .expect("project_event should succeed on fresh DB");
+
+        let item = query::get_item(&conn, "bn-fresh", false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.title, "Fresh item");
     }
 }

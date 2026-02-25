@@ -38,7 +38,8 @@ fn open_db(project_root: &std::path::Path) -> anyhow::Result<Connection> {
     }
 }
 
-/// Emit an `item.update` event for the parent field.
+/// Emit an `item.update` event for the parent field and apply it to the
+/// projection inline so that subsequent reads see the change immediately.
 fn emit_parent_event(
     project_root: &std::path::Path,
     agent: &str,
@@ -90,6 +91,15 @@ fn emit_parent_event(
         shard_mgr
             .append_raw(year, month, &line)
             .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+    }
+
+    // Apply inline so the projection reflects the move immediately.
+    let db_path = bones_dir.join("bones.db");
+    if let Some(conn) = try_open_projection(&db_path)? {
+        let projector = bones_core::db::project::Projector::new(&conn);
+        if let Err(e) = projector.project_event(&event) {
+            tracing::warn!("move projection failed (will recover on rebuild): {e}");
+        }
     }
 
     Ok(())
@@ -399,7 +409,6 @@ mod tests {
     fn run_move_reparents_task_under_goal() {
         use crate::output::OutputMode;
         use bones_core::db::query::{get_item, try_open_projection};
-        use bones_core::db::rebuild;
 
         let (_dir, root, task_id, goal_id) = setup_test_project_with_items();
 
@@ -411,12 +420,8 @@ mod tests {
         run_move(&args, Some("test-agent"), OutputMode::Human, &root)
             .expect("run_move should succeed");
 
-        // Rebuild and verify parent_id is set
-        let bones_dir = root.join(".bones");
-        let events_dir = bones_dir.join("events");
-        let db_path = bones_dir.join("bones.db");
-        rebuild::rebuild(&events_dir, &db_path).expect("rebuild");
-
+        // Verify parent_id is set immediately (no rebuild needed)
+        let db_path = root.join(".bones").join("bones.db");
         let conn = try_open_projection(&db_path)
             .expect("open db")
             .expect("db exists");
@@ -426,7 +431,7 @@ mod tests {
         assert_eq!(
             item.parent_id.as_deref(),
             Some(goal_id.as_str()),
-            "task should be parented under goal"
+            "task should be parented under goal without rebuild"
         );
     }
 
