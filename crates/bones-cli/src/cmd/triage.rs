@@ -9,7 +9,7 @@ use bones_core::db::query;
 
 use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
 use crate::output::{
-    CliError, OutputMode, pretty_section, pretty_table, render_error, render_mode,
+    CliError, OutputMode, pretty_color_enabled, pretty_section, render_error, render_mode,
 };
 
 /// Arguments for `bn triage`.
@@ -202,134 +202,150 @@ fn render_triage_human(
     needs_decomposition: &[&RankedItem],
     cycles: &[Vec<String>],
 ) -> std::io::Result<()> {
+    let color = pretty_color_enabled();
     pretty_section(w, "Triage report")?;
-    render_ranked_section(w, "Top Picks", top_picks)?;
-    writeln!(w)?;
-    render_actionable_blocker_section(w, actionable_blockers)?;
-    writeln!(w)?;
-    render_hub_section(w, blocked_hubs)?;
-    writeln!(w)?;
-    render_ranked_section(w, "Quick Wins", quick_wins)?;
-    writeln!(w)?;
-    render_decomposition_section(w, needs_decomposition)?;
-    writeln!(w)?;
-    pretty_section(w, "Cycles")?;
-    if cycles.is_empty() {
-        writeln!(w, "(none)")?;
+
+    write_section_heading(w, "Top Picks", color)?;
+    if top_picks.is_empty() {
+        writeln!(w, "  (none)")?;
     } else {
-        let rows: Vec<Vec<String>> = cycles
-            .iter()
-            .enumerate()
-            .map(|(idx, cycle)| vec![(idx + 1).to_string(), cycle.join(" -> ")])
-            .collect();
-        pretty_table(w, &["#", "CYCLE"], &rows)?;
+        for item in top_picks {
+            write_item_line(w, item, color)?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Actionable Blockers", color)?;
+    if actionable_blockers.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for item in actionable_blockers {
+            write_item_line(w, item, color)?;
+            writeln!(
+                w,
+                "    {}",
+                style_if(color, &format!("ready; unblocks {}", item.unblocks_active), DIM)
+            )?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Blocked Hubs", color)?;
+    if blocked_hubs.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for item in blocked_hubs {
+            write_item_line(w, item, color)?;
+            writeln!(
+                w,
+                "    {}",
+                style_if(
+                    color,
+                    &format!(
+                        "blocked by {}; unblocks {}",
+                        item.blocked_by_active, item.unblocks_active
+                    ),
+                    DIM
+                )
+            )?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Quick Wins", color)?;
+    if quick_wins.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for item in quick_wins {
+            write_item_line(w, item, color)?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Needs Decomposition", color)?;
+    if needs_decomposition.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for item in needs_decomposition {
+            write_item_line(w, item, color)?;
+            writeln!(
+                w,
+                "    {}",
+                style_if(
+                    color,
+                    &format!("{}; no children", item.size.as_deref().unwrap_or("?")),
+                    DIM
+                )
+            )?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Cycles", color)?;
+    if cycles.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for (idx, cycle) in cycles.iter().enumerate() {
+            writeln!(
+                w,
+                "  {}. {}",
+                idx + 1,
+                style_if(color, &cycle.join(" -> "), YELLOW)
+            )?;
+        }
     }
     Ok(())
 }
 
-fn render_ranked_section(
+// -- pretty helpers ---------------------------------------------------------
+
+const DIM: u8 = 0;
+const YELLOW: u8 = 1;
+
+fn style_if(color: bool, text: &str, kind: u8) -> String {
+    use crossterm::style::Stylize;
+    if !color {
+        return text.to_string();
+    }
+    match kind {
+        DIM => format!("{}", text.dark_grey()),
+        YELLOW => format!("{}", text.yellow()),
+        _ => text.to_string(),
+    }
+}
+
+fn write_section_heading(w: &mut dyn Write, title: &str, color: bool) -> std::io::Result<()> {
+    use crossterm::style::Stylize;
+    if color {
+        writeln!(w, "{}", title.bold())
+    } else {
+        writeln!(w, "{title}")
+    }
+}
+
+fn write_item_line(
     w: &mut dyn Write,
-    title: &str,
-    items: &[&RankedItem],
+    item: &RankedItem,
+    color: bool,
 ) -> std::io::Result<()> {
-    pretty_section(w, title)?;
-
-    if items.is_empty() {
-        writeln!(w, "(none)")?;
-        return Ok(());
+    use crossterm::style::Stylize;
+    if color {
+        writeln!(
+            w,
+            "  {} {}  {}",
+            item.id.clone().cyan(),
+            item.title,
+            format_score(item.score).dark_grey()
+        )
+    } else {
+        writeln!(
+            w,
+            "  {} {}  {}",
+            item.id,
+            item.title,
+            format_score(item.score)
+        )
     }
-
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|item| {
-            vec![
-                item.id.clone(),
-                format_score(item.score),
-                item.title.clone(),
-            ]
-        })
-        .collect();
-    pretty_table(w, &["ID", "SCORE", "TITLE"], &rows)?;
-
-    Ok(())
-}
-
-fn render_actionable_blocker_section(
-    w: &mut dyn Write,
-    items: &[&RankedItem],
-) -> std::io::Result<()> {
-    pretty_section(w, "Actionable Blockers")?;
-
-    if items.is_empty() {
-        writeln!(w, "(none)")?;
-        return Ok(());
-    }
-
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|item| {
-            vec![
-                item.id.clone(),
-                format!("ready; unblocks {}", item.unblocks_active),
-                format_score(item.score),
-                item.title.clone(),
-            ]
-        })
-        .collect();
-    pretty_table(w, &["ID", "STATUS", "SCORE", "TITLE"], &rows)?;
-
-    Ok(())
-}
-
-fn render_hub_section(w: &mut dyn Write, items: &[&RankedItem]) -> std::io::Result<()> {
-    pretty_section(w, "Blocked Hubs")?;
-
-    if items.is_empty() {
-        writeln!(w, "(none)")?;
-        return Ok(());
-    }
-
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|item| {
-            vec![
-                item.id.clone(),
-                format!(
-                    "blocked by {}; unblocks {}",
-                    item.blocked_by_active, item.unblocks_active
-                ),
-                format_score(item.score),
-                item.title.clone(),
-            ]
-        })
-        .collect();
-    pretty_table(w, &["ID", "STATUS", "SCORE", "TITLE"], &rows)?;
-
-    Ok(())
-}
-
-fn render_decomposition_section(w: &mut dyn Write, items: &[&RankedItem]) -> std::io::Result<()> {
-    pretty_section(w, "Needs Decomposition")?;
-
-    if items.is_empty() {
-        writeln!(w, "(none)")?;
-        return Ok(());
-    }
-
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|item| {
-            vec![
-                item.id.clone(),
-                format!("{}; no children", item.size.as_deref().unwrap_or("?")),
-                format_score(item.score),
-                item.title.clone(),
-            ]
-        })
-        .collect();
-    pretty_table(w, &["ID", "STATUS", "SCORE", "TITLE"], &rows)?;
-
-    Ok(())
 }
 
 fn render_triage_text(

@@ -191,6 +191,7 @@ All commands support JSON output with `--format json` for parsing. If a command 
 - **Run checks before requesting review**: `just check` (or your project's build/test command). Fix any failures before proceeding.
 - After finishing a bone, follow [finish.md](.agents/botbox/finish.md). **Workers: do NOT push** — the lead handles merges and pushes.
 - **Install locally** after releasing: `maw exec default -- just install`
+- **Update README install tag** on every release: bump the `--tag vX.Y.Z` in `README.md` to match the new version.
 
 ### Identity
 

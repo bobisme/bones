@@ -31,7 +31,7 @@ use std::io::{self, IsTerminal, Write};
 /// Shared width for human pretty separators.
 pub const PRETTY_RULE_WIDTH: usize = 72;
 
-fn pretty_color_enabled() -> bool {
+pub fn pretty_color_enabled() -> bool {
     io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }
 
