@@ -42,9 +42,11 @@ If the task is already small and clear (one reviewable change), skip planning an
 6. **Wire dependencies.** If order matters:
    - `maw exec default -- bn triage dep add <earlier> --blocks <later>`
    - Parent bones (epics) get children via `maw exec default -- bn triage dep add <parent> --blocks <child>`
+   - **Phased plans**: When a plan has phases (Phase I, II, III...), always wire phase goal bones sequentially so earlier phases block later ones: `bn triage dep add <phase-1-goal> --blocks <phase-2-goal>`. Without this, triage treats all phases as equal priority, defeating the purpose of phased planning.
 7. **Verify the graph.** `maw exec default -- bn triage graph` — check that:
    - Parallel work is actually parallel (not chained when it doesn't need to be)
    - Dependencies reflect reality (you can't test without implementing)
+   - **Phase ordering is present**: If the plan has phases, verify phase goals have dependency edges between them. If all phases have identical triage scores, the phase ordering is likely missing.
 8. **Announce.** `bus send --agent $AGENT $BOTBOX_PROJECT "Planned <spec-name>: N bones created" -L planning`
 
 ## What Makes a Good Bone

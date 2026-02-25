@@ -22,7 +22,8 @@ Groom a set of ready bones to improve backlog quality. Use this when you need to
    - **Schema before code**: If bone A changes a data format, config schema, or database structure that bone B relies on → `bn triage dep add <A> --blocks <B>`
    - **Core before extension**: If bone A adds base functionality and bone B extends it → `bn triage dep add <A> --blocks <B>`
    - **Shared file conflict**: If two bones will edit the same file in overlapping regions, sequence them to avoid merge conflicts → `bn triage dep add <earlier> --blocks <later>`
-   - Use `maw exec default -- bn triage graph` to visualize the full dependency graph across all open bones — verify there are no missing edges or unintended isolation.
+   - **Phased plans**: If bones come from a phased plan (Phase I, II, III...), verify that phase goal bones are wired sequentially (`bn triage dep add <phase-1-goal> --blocks <phase-2-goal>`). Without this, triage treats all phases as equal priority.
+   - Use `maw exec default -- bn triage graph` to visualize the full dependency graph across all open bones — verify there are no missing edges or unintended isolation. If all phases have identical triage scores, the phase ordering is likely missing.
    - Add a comment when adding a dependency to explain why: `maw exec default -- bn bone comment add <blocked-id> "Blocked by <blocker-id>: <reason>"`
 4. Check bone size: each bone should be one resumable unit of work — if a session crashes after completing it, the next session knows exactly where to pick up. If a bone covers multiple distinct steps, break it down:
    - Create smaller child bones with `maw exec default -- bn create --title "..." --kind task` and `maw exec default -- bn triage dep add <earlier> --blocks <later>`.
