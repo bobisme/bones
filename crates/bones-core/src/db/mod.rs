@@ -46,12 +46,16 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-fn configure_connection(conn: &Connection) -> rusqlite::Result<()> {
-    conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
-    let _journal_mode: String =
-        conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
-    conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
+fn configure_connection(conn: &Connection) -> anyhow::Result<()> {
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .context("PRAGMA foreign_keys = ON")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .context("PRAGMA synchronous = NORMAL")?;
+    let _journal_mode: String = conn
+        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+        .context("PRAGMA journal_mode = WAL")?;
+    conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)
+        .context("busy_timeout")?;
     Ok(())
 }
 

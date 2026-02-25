@@ -885,9 +885,10 @@ pub fn try_open_projection(path: &std::path::Path) -> Result<Option<Connection>>
             }
         }
         Err(e) => {
+            // Include the full causal chain so pragma/lock/IO failures are diagnosable.
             tracing::warn!(
                 path = %path.display(),
-                error = %e,
+                error = format!("{e:#}"),
                 "failed to open projection database, needs rebuild"
             );
             Ok(None)
