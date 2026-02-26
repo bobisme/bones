@@ -127,6 +127,10 @@ project-root/          ← bare repo (no source files here)
 | Next N bones | `maw exec default -- bn next N` (e.g., `bn next 4` for dispatch) |
 | Show bone | `maw exec default -- bn show <id>` |
 | Create | `maw exec default -- bn create --title "..." --description "..."` |
+| Create goal | `maw exec default -- bn create --title "..." --kind goal` |
+| Create child | `maw exec default -- bn create --title "..." --parent <goal-id>` |
+| Reparent bone | `maw exec default -- bn bone move <id> --parent <goal-id>` |
+| Detach from parent | `maw exec default -- bn bone move <id> --parent none` |
 | Start work | `maw exec default -- bn do <id>` |
 | Add comment | `maw exec default -- bn bone comment add <id> "message"` |
 | Close | `maw exec default -- bn done <id>` |
