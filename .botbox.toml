@@ -1,8 +1,7 @@
-# Botbox project configuration
-# See: https://github.com/anthropics/botbox
+#:schema https://raw.githubusercontent.com/bobisme/botbox/refs/heads/main/schemas/botbox.schema.json
 
 version = "1.0.16"
-push_main = false
+push_main = true
 
 [project]
 name = "bones"

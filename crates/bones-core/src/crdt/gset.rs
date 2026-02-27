@@ -17,7 +17,7 @@ pub struct GSet<T: Eq + std::hash::Hash + Clone> {
 
 impl<T: Eq + std::hash::Hash + Clone> GSet<T> {
     /// Create a new empty G-Set.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             elements: HashSet::new(),
@@ -42,13 +42,13 @@ impl<T: Eq + std::hash::Hash + Clone> GSet<T> {
     }
 
     /// Returns the number of elements in the set.
-    #[must_use] 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.elements.len()
     }
 
     /// Returns true if the set is empty.
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }

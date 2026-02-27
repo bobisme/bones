@@ -204,10 +204,7 @@ impl CacheManager {
     /// Parse TSJSON events from shards using the standard shard replay
     /// pipeline.
     fn parse_tsjson(&self) -> Result<Vec<Event>> {
-        let bones_dir = self
-            .events_dir
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
+        let bones_dir = self.events_dir.parent().unwrap_or_else(|| Path::new("."));
         let shard_mgr = ShardManager::new(bones_dir);
 
         let content = shard_mgr
@@ -282,9 +279,7 @@ fn fingerprint_dir(dir: &Path) -> Result<u64> {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |d| {
-                u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
-            });
+            .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
 
         entries.insert(name, (size, mtime_ns));
     }

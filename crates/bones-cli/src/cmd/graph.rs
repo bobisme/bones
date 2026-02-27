@@ -152,7 +152,9 @@ fn render_tree(
     depth_limit: Option<usize>,
     out: &mut String,
 ) {
-    let root_idx = if let Some(idx) = raw.node_index(root_id) { idx } else {
+    let root_idx = if let Some(idx) = raw.node_index(root_id) {
+        idx
+    } else {
         let _ = writeln!(out, "  (no connections)");
         return;
     };
@@ -333,14 +335,12 @@ fn render_mermaid_item(
     all_nodes.insert(id.to_string());
 
     if show_down {
-        let (nodes, edges) =
-            collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
+        let (nodes, edges) = collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
         all_nodes.extend(nodes);
         all_edges.extend(edges);
     }
     if show_up {
-        let (nodes, edges) =
-            collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
+        let (nodes, edges) = collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
         all_nodes.extend(nodes);
         all_edges.extend(edges);
     }
@@ -464,14 +464,12 @@ fn render_dot_item(
     all_nodes.insert(id.to_string());
 
     if show_down {
-        let (nodes, edges) =
-            collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
+        let (nodes, edges) = collect_subgraph(raw, id, petgraph::Direction::Outgoing, args.depth);
         all_nodes.extend(nodes);
         all_edges.extend(edges);
     }
     if show_up {
-        let (nodes, edges) =
-            collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
+        let (nodes, edges) = collect_subgraph(raw, id, petgraph::Direction::Incoming, args.depth);
         all_nodes.extend(nodes);
         all_edges.extend(edges);
     }
@@ -479,7 +477,9 @@ fn render_dot_item(
     all_edges.sort();
     all_edges.dedup();
 
-    let mut out = String::from("digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n");
+    let mut out = String::from(
+        "digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n",
+    );
 
     let mut sorted_nodes: Vec<&String> = all_nodes.iter().collect();
     sorted_nodes.sort();
@@ -512,7 +512,9 @@ fn render_dot_summary(
     open_connected: &HashSet<String>,
     open_edges: &[(String, String)],
 ) -> String {
-    let mut out = String::from("digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n");
+    let mut out = String::from(
+        "digraph bones {\n    rankdir=TB;\n    node [shape=box, style=filled, fontname=\"Helvetica\"];\n\n",
+    );
 
     let mut sorted_nodes: Vec<&String> = open_connected.iter().collect();
     sorted_nodes.sort();
@@ -545,10 +547,11 @@ fn render_dot_summary(
 pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> anyhow::Result<()> {
     // Validate item ID if given
     if let Some(ref id) = args.id
-        && let Err(e) = validate::validate_item_id(id) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
-        }
+        && let Err(e) = validate::validate_item_id(id)
+    {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
 
     // Find .bones dir
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
@@ -566,7 +569,9 @@ pub fn run_graph(args: &GraphArgs, output: OutputMode, project_root: &Path) -> a
     })?;
 
     let db_path = bones_dir.join("bones.db");
-    let conn = if let Some(c) = try_open_projection(&db_path)? { c } else {
+    let conn = if let Some(c) = try_open_projection(&db_path)? {
+        c
+    } else {
         let msg = "projection database not found; run `bn admin rebuild` first";
         render_error(output, &CliError::new(msg))?;
         anyhow::bail!("{msg}");
@@ -898,10 +903,8 @@ fn run_graph_summary(
                         let _ = writeln!(out, "    [{state_mark}] {id} -- {title}");
                     } else {
                         let arrow_str = targets.join(", ");
-                        let _ = writeln!(
-                            out,
-                            "    [{state_mark}] {id} -- {title}  --> {arrow_str}"
-                        );
+                        let _ =
+                            writeln!(out, "    [{state_mark}] {id} -- {title}  --> {arrow_str}");
                     }
                 }
             }
@@ -1311,11 +1314,17 @@ mod tests {
         let mut meta = HashMap::new();
         meta.insert(
             "bn-aaa".into(),
-            ItemMeta { title: "Alpha".into(), state: "open".into() },
+            ItemMeta {
+                title: "Alpha".into(),
+                state: "open".into(),
+            },
         );
         meta.insert(
             "bn-bbb".into(),
-            ItemMeta { title: "Beta".into(), state: "doing".into() },
+            ItemMeta {
+                title: "Beta".into(),
+                state: "doing".into(),
+            },
         );
 
         let args = GraphArgs {
@@ -1328,9 +1337,15 @@ mod tests {
         };
 
         let out = render_mermaid_item(&raw, &meta, "bn-aaa", &args);
-        assert!(out.starts_with("graph TD\n"), "should start with mermaid header: {out}");
+        assert!(
+            out.starts_with("graph TD\n"),
+            "should start with mermaid header: {out}"
+        );
         assert!(out.contains("bn-aaa"), "should contain root node: {out}");
-        assert!(out.contains("bn-bbb"), "should contain downstream node: {out}");
+        assert!(
+            out.contains("bn-bbb"),
+            "should contain downstream node: {out}"
+        );
         assert!(out.contains("-->"), "should contain edge arrow: {out}");
         assert!(out.contains("Alpha"), "should contain title: {out}");
         // Doing state should get yellow styling
@@ -1373,7 +1388,10 @@ mod tests {
         };
         let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_down);
         assert!(out.contains("bn-ccc"), "downstream should show C: {out}");
-        assert!(!out.contains("bn-aaa"), "downstream-only should NOT show A: {out}");
+        assert!(
+            !out.contains("bn-aaa"),
+            "downstream-only should NOT show A: {out}"
+        );
 
         // --up only from B: should show A but not C
         let args_up = GraphArgs {
@@ -1386,7 +1404,10 @@ mod tests {
         };
         let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_up);
         assert!(out.contains("bn-aaa"), "upstream should show A: {out}");
-        assert!(!out.contains("bn-ccc"), "upstream-only should NOT show C: {out}");
+        assert!(
+            !out.contains("bn-ccc"),
+            "upstream-only should NOT show C: {out}"
+        );
     }
 
     #[test]
@@ -1412,11 +1433,17 @@ mod tests {
         let mut meta = HashMap::new();
         meta.insert(
             "bn-aaa".into(),
-            ItemMeta { title: "Alpha".into(), state: "open".into() },
+            ItemMeta {
+                title: "Alpha".into(),
+                state: "open".into(),
+            },
         );
         meta.insert(
             "bn-bbb".into(),
-            ItemMeta { title: "Beta".into(), state: "done".into() },
+            ItemMeta {
+                title: "Beta".into(),
+                state: "done".into(),
+            },
         );
 
         let args = GraphArgs {
@@ -1429,12 +1456,24 @@ mod tests {
         };
 
         let out = render_dot_item(&raw, &meta, "bn-aaa", &args);
-        assert!(out.starts_with("digraph bones {"), "should start with digraph: {out}");
-        assert!(out.contains("\"bn-aaa\""), "should contain root node: {out}");
-        assert!(out.contains("\"bn-bbb\""), "should contain downstream node: {out}");
+        assert!(
+            out.starts_with("digraph bones {"),
+            "should start with digraph: {out}"
+        );
+        assert!(
+            out.contains("\"bn-aaa\""),
+            "should contain root node: {out}"
+        );
+        assert!(
+            out.contains("\"bn-bbb\""),
+            "should contain downstream node: {out}"
+        );
         assert!(out.contains("->"), "should contain edge arrow: {out}");
         assert!(out.contains("Alpha"), "should contain title: {out}");
-        assert!(out.contains("penwidth=3.0"), "root should have thick border: {out}");
+        assert!(
+            out.contains("penwidth=3.0"),
+            "root should have thick border: {out}"
+        );
         // Done state should get green fill
         assert!(out.contains("#d4edda"), "should style done node: {out}");
         assert!(out.ends_with("}\n"), "should end with closing brace: {out}");
@@ -1451,11 +1490,17 @@ mod tests {
         let mut meta = HashMap::new();
         meta.insert(
             "bn-001".into(),
-            ItemMeta { title: "First".into(), state: "open".into() },
+            ItemMeta {
+                title: "First".into(),
+                state: "open".into(),
+            },
         );
         meta.insert(
             "bn-002".into(),
-            ItemMeta { title: "Second".into(), state: "doing".into() },
+            ItemMeta {
+                title: "Second".into(),
+                state: "doing".into(),
+            },
         );
 
         // We need a dummy RawGraph for the signature
@@ -1469,7 +1514,10 @@ mod tests {
         assert!(out.starts_with("graph TD\n"), "mermaid header: {out}");
         assert!(out.contains("bn-001"), "should contain first node: {out}");
         assert!(out.contains("bn-002"), "should contain second node: {out}");
-        assert!(out.contains("bn-001 --> bn-002"), "should contain edge: {out}");
+        assert!(
+            out.contains("bn-001 --> bn-002"),
+            "should contain edge: {out}"
+        );
     }
 
     #[test]
@@ -1483,18 +1531,33 @@ mod tests {
         let mut meta = HashMap::new();
         meta.insert(
             "bn-001".into(),
-            ItemMeta { title: "First".into(), state: "open".into() },
+            ItemMeta {
+                title: "First".into(),
+                state: "open".into(),
+            },
         );
         meta.insert(
             "bn-002".into(),
-            ItemMeta { title: "Second".into(), state: "open".into() },
+            ItemMeta {
+                title: "Second".into(),
+                state: "open".into(),
+            },
         );
 
         let out = render_dot_summary(&meta, &open_connected, &open_edges);
         assert!(out.starts_with("digraph bones {"), "dot header: {out}");
-        assert!(out.contains("\"bn-001\""), "should contain first node: {out}");
-        assert!(out.contains("\"bn-002\""), "should contain second node: {out}");
-        assert!(out.contains("\"bn-001\" -> \"bn-002\""), "should contain edge: {out}");
+        assert!(
+            out.contains("\"bn-001\""),
+            "should contain first node: {out}"
+        );
+        assert!(
+            out.contains("\"bn-002\""),
+            "should contain second node: {out}"
+        );
+        assert!(
+            out.contains("\"bn-001\" -> \"bn-002\""),
+            "should contain edge: {out}"
+        );
         assert!(out.ends_with("}\n"), "should end properly: {out}");
     }
 
@@ -1519,20 +1582,32 @@ mod tests {
     #[test]
     fn graph_format_from_args() {
         let args = GraphArgs {
-            id: None, down: false, up: false, depth: None,
-            mermaid: false, dot: false,
+            id: None,
+            down: false,
+            up: false,
+            depth: None,
+            mermaid: false,
+            dot: false,
         };
         assert_eq!(args.format(), GraphFormat::Ascii);
 
         let args = GraphArgs {
-            id: None, down: false, up: false, depth: None,
-            mermaid: true, dot: false,
+            id: None,
+            down: false,
+            up: false,
+            depth: None,
+            mermaid: true,
+            dot: false,
         };
         assert_eq!(args.format(), GraphFormat::Mermaid);
 
         let args = GraphArgs {
-            id: None, down: false, up: false, depth: None,
-            mermaid: false, dot: true,
+            id: None,
+            down: false,
+            up: false,
+            depth: None,
+            mermaid: false,
+            dot: true,
         };
         assert_eq!(args.format(), GraphFormat::Dot);
     }

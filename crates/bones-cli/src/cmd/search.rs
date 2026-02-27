@@ -110,7 +110,9 @@ pub fn run_search(
 
     let db_path = project_root.join(".bones/bones.db");
 
-    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? {
+        c
+    } else {
         render_error(
             output,
             &CliError::with_details(

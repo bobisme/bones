@@ -187,7 +187,9 @@ fn run_archive_single(
         anyhow::bail!("{}", e.reason);
     }
 
-    let resolved_id = if let Some(id) = resolve_item_id(conn, id)? { id } else {
+    let resolved_id = if let Some(id) = resolve_item_id(conn, id)? {
+        id
+    } else {
         let msg = format!("item '{id}' not found");
         render_error(
             output,
@@ -200,7 +202,9 @@ fn run_archive_single(
         anyhow::bail!("{msg}");
     };
 
-    let item = if let Some(item) = query::get_item(conn, &resolved_id, false)? { item } else {
+    let item = if let Some(item) = query::get_item(conn, &resolved_id, false)? {
+        item
+    } else {
         let msg = format!("item '{resolved_id}' not found");
         render_error(
             output,

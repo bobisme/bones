@@ -419,9 +419,7 @@ pub fn open_db_with_retry(
                         );
                     }
                     Err(e) => {
-                        return Err(RecoveryError::Io(io::Error::other(
-                            e.to_string(),
-                        )));
+                        return Err(RecoveryError::Io(io::Error::other(e.to_string())));
                     }
                 }
             }
@@ -433,9 +431,7 @@ pub fn open_db_with_retry(
                         "database locked on open, retrying..."
                     );
                 } else {
-                    return Err(RecoveryError::Io(io::Error::other(
-                        err_str,
-                    )));
+                    return Err(RecoveryError::Io(io::Error::other(err_str)));
                 }
             }
         }

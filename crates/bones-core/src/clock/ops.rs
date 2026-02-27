@@ -95,14 +95,22 @@ fn join_event(a: &Event, b: &Event) -> Event {
                 let diff = na - nb;
                 let lifted_a_left = (**al).clone().lift(diff);
                 let lifted_a_right = (**ar).clone().lift(diff);
-                Event::branch(*nb, join_event(&lifted_a_left, bl), join_event(&lifted_a_right, br))
+                Event::branch(
+                    *nb,
+                    join_event(&lifted_a_left, bl),
+                    join_event(&lifted_a_right, br),
+                )
             } else {
                 // b's base is higher — lift b's children by the diff,
                 // use a's base (the lower), and merge.
                 let diff = nb - na;
                 let lifted_b_left = (**bl).clone().lift(diff);
                 let lifted_b_right = (**br).clone().lift(diff);
-                Event::branch(*na, join_event(al, &lifted_b_left), join_event(ar, &lifted_b_right))
+                Event::branch(
+                    *na,
+                    join_event(al, &lifted_b_left),
+                    join_event(ar, &lifted_b_right),
+                )
             }
         }
     }

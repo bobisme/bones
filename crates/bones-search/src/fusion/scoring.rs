@@ -242,7 +242,7 @@ pub fn rrf_fuse(
 ///     println!("{}: {} ({})", cand.item_id, cand.composite_score, cand.risk);
 /// }
 /// ```
-#[must_use] 
+#[must_use]
 pub fn build_dup_candidates(
     fused: &[(String, f32)],
     lexical: &[&str],
@@ -328,7 +328,7 @@ pub fn build_dup_candidates(
 /// assert_eq!(classify_risk(0.95, &config), DuplicateRisk::LikelyDuplicate);
 /// assert_eq!(classify_risk(0.75, &config), DuplicateRisk::PossiblyRelated);
 /// ```
-#[must_use] 
+#[must_use]
 pub fn classify_risk(score: f32, config: &SearchConfig) -> DuplicateRisk {
     if score >= config.likely_duplicate_threshold {
         DuplicateRisk::LikelyDuplicate

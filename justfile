@@ -7,7 +7,7 @@ check:
     cargo test --workspace
 
 install:
-    cargo install --path crates/bones-cli
+    cargo install --locked --path crates/bones-cli
 
 completions:
     mkdir -p ~/.local/share/bash-completion/completions

@@ -149,7 +149,11 @@ pub fn structural_similarity(
 /// # Errors
 ///
 /// Returns an error if any `SQLite` query fails.
-#[allow(clippy::implicit_hasher, clippy::cast_precision_loss, clippy::option_if_let_else)]
+#[allow(
+    clippy::implicit_hasher,
+    clippy::cast_precision_loss,
+    clippy::option_if_let_else
+)]
 pub fn structural_similarity_with_map(
     a: &str,
     b: &str,
@@ -185,7 +189,9 @@ pub fn structural_similarity_with_map(
     // 4. Build node lookup from petgraph (if not provided)
     // -----------------------------------------------------------------------
     let built_map;
-    let map_ref = if let Some(m) = node_map { m } else {
+    let map_ref = if let Some(m) = node_map {
+        m
+    } else {
         built_map = graph
             .node_indices()
             .filter_map(|idx| graph.node_weight(idx).map(|s| (s.as_str(), idx)))

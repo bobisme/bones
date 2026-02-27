@@ -219,9 +219,7 @@ fn collect_log_rows(project_root: &Path, args: &LogArgs) -> anyhow::Result<Vec<E
     let since_us = args.since.as_deref().map(parse_since_micros).transpose()?;
 
     let mut rows: Vec<EventRow> = collect_events(project_root, |partial| {
-        partial.item_id_raw == args.id
-            && since_us
-                .is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
+        partial.item_id_raw == args.id && since_us.is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
     })?
     .iter()
     .map(to_event_row)
@@ -240,8 +238,7 @@ fn collect_history_rows(project_root: &Path, args: &HistoryArgs) -> anyhow::Resu
     let since_us = args.since.as_deref().map(parse_since_micros).transpose()?;
 
     let mut rows: Vec<EventRow> = collect_events(project_root, |partial| {
-        since_us
-            .is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
+        since_us.is_none_or(|cutoff| partial.wall_ts_us >= cutoff)
             && args
                 .agent
                 .as_deref()
@@ -265,10 +262,7 @@ fn event_field_changes(event: &Event) -> Vec<(String, Value)> {
             .to_json_value()
             .ok()
             .and_then(|v| match v {
-                Value::Object(obj) => Some(
-                    obj.into_iter()
-                        .collect::<Vec<_>>(),
-                ),
+                Value::Object(obj) => Some(obj.into_iter().collect::<Vec<_>>()),
                 _ => None,
             })
             .unwrap_or_default(),

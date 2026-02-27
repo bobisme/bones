@@ -83,7 +83,8 @@ fn hybrid_search_inner(
         return Ok(Vec::new());
     }
 
-    let lexical_hits = search_bm25(db, query, u32::try_from(limit).unwrap_or(u32::MAX)).context("lexical search failed")?;
+    let lexical_hits = search_bm25(db, query, u32::try_from(limit).unwrap_or(u32::MAX))
+        .context("lexical search failed")?;
     let lexical_ranked_owned: Vec<String> = lexical_hits.into_iter().map(|h| h.item_id).collect();
     let lexical_ranked: Vec<&str> = lexical_ranked_owned.iter().map(String::as_str).collect();
 

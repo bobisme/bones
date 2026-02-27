@@ -121,9 +121,7 @@ pub fn run_migrate_format(
             );
         }
         OutputMode::Text => {
-            println!(
-                "migrate_format rewritten={rewritten} version={CURRENT_VERSION}"
-            );
+            println!("migrate_format rewritten={rewritten} version={CURRENT_VERSION}");
         }
         OutputMode::Pretty => {
             let stdout = std::io::stdout();

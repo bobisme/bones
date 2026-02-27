@@ -112,7 +112,9 @@ fn run_feedback(
     let _ = project::ensure_tracking_table(&conn);
 
     // 4. Resolve item ID (supports partial IDs)
-    let resolved_id = if let Some(resolved) = resolve_item_id(&conn, id)? { resolved } else {
+    let resolved_id = if let Some(resolved) = resolve_item_id(&conn, id)? {
+        resolved
+    } else {
         let msg = format!("item '{id}' not found");
         render_error(
             output,
