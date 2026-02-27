@@ -405,8 +405,7 @@ fn collect_projection_report(
         drift_indicators: Vec::new(),
     };
 
-    // Use _raw: diagnose reports actual state, not auto-repaired state.
-    let conn = match query::try_open_projection_raw(db_path) {
+    let conn = match query::try_open_projection(db_path) {
         Ok(Some(conn)) => {
             report.status = "ok".to_string();
             conn

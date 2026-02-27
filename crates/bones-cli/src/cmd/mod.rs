@@ -42,7 +42,6 @@ pub mod sim;
 pub mod similar;
 pub mod stats;
 pub mod status;
-pub mod sync;
 pub mod tag;
 pub mod triage;
 pub mod triage_support;

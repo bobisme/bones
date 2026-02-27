@@ -609,14 +609,6 @@ enum Commands {
     Config(cmd::config::ConfigArgs),
 
     #[command(
-        next_help_heading = "Sync",
-        about = "Synchronize local and remote state",
-        long_about = "Run the git-oriented sync workflow for a bones project.\n\nThis command:\n1) ensures git config entries for bones files are present\n2) runs `git pull --rebase`\n3) runs `bn admin rebuild --incremental`\n4) runs `git push` (unless `--no-push`)\n\nThis is a repository workflow wrapper, not a direct CRDT transport protocol command.",
-        after_help = "QUICK REFERENCE:\n    bn sync                 # config + pull + rebuild + push\n    bn sync --no-push       # stop before push\n    bn sync --config-only   # only update .gitattributes/.gitignore\n\nEXAMPLES:\n    # Full sync workflow\n    bn sync\n\n    # Local-only sync (no push)\n    bn sync --no-push\n\n    # Machine-readable output\n    bn sync --format json"
-    )]
-    Sync(cmd::sync::SyncArgs),
-
-    #[command(
         next_help_heading = "Lifecycle",
         about = "Bone-scoped operations",
         long_about = "Grouped bone operations including history, metadata, assignment, comments, and lifecycle detail.",
@@ -1271,10 +1263,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Cycles(ref args) => timing::timed("cmd.cycles", || {
             cmd::cycles::run_cycles(args, output, &project_root)
         }),
-        Commands::Sync(args) => timing::timed("cmd.sync", || {
-            cmd::sync::run_sync(&args, output, &project_root)
-        }),
-
         Commands::Bone { ref command } => timing::timed("cmd.bone", || match command {
             BoneCommand::Log(args) => cmd::log::run_log(args, output, &project_root),
             BoneCommand::History(args) => cmd::log::run_history(args, output, &project_root),

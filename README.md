@@ -83,8 +83,7 @@ bn do bn-abc
 bn bone comment add bn-abc "Found race in retry loop; patch in progress"
 bn done bn-abc
 
-# sync and machine-readable reporting
-bn sync --no-push
+# machine-readable reporting
 bn triage --format json
 bn triage plan --format json
 ```
