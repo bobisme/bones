@@ -235,8 +235,8 @@ fn run_dep_add(
 
     let from_id = ItemId::parse(&args.from)
         .map_err(|e| anyhow::anyhow!("invalid item ID '{}': {}", args.from, e))?;
-    let to_id = ItemId::parse(&to_raw)
-        .map_err(|e| anyhow::anyhow!("invalid item ID '{to_raw}': {e}"))?;
+    let to_id =
+        ItemId::parse(&to_raw).map_err(|e| anyhow::anyhow!("invalid item ID '{to_raw}': {e}"))?;
 
     if from_id == to_id {
         let msg = "cannot link an item to itself";
@@ -278,10 +278,10 @@ fn run_dep_add(
         if link_type == "blocks"
             && let Err(cycle_msg) =
                 check_would_create_cycle(&conn, from_id.as_str(), to_id.as_str())
-            {
-                render_error(output, &CliError::new(&cycle_msg))?;
-                anyhow::bail!("{cycle_msg}");
-            }
+        {
+            render_error(output, &CliError::new(&cycle_msg))?;
+            anyhow::bail!("{cycle_msg}");
+        }
     } else {
         let msg = "projection database not found; run `bn admin rebuild` first";
         render_error(output, &CliError::new(msg))?;

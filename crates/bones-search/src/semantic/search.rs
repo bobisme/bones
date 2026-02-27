@@ -129,9 +129,10 @@ fn try_knn_search_sqlite_vec(
         }
     };
 
-    let rows = match stmt.query_map(rusqlite::params![query_json, i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-    }) {
+    let rows = match stmt.query_map(
+        rusqlite::params![query_json, i64::try_from(limit).unwrap_or(i64::MAX)],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
+    ) {
         Ok(rows) => rows,
         Err(err) => {
             debug!("sqlite-vec KNN query failed, falling back to Rust KNN: {err}");

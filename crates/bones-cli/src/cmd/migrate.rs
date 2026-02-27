@@ -259,9 +259,10 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
         }
 
         if let Some(parent) = effective_parent_source_id.as_ref()
-            && !id_map.contains_key(parent) {
-                labels.push("migration:missing-parent".to_string());
-            }
+            && !id_map.contains_key(parent)
+        {
+            labels.push("migration:missing-parent".to_string());
+        }
 
         let create = CreateData {
             title: issue.title.clone(),
@@ -523,9 +524,10 @@ fn map_item_id(source_id: &str) -> Result<ItemId> {
     // We check prefix length to avoid false positives like "github-issue-42"
     // which terseid would parse as prefix="github-issue" hash="42".
     if let Ok(parsed) = terseid::parse_id(source_id)
-        && parsed.prefix.len() <= 3 {
-            return Ok(ItemId::new_unchecked(source_id.trim().to_lowercase()));
-        }
+        && parsed.prefix.len() <= 3
+    {
+        return Ok(ItemId::new_unchecked(source_id.trim().to_lowercase()));
+    }
 
     // Fallback for non-terseid source IDs: hash to generate a stable bn- ID.
     let mut hasher = Hasher::new();

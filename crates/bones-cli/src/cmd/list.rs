@@ -174,7 +174,9 @@ pub fn run_list(
     let db_path = project_root.join(".bones/bones.db");
 
     // Gracefully handle missing / corrupt projection
-    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? {
+        c
+    } else {
         if output.is_json() {
             let response = ListResponse {
                 items: Vec::new(),
@@ -217,15 +219,17 @@ pub fn run_list(
     };
 
     if let Some(ref state) = args.state
-        && let Err(e) = validate::validate_state(state) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
-        }
+        && let Err(e) = validate::validate_state(state)
+    {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
     if let Some(ref kind) = args.kind
-        && let Err(e) = validate::validate_kind(kind) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
-        }
+        && let Err(e) = validate::validate_kind(kind)
+    {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
     let all_labels = args.all_labels();
     for label in &all_labels {
         if let Err(e) = validate::validate_label(label) {
@@ -234,55 +238,66 @@ pub fn run_list(
         }
     }
     if let Some(ref urgency) = args.urgency
-        && urgency.parse::<Urgency>().is_err() {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("invalid urgency '{urgency}'"),
-                    "use --urgency urgent|default|punt",
-                    "invalid_urgency",
-                ),
-            )?;
-            anyhow::bail!("invalid urgency");
-        }
+        && urgency.parse::<Urgency>().is_err()
+    {
+        render_error(
+            output,
+            &CliError::with_details(
+                format!("invalid urgency '{urgency}'"),
+                "use --urgency urgent|default|punt",
+                "invalid_urgency",
+            ),
+        )?;
+        anyhow::bail!("invalid urgency");
+    }
     if let Some(ref parent) = args.parent
-        && let Err(e) = validate::validate_item_id(parent) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
-        }
+        && let Err(e) = validate::validate_item_id(parent)
+    {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
     if let Some(ref assignee) = args.assignee
-        && let Err(e) = validate::validate_agent(assignee) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
-        }
+        && let Err(e) = validate::validate_agent(assignee)
+    {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
+    }
 
     let since_us = match args.since.as_deref() {
-        Some(raw) => if let Some(value) = parse_datetime_to_micros(raw) { Some(value) } else {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("invalid --since value '{raw}'"),
-                    "use RFC3339, epoch seconds, or epoch microseconds",
-                    "invalid_datetime",
-                ),
-            )?;
-            anyhow::bail!("invalid --since value");
-        },
+        Some(raw) => {
+            if let Some(value) = parse_datetime_to_micros(raw) {
+                Some(value)
+            } else {
+                render_error(
+                    output,
+                    &CliError::with_details(
+                        format!("invalid --since value '{raw}'"),
+                        "use RFC3339, epoch seconds, or epoch microseconds",
+                        "invalid_datetime",
+                    ),
+                )?;
+                anyhow::bail!("invalid --since value");
+            }
+        }
         None => None,
     };
 
     let until_us = match args.until.as_deref() {
-        Some(raw) => if let Some(value) = parse_datetime_to_micros(raw) { Some(value) } else {
-            render_error(
-                output,
-                &CliError::with_details(
-                    format!("invalid --until value '{raw}'"),
-                    "use RFC3339, epoch seconds, or epoch microseconds",
-                    "invalid_datetime",
-                ),
-            )?;
-            anyhow::bail!("invalid --until value");
-        },
+        Some(raw) => {
+            if let Some(value) = parse_datetime_to_micros(raw) {
+                Some(value)
+            } else {
+                render_error(
+                    output,
+                    &CliError::with_details(
+                        format!("invalid --until value '{raw}'"),
+                        "use RFC3339, epoch seconds, or epoch microseconds",
+                        "invalid_datetime",
+                    ),
+                )?;
+                anyhow::bail!("invalid --until value");
+            }
+        }
         None => None,
     };
 

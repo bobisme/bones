@@ -231,7 +231,9 @@ pub fn run_update(
 
     // 3. Validate field values before touching the DB
     let validated_size: Option<Size> = if let Some(ref s) = args.size {
-        if let Ok(sz) = s.parse::<Size>() { Some(sz) } else {
+        if let Ok(sz) = s.parse::<Size>() {
+            Some(sz)
+        } else {
             let msg = format!("invalid size '{s}': expected xs|s|m|l|xl");
             render_error(
                 output,
@@ -244,7 +246,9 @@ pub fn run_update(
     };
 
     let validated_urgency: Option<Urgency> = if let Some(ref u) = args.urgency {
-        if let Ok(urg) = u.parse::<Urgency>() { Some(urg) } else {
+        if let Ok(urg) = u.parse::<Urgency>() {
+            Some(urg)
+        } else {
             let msg = format!("invalid urgency '{u}': expected punt|default|urgent");
             render_error(
                 output,
@@ -261,7 +265,9 @@ pub fn run_update(
     };
 
     let validated_kind: Option<Kind> = if let Some(ref k) = args.kind {
-        if let Ok(knd) = k.parse::<Kind>() { Some(knd) } else {
+        if let Ok(knd) = k.parse::<Kind>() {
+            Some(knd)
+        } else {
             let msg = format!("invalid kind '{k}': expected task|bug|goal");
             render_error(
                 output,

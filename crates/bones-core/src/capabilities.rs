@@ -215,14 +215,13 @@ fn probe_vectors(db: &Connection) -> bool {
 /// Uses the same cache path convention as `SemanticModel::model_cache_path()`:
 /// `<os-cache-dir>/bones/models/minilm-l6-v2-int8.onnx`.
 fn probe_semantic_model() -> bool {
-    let available = dirs::cache_dir()
-        .is_some_and(|mut p| {
-            p.push("bones");
-            p.push("models");
-            let model = p.join("minilm-l6-v2-int8.onnx");
-            let tokenizer = p.join("minilm-l6-v2-tokenizer.json");
-            model.is_file() && tokenizer.is_file()
-        });
+    let available = dirs::cache_dir().is_some_and(|mut p| {
+        p.push("bones");
+        p.push("models");
+        let model = p.join("minilm-l6-v2-int8.onnx");
+        let tokenizer = p.join("minilm-l6-v2-tokenizer.json");
+        model.is_file() && tokenizer.is_file()
+    });
     debug!(available, "semantic model probe");
     available
 }

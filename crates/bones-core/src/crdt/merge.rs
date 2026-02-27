@@ -1,4 +1,4 @@
-use crate::crdt::{Timestamp, Lww, GSet, EpochPhase};
+use crate::crdt::{EpochPhase, GSet, Lww, Timestamp};
 use std::hash::Hash;
 use tracing::instrument;
 
@@ -37,9 +37,8 @@ impl Merge for EpochPhase {
     fn merge(&mut self, other: Self) {
         if other.epoch > self.epoch {
             *self = other;
-        } else if other.epoch == self.epoch
-            && other.phase > self.phase {
-                self.phase = other.phase;
-            }
+        } else if other.epoch == self.epoch && other.phase > self.phase {
+            self.phase = other.phase;
+        }
     }
 }

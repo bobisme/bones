@@ -1934,9 +1934,7 @@ mod tests {
             .project_event(&event)
             .expect("project_event should succeed on fresh DB");
 
-        let item = query::get_item(&conn, "bn-fresh", false)
-            .unwrap()
-            .unwrap();
+        let item = query::get_item(&conn, "bn-fresh", false).unwrap().unwrap();
         assert_eq!(item.title, "Fresh item");
     }
 }

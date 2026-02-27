@@ -82,7 +82,9 @@ impl GoalProgress {
             return 100.0;
         }
         #[allow(clippy::cast_precision_loss)]
-        { (self.done as f32 / self.total as f32) * 100.0 }
+        {
+            (self.done as f32 / self.total as f32) * 100.0
+        }
     }
 
     /// Returns `true` if all children are done (or there are no children).

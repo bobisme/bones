@@ -101,7 +101,9 @@ pub fn run_show(
     let db_path = project_root.join(".bones/bones.db");
 
     // Gracefully handle missing / corrupt projection
-    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? {
+        c
+    } else {
         render_error(
             output,
             &CliError::with_details(
@@ -114,7 +116,9 @@ pub fn run_show(
     };
 
     // Resolve the ID (possibly partial)
-    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? {
+        id
+    } else {
         render_error(
             output,
             &CliError::with_details(
@@ -127,7 +131,9 @@ pub fn run_show(
     };
 
     // Fetch item
-    let item = if let Some(i) = query::get_item(&conn, &resolved_id, false)? { i } else {
+    let item = if let Some(i) = query::get_item(&conn, &resolved_id, false)? {
+        i
+    } else {
         render_error(
             output,
             &CliError::with_details(

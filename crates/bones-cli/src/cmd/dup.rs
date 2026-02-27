@@ -112,7 +112,9 @@ pub fn run_dup(
 ) -> anyhow::Result<()> {
     let db_path = project_root.join(".bones/bones.db");
 
-    let conn = if let Some(c) = query::try_open_projection(&db_path)? { c } else {
+    let conn = if let Some(c) = query::try_open_projection(&db_path)? {
+        c
+    } else {
         render_error(
             output,
             &CliError::with_details(
@@ -125,7 +127,9 @@ pub fn run_dup(
     };
 
     // Resolve potentially partial ID
-    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? { id } else {
+    let resolved_id = if let Some(id) = resolve_item_id(&conn, &args.id)? {
+        id
+    } else {
         render_error(
             output,
             &CliError::with_details(
@@ -138,7 +142,9 @@ pub fn run_dup(
     };
 
     // Fetch the source item
-    let source = if let Some(item) = query::get_item(&conn, &resolved_id, false)? { item } else {
+    let source = if let Some(item) = query::get_item(&conn, &resolved_id, false)? {
+        item
+    } else {
         render_error(
             output,
             &CliError::with_details(

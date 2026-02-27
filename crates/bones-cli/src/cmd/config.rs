@@ -160,11 +160,17 @@ fn split_known_key(scope: ConfigScope, key: &str) -> Result<(&str, &str)> {
     let valid = match scope {
         ConfigScope::Project => matches!(
             (section, leaf),
-            ("goals", "auto_complete") |
-("search",
-"semantic" | "model" | "duplicate_threshold" | "related_threshold" |
-"warn_on_create") | ("triage", "feedback_learning") |
-("done", "require_reason")
+            ("goals", "auto_complete")
+                | (
+                    "search",
+                    "semantic"
+                        | "model"
+                        | "duplicate_threshold"
+                        | "related_threshold"
+                        | "warn_on_create"
+                )
+                | ("triage", "feedback_learning")
+                | ("done", "require_reason")
         ),
         ConfigScope::User => matches!((section, leaf), ("user", "output")),
     };

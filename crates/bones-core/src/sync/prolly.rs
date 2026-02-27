@@ -43,7 +43,9 @@ fn gear_table() -> [u64; 256] {
     let mut table = [0u64; 256];
     for i in 0u16..256 {
         let h = blake3::hash(&i.to_le_bytes());
-        let bytes: [u8; 8] = h.as_bytes()[0..8].try_into().expect("BLAKE3 output is 32 bytes; first 8 always valid");
+        let bytes: [u8; 8] = h.as_bytes()[0..8]
+            .try_into()
+            .expect("BLAKE3 output is 32 bytes; first 8 always valid");
         table[i as usize] = u64::from_le_bytes(bytes);
     }
     table
@@ -151,7 +153,7 @@ impl ProllyTree {
     ///
     /// The root hash is deterministic for any permutation of the same event
     /// set.
-    #[must_use] 
+    #[must_use]
     pub fn build(events: &[Event]) -> Self {
         if events.is_empty() {
             let empty_hash = hash_bytes(b"prolly:empty");
@@ -185,7 +187,7 @@ impl ProllyTree {
     ///
     /// Returns event hashes that are in `other` but not in `self`.
     /// Runs in O(k log N) where k is the number of differing chunks.
-    #[must_use] 
+    #[must_use]
     pub fn diff(&self, other: &Self) -> Vec<String> {
         let mut missing = Vec::new();
         diff_nodes(&self.root, &other.root, &mut missing);
@@ -193,7 +195,7 @@ impl ProllyTree {
     }
 
     /// All event hashes stored in this tree.
-    #[must_use] 
+    #[must_use]
     pub fn event_hashes(&self) -> Vec<String> {
         let mut out = Vec::with_capacity(self.event_count);
         self.root.collect_event_hashes(&mut out);
@@ -384,8 +386,10 @@ fn diff_nodes(local: &ProllyNode, other: &ProllyNode, missing: &mut Vec<String>)
         // that aren't in local.
         let mut local_hashes = Vec::new();
         local.collect_event_hashes(&mut local_hashes);
-        let local_set: std::collections::HashSet<&str> =
-            local_hashes.iter().map(std::string::String::as_str).collect();
+        let local_set: std::collections::HashSet<&str> = local_hashes
+            .iter()
+            .map(std::string::String::as_str)
+            .collect();
 
         let mut other_hashes = Vec::new();
         other.collect_event_hashes(&mut other_hashes);

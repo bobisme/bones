@@ -86,7 +86,7 @@ pub struct SyncReport {
 
 impl SyncReport {
     /// Returns `true` if the sync was a no-op (replicas already identical).
-    #[must_use] 
+    #[must_use]
     pub const fn is_noop(&self) -> bool {
         self.events_sent == 0 && self.events_received == 0
     }
@@ -146,8 +146,14 @@ pub fn sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute what's missing on each side.
-    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
+    let local_set: HashSet<&str> = local_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
+    let remote_set: HashSet<&str> = remote_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
     // Event hashes the remote has that we don't.
     let need_from_remote: HashSet<&str> = remote_hashes
@@ -221,8 +227,14 @@ pub fn serve_sync<T: SyncTransport>(
     report.rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
+    let local_set: HashSet<&str> = local_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
+    let remote_set: HashSet<&str> = remote_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
     let need_from_remote: HashSet<&str> = remote_hashes
         .iter()
@@ -440,8 +452,14 @@ pub fn sync_in_memory(
     rounds += 1;
 
     // Compute diffs.
-    let local_set: HashSet<&str> = local_hashes.iter().map(std::string::String::as_str).collect();
-    let remote_set: HashSet<&str> = remote_hashes.iter().map(std::string::String::as_str).collect();
+    let local_set: HashSet<&str> = local_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
+    let remote_set: HashSet<&str> = remote_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
     let local_to_send: Vec<Event> = local_events
         .iter()

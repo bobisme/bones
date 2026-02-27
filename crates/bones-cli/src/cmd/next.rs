@@ -137,16 +137,25 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
 
         let top = if let Some(item) = chosen {
             item
+        } else if let Some(fallback) = skipped.first() {
+            // Every unblocked item needs decomposition, but we still have
+            // work to offer. Assign the top-scored one with a softer hint
+            // instead of refusing entirely.
+            let size = fallback.size.as_deref().unwrap_or("?");
+            let _ = writeln!(
+                std::io::stdout(),
+                "hint: {} is large ({}) and may benefit from decomposition into subtasks",
+                fallback.id,
+                size.to_uppercase(),
+            );
+            *fallback
         } else {
-            // Every unblocked item needs decomposition — tell the agent.
+            // Truly nothing available.
             let empty = EmptyNext {
-                message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
+                message: "No unblocked items are currently ready".to_string(),
             };
             return render(output, &empty, |_, w| {
-                writeln!(
-                    w,
-                    "advice  decompose-first  All unblocked items are L/XL without subtasks. Decompose them before starting work."
-                )
+                writeln!(w, "(no unblocked items ready right now)")
             });
         };
 

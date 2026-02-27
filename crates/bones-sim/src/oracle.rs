@@ -362,14 +362,15 @@ impl ConvergenceOracle {
 
                 // The first sequence must be 0 (can't have seq=N without seq=0).
                 if let Some(&first) = seqs.first()
-                    && first != 0 {
-                        violations.push(InvariantViolation::CausalConsistency {
-                            observer_agent: state.id,
-                            source_agent,
-                            missing_seq: 0,
-                            present_higher_seq: first,
-                        });
-                    }
+                    && first != 0
+                {
+                    violations.push(InvariantViolation::CausalConsistency {
+                        observer_agent: state.id,
+                        source_agent,
+                        missing_seq: 0,
+                        present_higher_seq: first,
+                    });
+                }
             }
         }
 
@@ -459,9 +460,9 @@ impl ConvergenceOracle {
         let commutativity = Self::check_commutativity(events, rng, 8);
 
         // For idempotence, use the first state (all are identical after convergence).
-        let idempotence = states
-            .first()
-            .map_or_else(OracleResult::pass, |first| Self::check_idempotence(first, events));
+        let idempotence = states.first().map_or_else(OracleResult::pass, |first| {
+            Self::check_idempotence(first, events)
+        });
 
         let causality = Self::check_causality(states);
 
