@@ -212,7 +212,7 @@ impl MdRenderer {
 
     fn inline_code(&mut self, code: &str) {
         let code_style = Style::default().fg(Color::Green);
-        self.spans.push(Span::styled(format!(" {code} "), code_style));
+        self.spans.push(Span::styled(code.to_string(), code_style));
     }
 
     fn line_break(&mut self) {
@@ -446,7 +446,7 @@ mod tests {
     fn inline_code_styled_green() {
         let lines = markdown_to_lines("use `foo` here");
         let text = spans_text(&lines);
-        assert_eq!(text, vec!["use  foo  here"]);
+        assert_eq!(text, vec!["use foo here"]);
         // The code span should be green
         assert_eq!(lines[0].spans[1].style.fg, Some(Color::Green));
     }

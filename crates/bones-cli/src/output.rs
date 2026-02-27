@@ -222,7 +222,7 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
             }
             Event::Code(code) => {
                 if colored {
-                    line_buf.push_str(&format!(" {} ", code.green()));
+                    line_buf.push_str(&format!("{}", code.green()));
                 } else {
                     line_buf.push_str(&format!("`{code}`"));
                 }
