@@ -338,8 +338,9 @@ fn build_list_response(
 ) -> anyhow::Result<ListResponse> {
     let all_labels = args.all_labels();
 
-    // Default to showing open items unless any filter is explicitly set.
-    // Pagination/sort alone should not disable this default behavior.
+    // Default to showing active items (open + doing) unless any filter is
+    // explicitly set. When the default applies, we query without a state
+    // filter and post-filter out done/archived items.
     let has_any_filter = args.state.is_some()
         || args.all
         || args.kind.is_some()
@@ -350,11 +351,8 @@ fn build_list_response(
         || since_us.is_some()
         || until_us.is_some();
 
-    let state_filter = if has_any_filter {
-        args.state.clone()
-    } else {
-        Some("open".to_string())
-    };
+    let default_active = !has_any_filter;
+    let state_filter = args.state.clone();
 
     // Fetch an unpaginated set first, then apply deterministic sort + pagination
     // in Rust so metadata remains consistent even with composite label filters.
@@ -372,6 +370,11 @@ fn build_list_response(
     };
 
     let mut raw = query::list_items(conn, &filter)?;
+
+    // Default: show only active items (open + doing), excluding done/archived.
+    if default_active {
+        raw.retain(|item| item.state == "open" || item.state == "doing");
+    }
 
     // AND-filter labels when multiple --label values are supplied.
     if !all_labels.is_empty() {
@@ -502,6 +505,29 @@ fn parse_datetime_to_micros(raw: &str) -> Option<i64> {
         .map(|dt| dt.timestamp_micros())
 }
 
+/// Format a microsecond timestamp as a compact relative time string.
+///
+/// Examples: `just now`, `2m`, `3h`, `5d`, `3w`, `4mo`, `2y`
+fn format_relative_time(updated_at_us: i64) -> String {
+    let now = chrono::Utc::now().timestamp_micros();
+    let delta_secs = (now - updated_at_us) / 1_000_000;
+
+    if delta_secs < 0 {
+        return "just now".into();
+    }
+
+    let secs = delta_secs as u64;
+    match secs {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86399 => format!("{}h", secs / 3600),
+        86400..=604799 => format!("{}d", secs / 86400),
+        604800..=2_629_799 => format!("{}w", secs / 604800),
+        2_629_800..=31_557_599 => format!("{}mo", secs / 2_629_800),
+        _ => format!("{}y", secs / 31_557_600),
+    }
+}
+
 const fn effective_limit(limit: usize, total: usize, offset: usize) -> usize {
     if limit == 0 {
         total.saturating_sub(offset)
@@ -540,10 +566,15 @@ fn render_list_human(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<(
             item.state.clone(),
             item.urgency.clone(),
             format!("{title}{labels_suffix}"),
+            format_relative_time(item.updated_at_us),
         ]);
     }
 
-    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "TITLE"], &rows)?;
+    pretty_table(
+        w,
+        &["ID", "KIND", "STATE", "URGENCY", "TITLE", "UPDATED"],
+        &rows,
+    )?;
 
     Ok(())
 }
@@ -554,7 +585,7 @@ fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()
         return Ok(());
     }
 
-    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS")?;
+    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS\tUPDATED")?;
 
     for item in items {
         let labels = if item.labels.is_empty() {
@@ -564,13 +595,14 @@ fn render_list_text(items: &[ListItem], w: &mut dyn Write) -> std::io::Result<()
         };
         writeln!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
             item.id,
             item.kind,
             item.state,
             item.urgency,
             item.title.replace('\t', " "),
-            labels
+            labels,
+            format_relative_time(item.updated_at_us),
         )?;
     }
     Ok(())
@@ -846,8 +878,8 @@ mod tests {
         let mut buf = Vec::new();
         render_list_text(&items, &mut buf).expect("render text");
         let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS"));
-        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend"));
+        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS\tUPDATED"));
+        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend\t"));
     }
 
     // -----------------------------------------------------------------------
@@ -922,12 +954,12 @@ mod tests {
         args.sort = "created".into();
 
         let response = build_list_response(&conn, &args, ListSort::CreatedAsc, None, None).unwrap();
-        // Default filter is state=open; we inserted 3 open rows total.
-        assert_eq!(response.total, 3);
+        // Default filter shows active items (open + doing); 3 open + 1 doing = 4 total.
+        assert_eq!(response.total, 4);
         assert_eq!(response.limit, 2);
         assert_eq!(response.offset, 1);
         assert_eq!(response.items.len(), 2);
-        assert!(!response.has_more);
+        assert!(response.has_more);
     }
 
     #[test]
@@ -1057,6 +1089,21 @@ mod tests {
         assert_eq!(json["limit"], 50);
         assert_eq!(json["offset"], 0);
         assert_eq!(json["has_more"], false);
+    }
+
+    #[test]
+    fn format_relative_time_ranges() {
+        let now = chrono::Utc::now().timestamp_micros();
+        assert_eq!(format_relative_time(now), "just now");
+        assert_eq!(format_relative_time(now - 30_000_000), "just now"); // 30s
+        assert_eq!(format_relative_time(now - 120_000_000), "2m");
+        assert_eq!(format_relative_time(now - 7_200_000_000), "2h");
+        assert_eq!(format_relative_time(now - 172_800_000_000), "2d");
+        assert_eq!(format_relative_time(now - 1_209_600_000_000), "2w");
+        assert_eq!(format_relative_time(now - 7_889_400_000_000), "3mo");
+        assert_eq!(format_relative_time(now - 63_115_200_000_000), "2y");
+        // Future timestamps
+        assert_eq!(format_relative_time(now + 60_000_000), "just now");
     }
 
     #[test]

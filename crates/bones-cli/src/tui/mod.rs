@@ -2,6 +2,7 @@
 
 mod actions;
 pub mod list;
+mod markdown;
 
 use crate::tui::list::ListView;
 use anyhow::{Context, Result};
