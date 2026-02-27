@@ -40,10 +40,18 @@ pub struct NextArgs {
     pub mode: ScheduleMode,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct Advice {
+    level: &'static str,
+    r#type: &'static str,
+    message: String,
+}
+
 #[derive(Debug, Serialize)]
 struct NextAssignments {
     mode: ScheduleMode,
     assignments: Vec<NextAssignment>,
+    advice: Vec<Advice>,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,19 +128,18 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             }
         }
 
-        // Emit decomposition warnings for skipped items on stdout so agents see them.
-        if !skipped.is_empty() {
-            let stdout = &mut std::io::stdout();
-            for item in &skipped {
-                let size = item.size.as_deref().unwrap_or("?");
-                let _ = writeln!(
-                    stdout,
-                    "warn: skipping {} ({}, {}) — needs decomposition into subtasks before work can begin",
-                    item.id,
-                    item.title,
-                    size.to_uppercase(),
-                );
-            }
+        // Collect advice for skipped decomposition items.
+        let mut advice: Vec<Advice> = Vec::new();
+        for item in &skipped {
+            let size = item.size.as_deref().unwrap_or("?");
+            advice.push(Advice {
+                level: "warn",
+                r#type: "needs-decomposition",
+                message: format!(
+                    "skipping {} ({}, {}) — needs decomposition into subtasks before work can begin",
+                    item.id, item.title, size.to_uppercase(),
+                ),
+            });
         }
 
         let top = if let Some(item) = chosen {
@@ -142,12 +149,14 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             // work to offer. Assign the top-scored one with a softer hint
             // instead of refusing entirely.
             let size = fallback.size.as_deref().unwrap_or("?");
-            let _ = writeln!(
-                std::io::stdout(),
-                "hint: {} is large ({}) and may benefit from decomposition into subtasks",
-                fallback.id,
-                size.to_uppercase(),
-            );
+            advice.push(Advice {
+                level: "hint",
+                r#type: "decomposition-suggested",
+                message: format!(
+                    "{} is large ({}) and may benefit from decomposition into subtasks",
+                    fallback.id, size.to_uppercase(),
+                ),
+            });
             *fallback
         } else {
             // Truly nothing available.
@@ -170,15 +179,18 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
         let payload = NextAssignments {
             mode: args.mode,
             assignments: vec![assignment],
+            advice: advice.clone(),
         };
 
         let (min_score, max_score) = score_bounds(&snapshot.unblocked_ranked);
 
-        // JSON uses consistent NextAssignments format; text/pretty use card rendering
+        // JSON uses consistent NextAssignments format; text/pretty use card rendering.
+        // Advice goes to stderr in text/pretty so stdout stays parseable.
         return render_mode(
             output,
             &payload,
             |p, w| {
+                emit_advice_stderr(&advice);
                 if let Some(a) = p.assignments.first() {
                     render_next_text_from_assignment(a, w)
                 } else {
@@ -186,6 +198,7 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
                 }
             },
             |p, w| {
+                emit_advice_stderr(&advice);
                 if let Some(a) = p.assignments.first() {
                     render_next_card_from_assignment(a, w, min_score, max_score)
                 } else {
@@ -201,6 +214,7 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
     let payload = NextAssignments {
         mode: args.mode,
         assignments,
+        advice: vec![],
     };
     render_mode(
         output,
@@ -398,6 +412,14 @@ fn score_bounds(items: &[RankedItem]) -> (f64, f64) {
     }
 
     (min_score, max_score)
+}
+
+/// Write advice entries to stderr for text/pretty modes.
+fn emit_advice_stderr(advice: &[Advice]) {
+    let stderr = &mut std::io::stderr();
+    for a in advice {
+        let _ = writeln!(stderr, "{}: {}", a.level, a.message);
+    }
 }
 
 fn score_bar(score: f64, min_score: f64, max_score: f64) -> String {
