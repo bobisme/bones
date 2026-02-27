@@ -75,7 +75,9 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
     };
 
     let db_path = project_root.join(".bones/bones.db");
-    let conn = if let Some(conn) = query::try_open_projection(&db_path)? { conn } else {
+    let conn = if let Some(conn) = query::try_open_projection(&db_path)? {
+        conn
+    } else {
         render_error(
             output,
             &CliError::with_details(
@@ -133,7 +135,9 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
             }
         }
 
-        let top = if let Some(item) = chosen { item } else {
+        let top = if let Some(item) = chosen {
+            item
+        } else {
             // Every unblocked item needs decomposition — tell the agent.
             let empty = EmptyNext {
                 message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
@@ -459,7 +463,10 @@ fn render_assignments_human(payload: &NextAssignments, w: &mut dyn Write) -> std
     Ok(())
 }
 
-fn render_next_text_from_assignment(item: &NextAssignment, w: &mut dyn Write) -> std::io::Result<()> {
+fn render_next_text_from_assignment(
+    item: &NextAssignment,
+    w: &mut dyn Write,
+) -> std::io::Result<()> {
     let score = display_score(item.score);
     writeln!(
         w,
