@@ -91,7 +91,10 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
             s = format!("{}", s.bold());
         }
         if i {
-            s = format!("{}", crossterm::style::style(&s).attribute(crossterm::style::Attribute::Italic));
+            s = format!(
+                "{}",
+                crossterm::style::style(&s).attribute(crossterm::style::Attribute::Italic)
+            );
         }
         s
     };
@@ -269,18 +272,58 @@ fn cli_keywords_for_lang(lang: Option<&str>) -> &'static [&'static str] {
             "False", "None", "self", "async", "await", "in", "not", "and", "or",
         ],
         Some("javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx") => &[
-            "function", "const", "let", "var", "return", "if", "else", "for", "while", "class",
-            "new", "this", "import", "export", "from", "async", "await", "try", "catch", "throw",
-            "true", "false", "null", "undefined",
+            "function",
+            "const",
+            "let",
+            "var",
+            "return",
+            "if",
+            "else",
+            "for",
+            "while",
+            "class",
+            "new",
+            "this",
+            "import",
+            "export",
+            "from",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "throw",
+            "true",
+            "false",
+            "null",
+            "undefined",
         ],
         Some("bash" | "sh" | "zsh" | "fish" | "shell") => &[
             "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac",
             "function", "return", "export", "local", "set", "echo", "exit",
         ],
         Some("go" | "golang") => &[
-            "func", "package", "import", "return", "if", "else", "for", "range", "switch", "case",
-            "default", "struct", "interface", "type", "var", "const", "defer", "go", "chan",
-            "select", "map", "nil",
+            "func",
+            "package",
+            "import",
+            "return",
+            "if",
+            "else",
+            "for",
+            "range",
+            "switch",
+            "case",
+            "default",
+            "struct",
+            "interface",
+            "type",
+            "var",
+            "const",
+            "defer",
+            "go",
+            "chan",
+            "select",
+            "map",
+            "nil",
         ],
         _ => &[],
     }
@@ -312,7 +355,10 @@ fn write_highlighted_code_line(
         }
         if ch == '#'
             && lang.is_some_and(|l| {
-                matches!(l, "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell")
+                matches!(
+                    l,
+                    "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell"
+                )
             })
         {
             let rest: String = chars[i..].iter().collect();

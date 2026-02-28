@@ -154,7 +154,8 @@ pub fn run_next(args: &NextArgs, output: OutputMode, project_root: &Path) -> any
                 r#type: "decomposition-suggested",
                 message: format!(
                     "{} is large ({}) and may benefit from decomposition into subtasks",
-                    fallback.id, size.to_uppercase(),
+                    fallback.id,
+                    size.to_uppercase(),
                 ),
             });
             *fallback

@@ -72,10 +72,7 @@ impl MdRenderer {
     fn start_tag(&mut self, tag: Tag<'_>) {
         match tag {
             Tag::Heading { .. } => {
-                self.style = self
-                    .style
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD);
+                self.style = self.style.fg(Color::White).add_modifier(Modifier::BOLD);
             }
             Tag::Emphasis => {
                 self.style = self.style.add_modifier(Modifier::ITALIC);
@@ -121,10 +118,8 @@ impl MdRenderer {
                     }
                     None => format!("{indent}  \u{2022} "),
                 };
-                self.spans.push(Span::styled(
-                    bullet,
-                    Style::default().fg(Color::DarkGray),
-                ));
+                self.spans
+                    .push(Span::styled(bullet, Style::default().fg(Color::DarkGray)));
             }
             Tag::Paragraph => {}
             _ => {}
@@ -205,8 +200,7 @@ impl MdRenderer {
                 ));
             }
         } else {
-            self.spans
-                .push(Span::styled(text.to_string(), self.style));
+            self.spans.push(Span::styled(text.to_string(), self.style));
         }
     }
 
@@ -248,9 +242,9 @@ impl MdRenderer {
     fn finish(mut self) -> Vec<Line<'static>> {
         self.flush_line();
         // Remove trailing empty line if present
-        if self.lines.last().is_some_and(|l| l.spans.is_empty()
-            || (l.spans.len() == 1 && l.spans[0].content.is_empty()))
-        {
+        if self.lines.last().is_some_and(|l| {
+            l.spans.is_empty() || (l.spans.len() == 1 && l.spans[0].content.is_empty())
+        }) {
             self.lines.pop();
         }
         self.lines
@@ -272,18 +266,62 @@ fn keywords_for_lang(lang: Option<&str>) -> &'static [&'static str] {
             "False", "None", "self", "async", "await", "in", "not", "and", "or", "is",
         ],
         Some("javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx") => &[
-            "function", "const", "let", "var", "return", "if", "else", "for", "while", "class",
-            "new", "this", "import", "export", "from", "async", "await", "try", "catch", "throw",
-            "true", "false", "null", "undefined", "typeof", "instanceof",
+            "function",
+            "const",
+            "let",
+            "var",
+            "return",
+            "if",
+            "else",
+            "for",
+            "while",
+            "class",
+            "new",
+            "this",
+            "import",
+            "export",
+            "from",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "throw",
+            "true",
+            "false",
+            "null",
+            "undefined",
+            "typeof",
+            "instanceof",
         ],
         Some("bash" | "sh" | "zsh" | "fish" | "shell") => &[
             "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac",
             "function", "return", "export", "local", "set", "echo", "exit", "true", "false",
         ],
         Some("go" | "golang") => &[
-            "func", "package", "import", "return", "if", "else", "for", "range", "switch", "case",
-            "default", "struct", "interface", "type", "var", "const", "defer", "go", "chan",
-            "select", "map", "nil", "true", "false",
+            "func",
+            "package",
+            "import",
+            "return",
+            "if",
+            "else",
+            "for",
+            "range",
+            "switch",
+            "case",
+            "default",
+            "struct",
+            "interface",
+            "type",
+            "var",
+            "const",
+            "defer",
+            "go",
+            "chan",
+            "select",
+            "map",
+            "nil",
+            "true",
+            "false",
         ],
         _ => &[],
     }
@@ -336,7 +374,14 @@ fn highlight_code_line(line: &str, lang: Option<&str>) -> Vec<Span<'static>> {
             spans.push(Span::styled(rest, comment_style));
             return spans;
         }
-        if ch == '#' && lang.is_some_and(|l| matches!(l, "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell")) {
+        if ch == '#'
+            && lang.is_some_and(|l| {
+                matches!(
+                    l,
+                    "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell"
+                )
+            })
+        {
             flush_buf(&mut buf, &mut spans);
             let rest: String = chars[i..].iter().collect();
             spans.push(Span::styled(rest, comment_style));
@@ -382,7 +427,9 @@ fn highlight_code_line(line: &str, lang: Option<&str>) -> Vec<Span<'static>> {
         if ch.is_ascii_digit() {
             flush_buf(&mut buf, &mut spans);
             let mut num = String::new();
-            while i < len && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '_') {
+            while i < len
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '_')
+            {
                 num.push(chars[i]);
                 i += 1;
             }
@@ -426,20 +473,24 @@ mod tests {
     fn bold_gets_modifier() {
         let lines = markdown_to_lines("**bold**");
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 
     #[test]
     fn italic_gets_modifier() {
         let lines = markdown_to_lines("*italic*");
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::ITALIC));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::ITALIC)
+        );
     }
 
     #[test]
@@ -456,10 +507,12 @@ mod tests {
         let lines = markdown_to_lines("# Title");
         let text = spans_text(&lines);
         assert_eq!(text, vec!["Title"]);
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::White));
     }
 
@@ -489,11 +542,7 @@ mod tests {
         // Code lines should be indented
         let code_line = lines
             .iter()
-            .find(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.contains("let x = 1;"))
-            })
+            .find(|l| l.spans.iter().any(|s| s.content.contains("let x = 1;")))
             .expect("code line");
         assert_eq!(code_line.spans[0].style.fg, Some(Color::Green));
     }
