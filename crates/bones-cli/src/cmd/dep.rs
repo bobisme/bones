@@ -591,7 +591,7 @@ mod tests {
             blocks: Some("bn-bbb".into()),
             relates: None,
         };
-        run_dep_add(&add_args, Some("test-agent"), OutputMode::Human, &root)
+        run_dep_add(&add_args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("dep add should succeed");
 
         // Rebuild and verify dependency exists
@@ -609,7 +609,7 @@ mod tests {
             from: "bn-aaa".into(),
             to: "bn-bbb".into(),
         };
-        run_dep_rm(&rm_args, Some("test-agent"), OutputMode::Human, &root)
+        run_dep_rm(&rm_args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("dep rm should succeed");
 
         // Rebuild and verify dependency removed
@@ -680,7 +680,7 @@ mod tests {
                 blocks: Some(to.into()),
                 relates: None,
             };
-            run_dep_add(&args, Some("test-agent"), OutputMode::Human, &root)
+            run_dep_add(&args, Some("test-agent"), OutputMode::Pretty, &root)
                 .expect("initial dep add should succeed");
             rebuild::rebuild(&events_dir, &db_path).expect("rebuild");
         }
@@ -691,7 +691,7 @@ mod tests {
             blocks: Some("bn-ca1".into()),
             relates: None,
         };
-        let result = run_dep_add(&cycle_args, Some("test-agent"), OutputMode::Human, &root);
+        let result = run_dep_add(&cycle_args, Some("test-agent"), OutputMode::Pretty, &root);
         assert!(result.is_err(), "cycle should be rejected");
         let err_str = result.unwrap_err().to_string();
         assert!(
@@ -710,7 +710,7 @@ mod tests {
             blocks: Some("bn-abc".into()),
             relates: None,
         };
-        let result = run_dep_add(&args, Some("test-agent"), OutputMode::Human, root);
+        let result = run_dep_add(&args, Some("test-agent"), OutputMode::Pretty, root);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("itself"), "should mention self-link: {msg}");

@@ -622,7 +622,7 @@ mod tests {
             lexical: false,
             semantic: false,
         };
-        run_search(&args, OutputMode::Human, &root).unwrap();
+        run_search(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -647,7 +647,7 @@ mod tests {
             semantic: false,
         };
         // Should succeed (not error) even with no results
-        run_search(&args, OutputMode::Human, &root).unwrap();
+        run_search(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -659,7 +659,7 @@ mod tests {
             lexical: false,
             semantic: false,
         };
-        run_search(&args, OutputMode::Human, &root).unwrap();
+        run_search(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -671,7 +671,7 @@ mod tests {
             lexical: false,
             semantic: false,
         };
-        assert!(run_search(&args, OutputMode::Human, dir.path()).is_err());
+        assert!(run_search(&args, OutputMode::Pretty, dir.path()).is_err());
     }
 
     #[test]
@@ -683,7 +683,7 @@ mod tests {
             lexical: false,
             semantic: false,
         };
-        assert!(run_search(&args, OutputMode::Human, &root).is_err());
+        assert!(run_search(&args, OutputMode::Pretty, &root).is_err());
     }
 
     #[test]

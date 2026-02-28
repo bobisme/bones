@@ -811,7 +811,7 @@ mod tests {
             threshold: None,
         };
         // Should succeed without error
-        run_dup(&args, OutputMode::Human, &root).unwrap();
+        run_dup(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -831,7 +831,7 @@ mod tests {
             id: "nonexistent".into(),
             threshold: None,
         };
-        assert!(run_dup(&args, OutputMode::Human, &root).is_err());
+        assert!(run_dup(&args, OutputMode::Pretty, &root).is_err());
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod tests {
             id: "bn-001".into(),
             threshold: None,
         };
-        assert!(run_dup(&args, OutputMode::Human, dir.path()).is_err());
+        assert!(run_dup(&args, OutputMode::Pretty, dir.path()).is_err());
     }
 
     #[test]
@@ -852,7 +852,7 @@ mod tests {
             id: "001".into(),
             threshold: None,
         };
-        run_dup(&args, OutputMode::Human, &root).unwrap();
+        run_dup(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -864,7 +864,7 @@ mod tests {
             threshold: Some(0.99),
         };
         // Should succeed (just might return 0 candidates)
-        run_dup(&args, OutputMode::Human, &root).unwrap();
+        run_dup(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]

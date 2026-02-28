@@ -382,7 +382,7 @@ pub fn run_create(
                         }
 
                         // In interactive mode, warn user
-                        if output == OutputMode::Human {
+                        if output == OutputMode::Pretty {
                             eprintln!(
                                 "⚠ Warning: {} potential duplicate(s) found",
                                 candidates.len()
@@ -728,7 +728,7 @@ mod tests {
             force: false,
         };
 
-        let result = run_create(&args, Some("agent"), OutputMode::Human, dir.path());
+        let result = run_create(&args, Some("agent"), OutputMode::Pretty, dir.path());
         assert!(result.is_err());
     }
 
@@ -757,7 +757,7 @@ mod tests {
             force: false,
         };
 
-        let result = run_create(&args, Some("agent"), OutputMode::Human, root);
+        let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
         assert!(result.is_err());
     }
 
@@ -786,7 +786,7 @@ mod tests {
             force: false,
         };
 
-        let result = run_create(&args, Some("agent"), OutputMode::Human, root);
+        let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
         assert!(result.is_err());
     }
 
@@ -815,7 +815,7 @@ mod tests {
             force: false,
         };
 
-        let result = run_create(&args, Some("agent"), OutputMode::Human, root);
+        let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
         assert!(result.is_err());
     }
 

@@ -1113,7 +1113,7 @@ mod tests {
         };
 
         // Just check it doesn't panic/error
-        let result = run_graph_summary(&raw, &conn, &args, OutputMode::Human);
+        let result = run_graph_summary(&raw, &conn, &args, OutputMode::Pretty);
         assert!(result.is_ok());
     }
 
@@ -1157,7 +1157,7 @@ mod tests {
             dot: false,
         };
 
-        let result = run_graph_summary(&raw, &conn, &args, OutputMode::Human);
+        let result = run_graph_summary(&raw, &conn, &args, OutputMode::Pretty);
         assert!(result.is_ok());
     }
 
@@ -1285,7 +1285,7 @@ mod tests {
             mermaid: false,
             dot: false,
         };
-        let result = run_graph(&args, OutputMode::Human, &root);
+        let result = run_graph(&args, OutputMode::Pretty, &root);
         assert!(result.is_ok(), "run_graph failed: {:?}", result.err());
     }
 

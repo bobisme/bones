@@ -422,7 +422,7 @@ mod tests {
             id: task_id.clone(),
             parent: goal_id.clone(),
         };
-        run_move(&args, Some("test-agent"), OutputMode::Human, &root)
+        run_move(&args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("run_move should succeed");
 
         // Verify parent_id is set immediately (no rebuild needed)
@@ -453,7 +453,7 @@ mod tests {
         };
         // This will try to use the same item as both child and parent,
         // but the important thing is that the parent kind validation happens
-        let result = run_move(&args, Some("test-agent"), OutputMode::Human, &root);
+        let result = run_move(&args, Some("test-agent"), OutputMode::Pretty, &root);
         assert!(result.is_err(), "should fail when parent is not a goal");
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -475,7 +475,7 @@ mod tests {
             id: task_id.clone(),
             parent: goal_id.clone(),
         };
-        run_move(&args, Some("test-agent"), OutputMode::Human, &root).expect("first move");
+        run_move(&args, Some("test-agent"), OutputMode::Pretty, &root).expect("first move");
 
         // Rebuild
         let bones_dir = root.join(".bones");
@@ -488,7 +488,7 @@ mod tests {
             id: task_id.clone(),
             parent: "none".to_string(),
         };
-        run_move(&args2, Some("test-agent"), OutputMode::Human, &root)
+        run_move(&args2, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("move to top-level should succeed");
 
         // Rebuild and verify parent_id is null

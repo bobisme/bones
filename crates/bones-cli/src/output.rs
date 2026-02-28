@@ -160,8 +160,6 @@ pub enum OutputMode {
 }
 
 impl OutputMode {
-    #[allow(non_upper_case_globals)]
-    pub const Human: Self = Self::Pretty;
     #[allow(dead_code, non_upper_case_globals)]
     pub const Table: Self = Self::Text;
 
@@ -498,7 +496,7 @@ mod tests {
     #[test]
     fn output_mode_is_json() {
         assert!(OutputMode::Json.is_json());
-        assert!(!OutputMode::Human.is_json());
+        assert!(!OutputMode::Pretty.is_json());
         assert!(!OutputMode::Table.is_json());
     }
 
@@ -734,7 +732,7 @@ mod tests {
         let data = TestData {
             name: "test".into(),
         };
-        let result = render(OutputMode::Human, &data, |d, w| {
+        let result = render(OutputMode::Pretty, &data, |d, w| {
             writeln!(w, "Name: {}", d.name)
         });
         assert!(result.is_ok());
@@ -767,7 +765,7 @@ mod tests {
     #[test]
     fn render_error_human() {
         let err = CliError::with_details("bad input", "try again", "bad_input");
-        let result = render_error(OutputMode::Human, &err);
+        let result = render_error(OutputMode::Pretty, &err);
         assert!(result.is_ok());
     }
 
@@ -786,7 +784,7 @@ mod tests {
 
     #[test]
     fn render_success_human() {
-        let result = render_success(OutputMode::Human, "it worked");
+        let result = render_success(OutputMode::Pretty, "it worked");
         assert!(result.is_ok());
     }
 
@@ -824,7 +822,7 @@ mod tests {
             bones_core::error::BonesError::Model(bones_core::error::ModelError::ItemNotFound {
                 item_id: "abc".into(),
             });
-        let result = render_bones_error(OutputMode::Human, &err);
+        let result = render_bones_error(OutputMode::Pretty, &err);
         assert!(result.is_ok());
     }
 }

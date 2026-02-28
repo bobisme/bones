@@ -784,7 +784,7 @@ mod tests {
             labels: vec!["bug".to_string(), "urgent".to_string()],
             additional_ids: vec![],
         };
-        run_tag(&args, Some("test-agent"), OutputMode::Human, &root)
+        run_tag(&args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("run_tag should succeed");
 
         // Rebuild projection to pick up the new event
@@ -821,7 +821,7 @@ mod tests {
             labels: vec!["initial".to_string()], // already present
             additional_ids: vec![],
         };
-        run_tag(&args, Some("test-agent"), OutputMode::Human, &root)
+        run_tag(&args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("run_tag should succeed even for existing labels");
 
         // Rebuild and verify no duplicates
@@ -855,7 +855,7 @@ mod tests {
             labels: vec!["a".to_string(), "b".to_string()],
             additional_ids: vec![],
         };
-        run_tag(&tag_args, Some("test-agent"), OutputMode::Human, &root)
+        run_tag(&tag_args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("run_tag should succeed");
 
         // Rebuild to pick up the tags
@@ -870,7 +870,7 @@ mod tests {
             labels: vec!["a".to_string()],
             additional_ids: vec![],
         };
-        run_untag(&untag_args, Some("test-agent"), OutputMode::Human, &root)
+        run_untag(&untag_args, Some("test-agent"), OutputMode::Pretty, &root)
             .expect("run_untag should succeed");
 
         // Rebuild again and verify
@@ -898,7 +898,7 @@ mod tests {
             labels: vec!["bug".to_string()],
             additional_ids: vec![],
         };
-        let result = run_tag(&args, Some("test-agent"), OutputMode::Human, root);
+        let result = run_tag(&args, Some("test-agent"), OutputMode::Pretty, root);
         assert!(result.is_err(), "should fail when no projection DB exists");
     }
 
@@ -926,7 +926,7 @@ mod tests {
             labels: vec!["bug".to_string()],
             additional_ids: vec![],
         };
-        let result = run_tag(&args, Some("test-agent"), OutputMode::Human, root);
+        let result = run_tag(&args, Some("test-agent"), OutputMode::Pretty, root);
         assert!(result.is_err(), "should fail when item does not exist");
         let err_msg = result.unwrap_err().to_string();
         assert!(

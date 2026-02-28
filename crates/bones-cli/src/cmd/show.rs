@@ -671,7 +671,7 @@ mod tests {
         let args = ShowArgs {
             id: "bn-xyz789".into(),
         };
-        run_show(&args, OutputMode::Human, &root).unwrap();
+        run_show(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -681,7 +681,7 @@ mod tests {
         let args = ShowArgs {
             id: "xyz789".into(),
         };
-        run_show(&args, OutputMode::Human, &root).unwrap();
+        run_show(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -689,7 +689,7 @@ mod tests {
         let (_dir, root) = setup_test_db();
         // "xyz" → prefix match → "bn-xyz789"
         let args = ShowArgs { id: "xyz".into() };
-        run_show(&args, OutputMode::Human, &root).unwrap();
+        run_show(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod tests {
         let args = ShowArgs {
             id: "nonexistent".into(),
         };
-        assert!(run_show(&args, OutputMode::Human, &root).is_err());
+        assert!(run_show(&args, OutputMode::Pretty, &root).is_err());
     }
 
     #[test]
@@ -716,7 +716,7 @@ mod tests {
         let args = ShowArgs {
             id: "bn-001".into(),
         };
-        assert!(run_show(&args, OutputMode::Human, dir.path()).is_err());
+        assert!(run_show(&args, OutputMode::Pretty, dir.path()).is_err());
     }
 
     #[test]

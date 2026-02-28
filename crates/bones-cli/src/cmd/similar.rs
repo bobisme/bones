@@ -562,7 +562,7 @@ mod tests {
             id: "bn-001".into(),
             limit: 10,
         };
-        run_similar(&args, OutputMode::Human, &root).unwrap();
+        run_similar(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -583,7 +583,7 @@ mod tests {
             id: "bn-001".into(),
             limit: 1,
         };
-        run_similar(&args, OutputMode::Human, &root).unwrap();
+        run_similar(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -594,7 +594,7 @@ mod tests {
             id: "001".into(),
             limit: 10,
         };
-        run_similar(&args, OutputMode::Human, &root).unwrap();
+        run_similar(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -604,7 +604,7 @@ mod tests {
             id: "bn-010".into(),
             limit: 10,
         };
-        run_similar(&args, OutputMode::Human, &root).unwrap();
+        run_similar(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -614,7 +614,7 @@ mod tests {
             id: "nonexistent-xyz".into(),
             limit: 10,
         };
-        assert!(run_similar(&args, OutputMode::Human, &root).is_err());
+        assert!(run_similar(&args, OutputMode::Pretty, &root).is_err());
     }
 
     #[test]
@@ -624,7 +624,7 @@ mod tests {
             id: "bn-001".into(),
             limit: 10,
         };
-        assert!(run_similar(&args, OutputMode::Human, dir.path()).is_err());
+        assert!(run_similar(&args, OutputMode::Pretty, dir.path()).is_err());
     }
 
     // -----------------------------------------------------------------------

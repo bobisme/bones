@@ -1073,7 +1073,7 @@ mod tests {
         let (_dir, root) = setup_test_db();
         let args = default_args();
         // Should not error and should list only open items by default
-        run_list(&args, OutputMode::Human, &root).unwrap();
+        run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -1081,7 +1081,7 @@ mod tests {
         let (_dir, root) = setup_test_db();
         let mut args = default_args();
         args.state = Some("doing".into());
-        run_list(&args, OutputMode::Human, &root).unwrap();
+        run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -1090,7 +1090,7 @@ mod tests {
         let mut args = default_args();
         args.state = Some("archived".into());
         // No archived items → should succeed with empty result
-        run_list(&args, OutputMode::Human, &root).unwrap();
+        run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -1106,7 +1106,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         // No .bones/bones.db — should return gracefully
         let args = default_args();
-        run_list(&args, OutputMode::Human, dir.path()).unwrap();
+        run_list(&args, OutputMode::Pretty, dir.path()).unwrap();
     }
 
     #[test]
@@ -1115,7 +1115,7 @@ mod tests {
         let mut args = default_args();
         args.state = Some("doing".into());
         args.kind = Some("bug".into());
-        run_list(&args, OutputMode::Human, &root).unwrap();
+        run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
 
     #[test]
@@ -1123,7 +1123,7 @@ mod tests {
         let (_dir, root) = setup_test_db();
         let mut args = default_args();
         args.sort = "bogus_sort".into();
-        assert!(run_list(&args, OutputMode::Human, &root).is_err());
+        assert!(run_list(&args, OutputMode::Pretty, &root).is_err());
     }
 
     #[test]
