@@ -1887,3 +1887,4 @@
 1772058420169163	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3pwo		item.move	bn-3a9o	{"state":"doing"}	blake3:Di-Azzk3kW7r-LYhzv1zaq4J7gWMAi0y849yA5QAl5I
 1772058867701478	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3qAo		item.move	bn-33e0	{"state":"done"}	blake3:eyh6B7R2DgHInnDZRIVn9Cs35x5hFxJX1la-7uYOn1E
 1772058867725641	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3qQo		item.move	bn-3a9o	{"state":"done"}	blake3:IJJVCMrJKsvqxuYs4H-9cEjjYoYSCxztIHcFVBl7sKM
+1772300618400647	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzbg		item.create	bn-21bn	{"description":"test","kind":"task","labels":["test"],"title":"test"}	blake3:WEMS-dLDR-BL0d-ltN4u8pHxgzeAR_omHyGQUUAxU9M
