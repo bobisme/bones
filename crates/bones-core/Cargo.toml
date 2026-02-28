@@ -1,6 +1,6 @@
 [package]
 name = "bones-core"
-version = "0.15.3"
+version.workspace = true
 edition = "2024"
 
 [lints]

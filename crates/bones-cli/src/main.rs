@@ -1555,8 +1555,7 @@ mod tests {
     fn default_output_uses_auto_detection() {
         let cli = Cli::parse_from(["bn", "list"]);
         assert!(!cli.json);
-        // In test (non-TTY), resolve_output_mode defaults to Text.
-        assert!(cli.output_mode().is_text());
+        assert_eq!(cli.format, None);
     }
 
     #[test]

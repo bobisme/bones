@@ -521,8 +521,8 @@ fn format_relative_time(updated_at_us: i64) -> String {
         0..=59 => "just now".into(),
         60..=3599 => format!("{}m", secs / 60),
         3600..=86399 => format!("{}h", secs / 3600),
-        86400..=604799 => format!("{}d", secs / 86400),
-        604800..=2_629_799 => format!("{}w", secs / 604800),
+        86400..=604_799 => format!("{}d", secs / 86400),
+        604_800..=2_629_799 => format!("{}w", secs / 604_800),
         2_629_800..=31_557_599 => format!("{}mo", secs / 2_629_800),
         _ => format!("{}y", secs / 31_557_600),
     }

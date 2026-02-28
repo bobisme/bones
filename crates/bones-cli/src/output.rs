@@ -215,16 +215,18 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
                     line_buf.push_str(&prefix);
                     line_buf.push_str(&style_text(&text, bold, italic));
                 } else if in_heading && colored {
-                    line_buf.push_str(&format!("{}", text.bold().with(Color::Cyan)));
+                    use std::fmt::Write;
+                    let _ = write!(line_buf, "{}", text.bold().with(Color::Cyan));
                 } else {
                     line_buf.push_str(&style_text(&text, bold, italic));
                 }
             }
             Event::Code(code) => {
+                use std::fmt::Write;
                 if colored {
-                    line_buf.push_str(&format!("{}", code.green()));
+                    let _ = write!(line_buf, "{}", code.green());
                 } else {
-                    line_buf.push_str(&format!("`{code}`"));
+                    let _ = write!(line_buf, "`{code}`");
                 }
             }
             Event::SoftBreak | Event::HardBreak => {

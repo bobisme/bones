@@ -30,7 +30,7 @@ use bones_core::model::item::{Kind, Size, Urgency};
 use bones_core::model::item_id::ItemId;
 use bones_search::find_duplicates;
 use bones_search::fusion::{SearchConfig, hybrid_search};
-use bones_search::semantic::{is_semantic_available, knn_search};
+use bones_search::semantic::knn_search;
 use petgraph::graph::DiGraph;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
