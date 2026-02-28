@@ -21,21 +21,6 @@ The short version:
 - **beads_viewer**: rich `--robot-*` triage/reporting interface.
 - **bones**: append-only event log + CRDT convergence + graph-native triage + consistent `--format json` contracts.
 
-## How this relates to `beads` and `beads_viewer --robot-*`
-
-If your automation currently calls `bv --robot-*`, the equivalent bones shape is usually: same intent, but as normal subcommands with machine output.
-
-| beads_viewer                     | bones equivalent                                                                                            |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `bv --robot-next`                | `bn next --format json`                                                                                     |
-| `bv --robot-triage`              | `bn triage --format json`                                                                                   |
-| `bv --robot-plan`                | `bn triage plan --format json`                                                                              |
-| `bv --robot-graph`               | `bn triage graph --format json`                                                                             |
-| `bv --robot-health` style checks | `bn triage health --format json`                                                                            |
-| duplicate/related robot flows    | `bn triage dup <id> --format json`, `bn triage dedup --format json`, `bn triage similar <id> --format json` |
-
-The overall intent is similar: let agents consume structured prioritization/search/graph data. bones keeps that in the main CLI command family instead of a large parallel flag namespace.
-
 ## Project goal: eliminate merge conflicts in tracker data
 
 bones is built around an append-only event log in `.bones/events/*.events`, then replayed into disposable projections (`.bones/bones.db`, caches).
@@ -49,9 +34,7 @@ Design goal: **eliminate backlog merge conflicts as a normal mode of operation**
 
 In other words: fewer painful "who wins this edit?" moments, more "everyone can keep moving."
 
-## The math and algorithms under the hood
-
-See `notes/plan.md` for the full design reference. Highlights:
+## Fun stuff
 
 - **CRDT/event layer**: event DAG replay, ITC clocks, deterministic merge/tie-break rules.
 - **Graph triage**: SCC condensation, transitive reduction, PageRank, betweenness, HITS/eigenvector signals, critical-path influence.
