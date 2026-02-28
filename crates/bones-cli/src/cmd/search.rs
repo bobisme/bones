@@ -358,7 +358,11 @@ fn render_search_text(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result<
     }
 
     if out.count >= out.limit {
-        writeln!(w, "advice  result-limit  limit={}  query={}", out.limit, out.query)?;
+        writeln!(
+            w,
+            "advice  result-limit  limit={}  query={}",
+            out.limit, out.query
+        )?;
     }
 
     if let Some(fallback_query) = &out.fallback_query {
@@ -621,8 +625,14 @@ mod tests {
         let mut buf = Vec::new();
         render_search_human(&out, &mut buf).unwrap();
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("Showing first"), "should show limit hint when count >= limit");
-        assert!(text.contains("-n"), "should mention -n flag to increase limit");
+        assert!(
+            text.contains("Showing first"),
+            "should show limit hint when count >= limit"
+        );
+        assert!(
+            text.contains("-n"),
+            "should mention -n flag to increase limit"
+        );
     }
 
     #[test]
@@ -642,7 +652,10 @@ mod tests {
         let mut buf = Vec::new();
         render_search_text(&out, &mut buf).unwrap();
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("advice  result-limit"), "text format should emit limit advice");
+        assert!(
+            text.contains("advice  result-limit"),
+            "text format should emit limit advice"
+        );
         assert!(text.contains("limit=1"));
     }
 
@@ -773,7 +786,10 @@ mod tests {
         assert!(json.contains("bn-001"));
         assert!(json.contains("auth"));
         assert!(json.contains("Auth bug"));
-        assert!(json.contains("\"limit\":10"), "JSON output should include the effective limit");
+        assert!(
+            json.contains("\"limit\":10"),
+            "JSON output should include the effective limit"
+        );
     }
 
     #[test]

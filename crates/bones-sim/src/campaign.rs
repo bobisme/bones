@@ -43,7 +43,7 @@ pub struct CampaignConfig {
     pub reconciliation_rounds: u8,
 }
 
-fn default_reconciliation_rounds() -> u8 {
+const fn default_reconciliation_rounds() -> u8 {
     3
 }
 

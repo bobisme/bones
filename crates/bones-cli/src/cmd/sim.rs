@@ -147,6 +147,7 @@ struct ReplayOutput {
     trace_fingerprint: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_campaign_config(
     seed_start: u64,
     seeds: u64,

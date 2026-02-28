@@ -132,7 +132,7 @@ pub struct SimulationConfig {
     pub reconciliation_rounds: u8,
 }
 
-fn default_reconciliation_rounds() -> u8 {
+const fn default_reconciliation_rounds() -> u8 {
     3
 }
 
@@ -408,7 +408,11 @@ impl Simulator {
                 break;
             }
 
-            let synthetic_round = self.config.rounds.saturating_add(1001).saturating_add(round_offset);
+            let synthetic_round = self
+                .config
+                .rounds
+                .saturating_add(1001)
+                .saturating_add(round_offset);
 
             // Each agent picks a random partner — models epidemic/gossip protocol.
             let len_u64 = u64::try_from(n).unwrap_or(1);
@@ -448,13 +452,7 @@ impl Simulator {
             .all(|a| a.snapshot().known_events == *first)
     }
 
-    fn reconcile_pair(
-        &mut self,
-        a: AgentId,
-        b: AgentId,
-        round: u64,
-        trace: &mut Vec<TraceEvent>,
-    ) {
+    fn reconcile_pair(&mut self, a: AgentId, b: AgentId, round: u64, trace: &mut Vec<TraceEvent>) {
         let snap_a = self.agents[a].snapshot().known_events;
         let snap_b = self.agents[b].snapshot().known_events;
         let a_to_b: Vec<u64> = snap_a.difference(&snap_b).copied().collect();
