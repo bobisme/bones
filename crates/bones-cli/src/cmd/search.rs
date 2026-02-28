@@ -71,6 +71,8 @@ pub struct SearchResult {
 pub struct SearchOutput {
     /// The original query string.
     pub query: String,
+    /// Maximum number of results requested (the effective limit).
+    pub limit: usize,
     /// Total number of results returned.
     pub count: usize,
     /// Ordered list of results (best match first).
@@ -162,6 +164,7 @@ pub fn run_search(
 
     let search_output = SearchOutput {
         query: args.query.clone(),
+        limit,
         count: results_with_meta.len(),
         results: results_with_meta,
         fallback_query,
@@ -321,7 +324,15 @@ fn render_search_human(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result
         return Ok(());
     }
 
-    writeln!(w, "{} result(s) for '{}':", out.count, out.query)?;
+    if out.count >= out.limit {
+        writeln!(
+            w,
+            "Showing first {} result(s) for '{}' (use -n to increase limit):",
+            out.count, out.query
+        )?;
+    } else {
+        writeln!(w, "{} result(s) for '{}':", out.count, out.query)?;
+    }
     if let Some(fallback_query) = &out.fallback_query {
         writeln!(w, "(fallback query applied: {fallback_query})")?;
     }
@@ -344,6 +355,10 @@ fn render_search_text(out: &SearchOutput, w: &mut dyn Write) -> std::io::Result<
     if out.results.is_empty() {
         writeln!(w, "advice  no-results  query={}", out.query)?;
         return Ok(());
+    }
+
+    if out.count >= out.limit {
+        writeln!(w, "advice  result-limit  limit={}  query={}", out.limit, out.query)?;
     }
 
     if let Some(fallback_query) = &out.fallback_query {
@@ -534,6 +549,7 @@ mod tests {
     fn render_search_human_no_results() {
         let out = SearchOutput {
             query: "nonexistent".into(),
+            limit: 10,
             count: 0,
             results: vec![],
             fallback_query: None,
@@ -549,6 +565,7 @@ mod tests {
     fn render_search_human_with_results() {
         let out = SearchOutput {
             query: "auth".into(),
+            limit: 10,
             count: 2,
             results: vec![
                 SearchResult {
@@ -575,6 +592,58 @@ mod tests {
         assert!(text.contains("open"));
         assert!(text.contains("bn-002"));
         assert!(text.contains("doing"));
+        // count < limit: no "Showing first" hint needed
+        assert!(!text.contains("Showing first"));
+    }
+
+    #[test]
+    fn render_search_human_shows_limit_hint_when_at_capacity() {
+        let out = SearchOutput {
+            query: "auth".into(),
+            limit: 2,
+            count: 2,
+            results: vec![
+                SearchResult {
+                    id: "bn-001".into(),
+                    title: "Authentication timeout".into(),
+                    score: -3.5,
+                    state: "open".into(),
+                },
+                SearchResult {
+                    id: "bn-002".into(),
+                    title: "Auth service broken".into(),
+                    score: -2.1,
+                    state: "doing".into(),
+                },
+            ],
+            fallback_query: None,
+        };
+        let mut buf = Vec::new();
+        render_search_human(&out, &mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("Showing first"), "should show limit hint when count >= limit");
+        assert!(text.contains("-n"), "should mention -n flag to increase limit");
+    }
+
+    #[test]
+    fn render_search_text_shows_limit_advice_when_at_capacity() {
+        let out = SearchOutput {
+            query: "auth".into(),
+            limit: 1,
+            count: 1,
+            results: vec![SearchResult {
+                id: "bn-001".into(),
+                title: "Auth bug".into(),
+                score: -2.5,
+                state: "open".into(),
+            }],
+            fallback_query: None,
+        };
+        let mut buf = Vec::new();
+        render_search_text(&out, &mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("advice  result-limit"), "text format should emit limit advice");
+        assert!(text.contains("limit=1"));
     }
 
     // -----------------------------------------------------------------------
@@ -690,6 +759,7 @@ mod tests {
     fn search_output_json_serializable() {
         let out = SearchOutput {
             query: "auth".into(),
+            limit: 10,
             count: 1,
             results: vec![SearchResult {
                 id: "bn-001".into(),
@@ -703,6 +773,7 @@ mod tests {
         assert!(json.contains("bn-001"));
         assert!(json.contains("auth"));
         assert!(json.contains("Auth bug"));
+        assert!(json.contains("\"limit\":10"), "JSON output should include the effective limit");
     }
 
     #[test]
