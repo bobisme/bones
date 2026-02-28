@@ -2,6 +2,9 @@
 name = "bones-sqlite-vec"
 version.workspace = true
 edition = "2024"
+license.workspace = true
+description = "SQLite-vec integration for bones"
+repository.workspace = true
 
 [lints]
 workspace = true

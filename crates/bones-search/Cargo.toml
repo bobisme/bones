@@ -2,6 +2,9 @@
 name = "bones-search"
 version.workspace = true
 edition = "2024"
+license.workspace = true
+description = "Search and retrieval for bones"
+repository.workspace = true
 
 [lints]
 workspace = true
@@ -12,7 +15,7 @@ semantic-ort = ["dep:ort", "dep:tokenizers", "dep:ureq"]
 bundled-model = ["semantic-ort"]
 
 [dependencies]
-bones-core = { path = "../bones-core" }
+bones-core = { path = "../bones-core", version = "0.18.1" }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 ort = { version = "2.0.0-rc.10", optional = true }

@@ -2,6 +2,9 @@
 name = "bones-core"
 version.workspace = true
 edition = "2024"
+license.workspace = true
+description.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
@@ -19,7 +22,7 @@ toml = { workspace = true }
 dirs = { workspace = true }
 terseid = { workspace = true }
 tracing = { workspace = true }
-bones-sqlite-vec = { path = "../bones-sqlite-vec" }
+bones-sqlite-vec = { path = "../bones-sqlite-vec", version = "0.18.1" }
 bumpalo = "3.20.2"
 memmap2 = "0.9.10"
 

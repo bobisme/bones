@@ -2,12 +2,15 @@
 name = "bones-triage"
 version.workspace = true
 edition = "2024"
+license.workspace = true
+description = "Prioritization and scoring for bones"
+repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core" }
+bones-core = { path = "../bones-core", version = "0.18.1" }
 anyhow = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
