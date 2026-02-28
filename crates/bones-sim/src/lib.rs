@@ -99,6 +99,17 @@ pub enum TraceEventKind {
         /// Freeze expires at this round (exclusive).
         until_round: u64,
     },
+    /// A reconciliation exchange between two agents.
+    Reconcile {
+        /// First agent in the pair.
+        agent_a: AgentId,
+        /// Second agent in the pair.
+        agent_b: AgentId,
+        /// Events transferred from A to B.
+        a_to_b: usize,
+        /// Events transferred from B to A.
+        b_to_a: usize,
+    },
 }
 
 /// Top-level simulation configuration.
@@ -116,6 +127,13 @@ pub struct SimulationConfig {
     pub fault: FaultConfig,
     /// Clock modeling configuration.
     pub clock: ClockConfig,
+    /// Number of pairwise gossip reconciliation rounds after drain.
+    #[serde(default = "default_reconciliation_rounds")]
+    pub reconciliation_rounds: u8,
+}
+
+fn default_reconciliation_rounds() -> u8 {
+    3
 }
 
 impl Default for SimulationConfig {
@@ -127,6 +145,7 @@ impl Default for SimulationConfig {
             fanout: 2,
             fault: FaultConfig::default(),
             clock: ClockConfig::default(),
+            reconciliation_rounds: default_reconciliation_rounds(),
         }
     }
 }
@@ -309,6 +328,7 @@ impl Simulator {
         }
 
         self.final_drain(&mut trace);
+        self.reconcile(&mut trace);
 
         let states = self
             .agents
@@ -370,6 +390,95 @@ impl Simulator {
             self.deliver_round(drain_round, trace);
             drain_round = drain_round.saturating_add(1);
         }
+    }
+
+    fn reconcile(&mut self, trace: &mut Vec<TraceEvent>) {
+        if self.config.reconciliation_rounds == 0 {
+            return;
+        }
+
+        let n = self.agents.len();
+        if n < 2 {
+            return;
+        }
+
+        for round_offset in 0..u64::from(self.config.reconciliation_rounds) {
+            // Early exit if all agents already have identical known_events.
+            if self.all_agents_converged() {
+                break;
+            }
+
+            let synthetic_round = self.config.rounds.saturating_add(1001).saturating_add(round_offset);
+
+            // Each agent picks a random partner — models epidemic/gossip protocol.
+            let len_u64 = u64::try_from(n).unwrap_or(1);
+            for a in 0..n {
+                let mut b = usize::try_from(self.rng.next_bounded(len_u64)).unwrap_or(0);
+                while b == a {
+                    b = usize::try_from(self.rng.next_bounded(len_u64)).unwrap_or(0);
+                }
+                self.reconcile_pair(a, b, synthetic_round, trace);
+            }
+        }
+
+        // If random gossip rounds left gaps, two sequential chain sweeps
+        // guarantee convergence: forward (0↔1, 1↔2, ...) propagates
+        // everything rightward, reverse (..., 1↔0) propagates back.
+        if !self.all_agents_converged() {
+            let synthetic_round = self
+                .config
+                .rounds
+                .saturating_add(1001)
+                .saturating_add(u64::from(self.config.reconciliation_rounds));
+            // Forward pass.
+            for a in 0..n.saturating_sub(1) {
+                self.reconcile_pair(a, a + 1, synthetic_round, trace);
+            }
+            // Reverse pass.
+            for a in (0..n.saturating_sub(1)).rev() {
+                self.reconcile_pair(a + 1, a, synthetic_round, trace);
+            }
+        }
+    }
+
+    fn all_agents_converged(&self) -> bool {
+        let first = &self.agents[0].snapshot().known_events;
+        self.agents[1..]
+            .iter()
+            .all(|a| a.snapshot().known_events == *first)
+    }
+
+    fn reconcile_pair(
+        &mut self,
+        a: AgentId,
+        b: AgentId,
+        round: u64,
+        trace: &mut Vec<TraceEvent>,
+    ) {
+        let snap_a = self.agents[a].snapshot().known_events;
+        let snap_b = self.agents[b].snapshot().known_events;
+        let a_to_b: Vec<u64> = snap_a.difference(&snap_b).copied().collect();
+        let b_to_a: Vec<u64> = snap_b.difference(&snap_a).copied().collect();
+
+        let a_to_b_count = a_to_b.len();
+        let b_to_a_count = b_to_a.len();
+
+        for event_id in &a_to_b {
+            self.agents[b].observe_event(*event_id);
+        }
+        for event_id in &b_to_a {
+            self.agents[a].observe_event(*event_id);
+        }
+
+        trace.push(TraceEvent {
+            round,
+            kind: TraceEventKind::Reconcile {
+                agent_a: a,
+                agent_b: b,
+                a_to_b: a_to_b_count,
+                b_to_a: b_to_a_count,
+            },
+        });
     }
 
     fn pick_targets(&mut self, source: AgentId) -> Vec<AgentId> {
@@ -599,6 +708,79 @@ mod tests {
         let report = ConvergenceOracle::evaluate(&[state_a, state_b]);
         assert!(!report.converged);
         assert_eq!(report.divergent_agents, vec![1]);
+    }
+
+    #[test]
+    fn reconciliation_heals_dropped_messages() {
+        let config = SimulationConfig {
+            seed: 42,
+            agent_count: 5,
+            rounds: 24,
+            fanout: 2,
+            fault: FaultConfig {
+                max_delay_rounds: 3,
+                drop_rate_percent: 10,
+                duplicate_rate_percent: 5,
+                reorder_rate_percent: 10,
+                partition_rate_percent: 5,
+                freeze_rate_percent: 5,
+                freeze_duration_rounds: 2,
+            },
+            clock: Default::default(),
+            reconciliation_rounds: 3,
+        };
+
+        let mut simulator = Simulator::new(config).expect("valid config");
+        let result = simulator.run().expect("run");
+
+        // After reconciliation, all agents should converge.
+        let first = &result.states[0].known_events;
+        for state in &result.states[1..] {
+            assert_eq!(
+                &state.known_events, first,
+                "agent {} diverges after reconciliation",
+                state.id
+            );
+        }
+    }
+
+    #[test]
+    fn reconciliation_disabled_allows_divergence() {
+        // With faults and no reconciliation, at least some seeds should diverge.
+        // We try a few seeds to find one that diverges.
+        let mut found_divergence = false;
+        for seed in 0..20 {
+            let config = SimulationConfig {
+                seed,
+                agent_count: 5,
+                rounds: 24,
+                fanout: 2,
+                fault: FaultConfig {
+                    max_delay_rounds: 3,
+                    drop_rate_percent: 10,
+                    duplicate_rate_percent: 5,
+                    reorder_rate_percent: 10,
+                    partition_rate_percent: 5,
+                    freeze_rate_percent: 5,
+                    freeze_duration_rounds: 2,
+                },
+                clock: Default::default(),
+                reconciliation_rounds: 0,
+            };
+
+            let mut simulator = Simulator::new(config).expect("valid config");
+            let result = simulator.run().expect("run");
+
+            let first = &result.states[0].known_events;
+            if result.states[1..].iter().any(|s| &s.known_events != first) {
+                found_divergence = true;
+                break;
+            }
+        }
+        assert!(
+            found_divergence,
+            "expected at least one seed to diverge without reconciliation"
+        );
     }
 
     #[test]

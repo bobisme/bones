@@ -77,6 +77,10 @@ pub struct SimRunArgs {
     /// Maximum delivery delay in rounds.
     #[arg(long, default_value = "3")]
     pub max_delay: u8,
+
+    /// Number of pairwise gossip reconciliation rounds after drain.
+    #[arg(long, default_value = "3")]
+    pub reconciliation_rounds: u8,
 }
 
 /// Arguments for `bn dev sim replay`.
@@ -105,6 +109,10 @@ pub struct SimReplayArgs {
     /// Maximum delivery delay in rounds.
     #[arg(long, default_value = "3")]
     pub max_delay: u8,
+
+    /// Number of pairwise gossip reconciliation rounds after drain.
+    #[arg(long, default_value = "3")]
+    pub reconciliation_rounds: u8,
 }
 
 /// JSON output for `bn dev sim run`.
@@ -147,6 +155,7 @@ fn build_campaign_config(
     fanout: usize,
     faults: f64,
     max_delay: u8,
+    reconciliation_rounds: u8,
 ) -> bones_sim::campaign::CampaignConfig {
     // Scale individual fault rates from the overall fault probability.
     let drop = scale_fault(faults, 50); // drop is half of faults
@@ -167,6 +176,7 @@ fn build_campaign_config(
         fault_max_delay: max_delay,
         fault_freeze_percent: freeze,
         fault_freeze_duration: 2,
+        reconciliation_rounds,
     }
 }
 
@@ -187,6 +197,7 @@ pub fn run_sim_run(args: &SimRunArgs, output: OutputMode, _project_root: &Path) 
         args.fanout,
         args.faults,
         args.max_delay,
+        args.reconciliation_rounds,
     );
 
     let report = bones_sim::campaign::run_campaign(&config)?;
@@ -324,6 +335,7 @@ pub fn run_sim_replay(
         args.fanout,
         args.faults,
         args.max_delay,
+        args.reconciliation_rounds,
     );
 
     let trace = bones_sim::campaign::replay_seed(args.seed, &config)?;

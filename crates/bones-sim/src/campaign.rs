@@ -38,6 +38,13 @@ pub struct CampaignConfig {
     pub fault_freeze_percent: u8,
     /// Clock freeze duration in rounds.
     pub fault_freeze_duration: u8,
+    /// Number of pairwise gossip reconciliation rounds after drain.
+    #[serde(default = "default_reconciliation_rounds")]
+    pub reconciliation_rounds: u8,
+}
+
+fn default_reconciliation_rounds() -> u8 {
+    3
 }
 
 impl Default for CampaignConfig {
@@ -54,6 +61,7 @@ impl Default for CampaignConfig {
             fault_max_delay: 3,
             fault_freeze_percent: 5,
             fault_freeze_duration: 2,
+            reconciliation_rounds: default_reconciliation_rounds(),
         }
     }
 }
@@ -78,6 +86,7 @@ impl CampaignConfig {
                 freeze_duration_rounds: self.fault_freeze_duration,
             },
             clock: crate::clock::ClockConfig::default(),
+            reconciliation_rounds: self.reconciliation_rounds,
         }
     }
 
@@ -384,6 +393,7 @@ mod tests {
             fault_max_delay: 2,
             fault_freeze_percent: 2,
             fault_freeze_duration: 2,
+            ..CampaignConfig::default()
         };
         let result = run_single_seed(0, &config).expect("sim should not error");
         assert!(result.is_ok(), "seed 0 should pass: {result:?}");
@@ -406,6 +416,7 @@ mod tests {
             fault_max_delay: 2,
             fault_freeze_percent: 2,
             fault_freeze_duration: 2,
+            ..CampaignConfig::default()
         };
         let report = run_campaign(&config).expect("campaign should not error");
         assert_eq!(report.seeds_run, 10);
@@ -433,6 +444,34 @@ mod tests {
             fault_max_delay: 3,
             fault_freeze_percent: 5,
             fault_freeze_duration: 2,
+            ..CampaignConfig::default()
+        };
+        let report = run_campaign(&config).expect("campaign should not error");
+        assert_eq!(report.seeds_run, 100);
+        assert!(
+            report.all_passed(),
+            "campaign failed: {} failures, first at seed {:?}",
+            report.failures.len(),
+            report.first_failure,
+        );
+    }
+
+    #[test]
+    fn run_campaign_100_seeds_pass_with_faults_and_reconciliation() {
+        // The acceptance test: 100 seeds with real faults, reconciliation heals divergence.
+        let config = CampaignConfig {
+            seed_range: 0..100,
+            agent_count: 5,
+            rounds: 24,
+            fanout: 2,
+            fault_drop_percent: 5,
+            fault_duplicate_percent: 2,
+            fault_reorder_percent: 5,
+            fault_partition_percent: 2,
+            fault_max_delay: 3,
+            fault_freeze_percent: 2,
+            fault_freeze_duration: 2,
+            reconciliation_rounds: 3,
         };
         let report = run_campaign(&config).expect("campaign should not error");
         assert_eq!(report.seeds_run, 100);
