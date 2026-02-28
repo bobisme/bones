@@ -140,8 +140,8 @@ fn hybrid_search_inner(
         .map(|(i, &id)| (id, i + 1))
         .collect();
 
-    let mut out = Vec::with_capacity(fused.len().min(limit));
-    for (item_id, score) in fused.into_iter().take(limit) {
+    let mut out = Vec::with_capacity(limit);
+    for (item_id, score) in fused {
         let lexical_rank = lexical_map
             .get(item_id.as_str())
             .copied()
@@ -156,6 +156,8 @@ fn hybrid_search_inner(
             .unwrap_or(usize::MAX);
 
         // Avoid returning graph-only expansions that have no textual relevance.
+        // Filter before counting against the limit so structural-only items don't
+        // silently reduce the result count below what the caller requested.
         if lexical_rank == usize::MAX && semantic_rank == usize::MAX {
             continue;
         }
@@ -170,6 +172,10 @@ fn hybrid_search_inner(
             semantic_rank,
             structural_rank,
         });
+
+        if out.len() >= limit {
+            break;
+        }
     }
 
     Ok(out)
