@@ -85,7 +85,12 @@ fn init_noop() -> TelemetryGuard {
             .try_init(),
         _ => tracing_subscriber::registry()
             .with(filter)
-            .with(tracing_subscriber::fmt::layer().compact())
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .compact()
+                    .without_time()
+                    .with_target(false),
+            )
             .try_init(),
     };
 
