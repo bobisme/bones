@@ -1,7 +1,11 @@
 [package]
 name = "bones-core"
-version = "0.19.0"
-edition = "2024"
+version = "0.19.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core data structures, CRDT event model, and projection engine for bones"
+readme = "README.md"
 
 [lints]
 workspace = true
