@@ -11,7 +11,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core" }
+bones-core = { path = "../bones-core", version = "0.19.4" }
 anyhow = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }

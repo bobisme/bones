@@ -16,7 +16,7 @@ semantic-ort = ["dep:ort", "dep:tokenizers", "dep:ureq"]
 bundled-model = ["semantic-ort"]
 
 [dependencies]
-bones-core = { path = "../bones-core" }
+bones-core = { path = "../bones-core", version = "0.19.4" }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 ort = { version = "2.0.0-rc.10", optional = true }

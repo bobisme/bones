@@ -107,7 +107,7 @@ jobs:
           # Publish in dependency order. --no-verify skips rebuilding
           # (already verified by the test + build jobs).
           # Sleep between publishes to let crates.io index catch up.
-          for crate in bones-core bones-triage bones-search bones-sim bones-cli; do
+          for crate in bones-sqlite-vec bones-core bones-triage bones-search bones-sim bones-cli; do
             echo "::group::Publishing ${crate}"
             cargo publish -p "${crate}" --no-verify || {
               echo "::warning::cargo publish -p ${crate} failed (may already be published)"
