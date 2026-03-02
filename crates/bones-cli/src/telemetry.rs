@@ -10,7 +10,17 @@
 //! If `TRACEPARENT` is set (W3C Trace Context format), spans are created as
 //! children of the remote parent. Use [`current_traceparent`] to extract the
 //! current span context for propagation to child processes.
+//!
+//! ## TUI mode
+//!
+//! Call [`init_for_tui`] instead of [`init`] before launching the TUI.
+//! This suppresses all console output and instead buffers ERROR-level
+//! messages into a shared sink. The TUI polls the sink via
+//! [`tui_drain_errors`] and renders errors in red at the status bar.
 
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock};
+use tracing::Subscriber;
 use tracing_subscriber::EnvFilter;
 
 /// Opaque guard — dropping it flushes and shuts down the OTLP pipeline.
@@ -40,6 +50,79 @@ impl Drop for TelemetryGuard {
     }
 }
 
+// ---------------------------------------------------------------------------
+// TUI log sink
+// ---------------------------------------------------------------------------
+
+type TuiLogSink = Arc<Mutex<VecDeque<String>>>;
+
+static TUI_LOG_SINK: OnceLock<TuiLogSink> = OnceLock::new();
+
+/// Drain all ERROR messages captured during TUI mode.
+///
+/// Returns collected messages in chronological order (oldest first) and
+/// clears the internal buffer.  Returns an empty `Vec` outside TUI mode.
+pub fn tui_drain_errors() -> Vec<String> {
+    if let Some(sink) = TUI_LOG_SINK.get() {
+        if let Ok(mut s) = sink.lock() {
+            return s.drain(..).collect();
+        }
+    }
+    vec![]
+}
+
+/// A `tracing_subscriber` layer that captures ERROR events into the shared
+/// TUI log sink instead of writing them to stdout/stderr.
+struct TuiLogLayer {
+    sink: TuiLogSink,
+}
+
+impl<S: Subscriber> tracing_subscriber::Layer<S> for TuiLogLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        // Only capture ERROR-level events; silently drop everything else.
+        if *event.metadata().level() > tracing::Level::ERROR {
+            return;
+        }
+        let mut visitor = MessageVisitor(String::new());
+        event.record(&mut visitor);
+        let msg = if visitor.0.is_empty() {
+            event.metadata().name().to_string()
+        } else {
+            visitor.0.clone()
+        };
+        if let Ok(mut s) = self.sink.lock() {
+            s.push_back(msg);
+            // Bound memory: keep at most 20 recent errors.
+            while s.len() > 20 {
+                s.pop_front();
+            }
+        }
+    }
+}
+
+struct MessageVisitor(String);
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.0 = value.to_string();
+        }
+    }
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public init functions
+// ---------------------------------------------------------------------------
+
 /// Initialize telemetry based on `OTEL_EXPORTER_OTLP_ENDPOINT`.
 ///
 /// Returns a guard that must be held until the program exits.
@@ -62,6 +145,41 @@ pub fn init() -> TelemetryGuard {
         }
     }
 }
+
+/// Initialize telemetry for TUI mode.
+///
+/// No log output is written to stdout or stderr.  Instead, ERROR-level
+/// tracing events are captured in a shared in-memory sink.  Call
+/// [`tui_drain_errors`] periodically (e.g. from the tick handler) to
+/// retrieve accumulated messages and display them in the TUI.
+#[must_use]
+pub fn init_for_tui() -> TelemetryGuard {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    let sink: TuiLogSink = Arc::new(Mutex::new(VecDeque::new()));
+    // Ignore failure: OnceLock may already be set in tests.
+    let _ = TUI_LOG_SINK.set(Arc::clone(&sink));
+
+    // Filter: only ERROR reaches the TUI layer; everything else is discarded.
+    let filter = EnvFilter::new("error");
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(TuiLogLayer { sink })
+        .try_init();
+
+    TelemetryGuard {
+        #[cfg(feature = "otel")]
+        trace_provider: None,
+        #[cfg(feature = "otel")]
+        log_provider: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 fn init_noop() -> TelemetryGuard {
     use tracing_subscriber::layer::SubscriberExt as _;
@@ -89,7 +207,11 @@ fn init_noop() -> TelemetryGuard {
                 tracing_subscriber::fmt::layer()
                     .compact()
                     .without_time()
-                    .with_target(false),
+                    .with_target(false)
+                    .with_thread_ids(false)
+                    .with_thread_names(false)
+                    .with_file(false)
+                    .with_line_number(false),
             )
             .try_init(),
     };

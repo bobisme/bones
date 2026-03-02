@@ -1007,9 +1007,13 @@ fn setup_merge_tool() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let _telemetry_guard = telemetry::init();
-
     let cli = Cli::parse();
+    let is_tui = matches!(cli.command, Commands::Ui | Commands::Tui);
+    let _telemetry_guard = if is_tui {
+        telemetry::init_for_tui()
+    } else {
+        telemetry::init()
+    };
     let timing_enabled = cli.timing || timing::timing_enabled_from_env();
     timing::set_timing_enabled(timing_enabled);
     timing::clear_timings();

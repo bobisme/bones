@@ -1612,6 +1612,8 @@ pub struct ListView {
     refresh_interval: Duration,
     /// Whether a status message should be shown temporarily.
     status_msg: Option<(String, Instant)>,
+    /// Most recent tracing ERROR captured from the log sink (shown in red).
+    error_msg: Option<(String, Instant)>,
     /// Whether the right-side detail pane is open.
     show_detail: bool,
     /// Whether done/archived bones are shown.
@@ -1700,6 +1702,7 @@ impl ListView {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
             status_msg: None,
+            error_msg: None,
             show_detail: false,
             show_done: false,
             split_percent: 40,
@@ -2728,6 +2731,10 @@ impl ListView {
             self.reload()?;
         }
         self.clamp_detail_scroll();
+        // Pick up any ERROR events captured by the TUI log layer.
+        if let Some(msg) = crate::telemetry::tui_drain_errors().into_iter().last() {
+            self.error_msg = Some((msg, Instant::now()));
+        }
         Ok(())
     }
 
@@ -3734,6 +3741,16 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
 
 /// Build the status bar line from current filter state.
 fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
+    // Errors take highest priority: show in red for 10 seconds.
+    if let Some((ref msg, at)) = app.error_msg
+        && at.elapsed() < Duration::from_secs(10)
+    {
+        return Line::from(vec![Span::styled(
+            format!("error: {msg}"),
+            Style::default().fg(Color::Red),
+        )]);
+    }
+
     // Show a transient status message if recent (< 3 seconds).
     if let Some((ref msg, at)) = app.status_msg
         && at.elapsed() < Duration::from_secs(3)
@@ -4820,6 +4837,7 @@ mod tests {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
             status_msg: None,
+            error_msg: None,
             show_detail: false,
             show_done: false,
             split_percent: 40,
@@ -4926,6 +4944,7 @@ mod tests {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
             status_msg: None,
+            error_msg: None,
             show_detail: false,
             show_done: false,
             split_percent: 40,
