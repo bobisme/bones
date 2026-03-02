@@ -166,7 +166,7 @@ If a review was conducted:
 Then proceed with teardown:
 - `maw exec default -- bn bone comment add <bone-id> "Completed by $AGENT"`
 - `maw exec default -- bn done <bone-id> --reason "Completed"`
-- `maw ws merge $WS --destroy` (if merge conflict, preserve workspace and announce; maw v0.22.0+ produces linear squashed history and auto-moves main)
+- `maw ws merge $WS --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; if merge conflict, preserve workspace and announce; maw v0.22.0+ produces linear squashed history and auto-moves main)
 - `maw push` (if pushMain enabled in `.botbox.json`; maw v0.24.0+ handles bookmark and push)
 - `bus claims release --agent $AGENT --all`
 - `bus send --agent $AGENT $BOTBOX_PROJECT "Completed <bone-id>: <bone-title>" -L task-done`

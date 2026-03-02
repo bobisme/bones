@@ -26,7 +26,7 @@ All steps below are required — they clean up resources, prevent workspace leak
    - Run in the workspace: `maw exec $WS -- <checkCommand>` (e.g., `cargo clippy && cargo test`, `npm test`)
    - If checks fail, fix the issues before proceeding. Do NOT merge broken code.
    - If no `checkCommand` is configured, at minimum verify compilation succeeds.
-7. **Merge and destroy the workspace**: `maw ws merge $WS --destroy` (where `$WS` is the workspace name from the start step — **never `default`**)
+7. **Merge and destroy the workspace**: `maw ws merge $WS --destroy --message "feat: <bone-title>"` (where `$WS` is the workspace name from the start step — **never `default`**; use a conventional commit prefix matching your change type: `feat:`, `fix:`, `chore:`, etc.)
    - The `--destroy` flag is required — it cleans up the workspace after merging
    - **Never merge or destroy the default workspace.** Default is where other workspaces merge into.
    - `maw ws merge` now produces linear history: workspace commits are rebased onto main and squashed into a single commit (as of v0.22.0)
@@ -70,7 +70,7 @@ If `maw ws merge` detects conflicts:
 maw exec $WS -- git restore --source refs/heads/main -- .bones/ .agents/ .claude/
 ```
 
-Then retry `maw ws merge $WS --destroy`.
+Then retry `maw ws merge $WS --destroy --message "feat: <bone-title>"`.
 
 ### Full recovery when conflicts are messy
 
@@ -91,7 +91,7 @@ maw exec $WS -- git status
 maw exec $WS -- git add <resolved-file>
 
 # 5. Retry merge
-maw ws merge $WS --destroy
+maw ws merge $WS --destroy --message "feat: <bone-title>"
 ```
 
 ### When to escalate

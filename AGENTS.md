@@ -85,7 +85,7 @@ See `docs/contributor-guide.md` for:
 1. **Create a bone** to track your work: `maw exec default -- bn create --title "..." --description "..."`
 2. **Create a workspace** for your changes: `maw ws create --random` — this gives you `ws/<name>/`
 3. **Edit files in your workspace** (`ws/<name>/`), never in `ws/default/`
-4. **Merge when done**: `maw ws merge <name> --destroy`
+4. **Merge when done**: `maw ws merge <name> --destroy --message "feat: <bone-title>"` (use conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.)
 5. **Close the bone**: `maw exec default -- bn done <id>`
 
 Do not create git branches manually — `maw ws create` handles branching for you. See [worker-loop.md](.agents/botbox/worker-loop.md) for the full triage → start → work → finish cycle.
@@ -104,8 +104,7 @@ project-root/          ← bare repo (no source files here)
 │   └── amber-reef/    ← another agent workspace
 ├── .manifold/         ← maw metadata/artifacts
 ├── .git/              ← git data (core.bare=true)
-├── AGENTS.md          ← stub redirecting to ws/default/AGENTS.md
-└── CLAUDE.md          ← symlink → AGENTS.md
+└── AGENTS.md          ← stub redirecting to ws/default/AGENTS.md
 ```
 
 **Key rules:**
@@ -127,10 +126,6 @@ project-root/          ← bare repo (no source files here)
 | Next N bones | `maw exec default -- bn next N` (e.g., `bn next 4` for dispatch) |
 | Show bone | `maw exec default -- bn show <id>` |
 | Create | `maw exec default -- bn create --title "..." --description "..."` |
-| Create goal | `maw exec default -- bn create --title "..." --kind goal` |
-| Create child | `maw exec default -- bn create --title "..." --parent <goal-id>` |
-| Reparent bone | `maw exec default -- bn bone move <id> --parent <goal-id>` |
-| Detach from parent | `maw exec default -- bn bone move <id> --parent none` |
 | Start work | `maw exec default -- bn do <id>` |
 | Add comment | `maw exec default -- bn bone comment add <id> "message"` |
 | Close | `maw exec default -- bn done <id>` |
@@ -146,7 +141,7 @@ Identity resolved from `$AGENT` env. No flags needed in agent loops.
 | Create workspace | `maw ws create <name>` |
 | List workspaces | `maw ws list` |
 | Check merge readiness | `maw ws merge <name> --check` |
-| Merge to main | `maw ws merge <name> --destroy` |
+| Merge to main | `maw ws merge <name> --destroy --message "feat: <bone-title>"` |
 | Destroy (no merge) | `maw ws destroy <name>` |
 | Run command in workspace | `maw exec <name> -- <command>` |
 | Diff workspace vs epoch | `maw ws diff <name>` |
@@ -166,7 +161,7 @@ maw ws diff <name>                        # diff vs epoch (maw-native)
 **Lead agent merge workflow** — after a worker finishes a bone:
 1. `maw ws list` — look for `active (+N to merge)` entries
 2. `maw ws merge <name> --check` — verify no conflicts
-3. `maw ws merge <name> --destroy` — merge and clean up
+3. `maw ws merge <name> --destroy --message "feat: <bone-title>"` — merge and clean up (use conventional commit prefix)
 
 **Workspace safety:**
 - Never merge or destroy `default`.
@@ -195,7 +190,6 @@ All commands support JSON output with `--format json` for parsing. If a command 
 - **Run checks before requesting review**: `just check` (or your project's build/test command). Fix any failures before proceeding.
 - After finishing a bone, follow [finish.md](.agents/botbox/finish.md). **Workers: do NOT push** — the lead handles merges and pushes.
 - **Install locally** after releasing: `maw exec default -- just install`
-- **Update README install tag** on every release: bump the `--tag vX.Y.Z` in `README.md` to match the new version.
 
 ### Identity
 

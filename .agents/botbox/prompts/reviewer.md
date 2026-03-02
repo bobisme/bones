@@ -17,13 +17,13 @@ At the end of your work, output exactly one of these completion signals:
    Check the PENDING WORK section below — the reviewer-loop has pre-discovered which
    workspaces have reviews and threads needing attention, with exact commands to use.
    If no PENDING WORK section exists, iterate workspaces manually:
-     maw ws list, then for each: maw exec $WS -- crit inbox --agent {{ AGENT }}
+     maw ws list, then for each: maw exec <ws> -- crit inbox --agent {{ AGENT }}
    Pick one review to process. If nothing pending, say "NO_REVIEWS_PENDING" and stop.
    bus statuses set --agent {{ AGENT }} "Review: <review-id>" --ttl 30m
 
 3. REVIEW (follow .agents/botbox/review-loop.md):
-   a. Read the review and diff: maw exec $WS -- crit review <id> and maw exec $WS -- crit diff <id>
-   b. Read the full source files changed in the diff — use absolute paths (ws/$WS/...)
+   a. Read the review and diff: maw exec {{ WORKSPACE }} -- crit review <id> and maw exec {{ WORKSPACE }} -- crit diff <id>
+   b. Read the full source files changed in the diff — use absolute paths (ws/{{ WORKSPACE }}/...)
    c. Check project config (e.g., Cargo.toml, package.json) for dependencies and settings
    d. RISK-AWARE REVIEW:
       Before reviewing, check the bone's risk tag:
@@ -37,7 +37,7 @@ At the end of your work, output exactly one of these completion signals:
 
       If the bone has `risk:critical`, ALWAYS BLOCK with comment:
       "risk:critical requires human approval before merge"
-   e. Run static analysis if applicable: maw exec $WS -- cargo clippy, maw exec $WS -- oxlint — cite warnings in comments
+   e. Run static analysis if applicable: maw exec {{ WORKSPACE }} -- cargo clippy, maw exec {{ WORKSPACE }} -- oxlint — cite warnings in comments
    f. Cross-file consistency: compare similar functions across files for uniform patterns.
       If one function does it right and another doesn't, that's a bug.
    g. Boundary checks: trace user-supplied values through to where they're used.
@@ -48,11 +48,11 @@ At the end of your work, output exactly one of these completion signals:
       - MEDIUM: Error handling gaps, missing validation at boundaries
       - LOW: Code quality, naming, structure
       - INFO: Suggestions, style preferences, minor improvements
-      Use: maw exec $WS -- crit comment <id> "SEVERITY: <feedback>" --file <path> --line <line-or-range>
+      Use: maw exec {{ WORKSPACE }} -- crit comment <id> --agent {{ AGENT }} "SEVERITY: <feedback>" --file <path> --line <line-or-range>
    i. Vote:
       - For `risk:critical` bones: ALWAYS BLOCK with comment "risk:critical requires human approval before merge"
-      - For other bones: maw exec $WS -- crit block <id> --reason "..." if any CRITICAL or HIGH issues exist
-      - maw exec $WS -- crit lgtm <id> if no CRITICAL or HIGH issues AND not risk:critical
+      - For other bones: maw exec {{ WORKSPACE }} -- crit block <id> --agent {{ AGENT }} --reason "..." if any CRITICAL or HIGH issues exist
+      - maw exec {{ WORKSPACE }} -- crit lgtm <id> --agent {{ AGENT }} if no CRITICAL or HIGH issues AND not risk:critical
 
 4. ANNOUNCE:
    bus send --agent {{ AGENT }} {{ PROJECT }} "Review complete: <review-id> — <LGTM|BLOCKED>" -L review-done
@@ -60,16 +60,16 @@ At the end of your work, output exactly one of these completion signals:
 5. RE-REVIEW (if a review-response message or thread response indicates the author addressed feedback):
    The author's fixes are in their workspace, not the main branch.
    a. Find the workspace: check the PENDING WORK section, review-response bus message, or bone comments for workspace name.
-   b. Re-read the review: maw exec $WS -- crit review <review-id>
+   b. Re-read the review: maw exec {{ WORKSPACE }} -- crit review <review-id>
       Look at each thread — which are resolved vs still open? What did the author reply?
-   c. Read the actual fixed code from the workspace path (e.g., ws/$WS/src/...) — don't trust replies alone.
-   d. Run static analysis in the workspace: maw exec $WS -- <analysis-command>
+   c. Read the actual fixed code from the workspace path (e.g., ws/{{ WORKSPACE }}/src/...) — don't trust replies alone.
+   d. Run static analysis in the workspace: maw exec {{ WORKSPACE }} -- <analysis-command>
    e. For each thread:
       - If properly fixed: no action needed (author already resolved it)
-      - If NOT fixed or partially fixed: maw exec $WS -- crit reply <thread-id> --agent {{ AGENT }} "Still an issue: <what's wrong>"
+      - If NOT fixed or partially fixed: maw exec {{ WORKSPACE }} -- crit reply <thread-id> --agent {{ AGENT }} "Still an issue: <what's wrong>"
    f. Vote:
-      - All issues resolved: maw exec $WS -- crit lgtm <review-id> -m "Fixes verified"
-      - Issues remain: maw exec $WS -- crit block <review-id> --reason "N threads still unresolved"
+      - All issues resolved: maw exec {{ WORKSPACE }} -- crit lgtm <review-id> --agent {{ AGENT }} -m "Fixes verified"
+      - Issues remain: maw exec {{ WORKSPACE }} -- crit block <review-id> --agent {{ AGENT }} --reason "N threads still unresolved"
 
 Key rules:
 - Process exactly one review per cycle, then STOP.

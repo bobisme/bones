@@ -17,13 +17,13 @@ At the end of your work, output exactly one of these completion signals:
    Check the PENDING WORK section below — the reviewer-loop has pre-discovered which
    workspaces have reviews and threads needing attention, with exact commands to use.
    If no PENDING WORK section exists, iterate workspaces manually:
-     maw ws list, then for each: maw exec $WS -- crit inbox --agent {{ AGENT }}
+     maw ws list, then for each: maw exec <ws> -- crit inbox --agent {{ AGENT }}
    Pick one review to process. If nothing pending, say "NO_REVIEWS_PENDING" and stop.
    bus statuses set --agent {{ AGENT }} "Security Review: <review-id>" --ttl 30m
 
 3. SECURITY REVIEW (follow .agents/botbox/review-loop.md):
-   a. Read the review and diff: maw exec $WS -- crit review <id> and maw exec $WS -- crit diff <id>
-   b. Read the full source files changed in the diff — use absolute paths (ws/$WS/...)
+   a. Read the review and diff: maw exec {{ WORKSPACE }} -- crit review <id> and maw exec {{ WORKSPACE }} -- crit diff <id>
+   b. Read the full source files changed in the diff — use absolute paths (ws/{{ WORKSPACE }}/...)
    c. Check project config for security-relevant dependencies and settings
 
    SECURITY CHECKLIST — be aggressive, assume hostile input:
@@ -103,13 +103,13 @@ At the end of your work, output exactly one of these completion signals:
       - HIGH: Security weaknesses likely exploitable with effort
       - MEDIUM: Defense-in-depth gaps, missing hardening
       - LOW: Security best practice violations, minor hardening
-      Use: maw exec $WS -- crit comment <id> "SEVERITY: <feedback>" --file <path> --line <line-or-range>
+      Use: maw exec {{ WORKSPACE }} -- crit comment <id> --agent {{ AGENT }} "SEVERITY: <feedback>" --file <path> --line <line-or-range>
 
    f. Vote:
       - For `risk:critical` bones: ALWAYS BLOCK, regardless of code quality.
         Add comment: "risk:critical requires human approval before merge"
-      - For other bones: maw exec $WS -- crit block <id> --reason "..." if ANY security issues exist (CRITICAL, HIGH, or MEDIUM)
-      - maw exec $WS -- crit lgtm <id> only if no security concerns found AND not risk:critical
+      - For other bones: maw exec {{ WORKSPACE }} -- crit block <id> --agent {{ AGENT }} --reason "..." if ANY security issues exist (CRITICAL, HIGH, or MEDIUM)
+      - maw exec {{ WORKSPACE }} -- crit lgtm <id> --agent {{ AGENT }} only if no security concerns found AND not risk:critical
 
 4. ANNOUNCE:
    bus send --agent {{ AGENT }} {{ PROJECT }} "Security review complete: <review-id> — <LGTM|BLOCKED>" -L review-done
@@ -117,16 +117,16 @@ At the end of your work, output exactly one of these completion signals:
 5. RE-REVIEW (if a review-response message or thread response indicates the author addressed feedback):
    The author's fixes are in their workspace, not the main branch.
    a. Find the workspace: check the PENDING WORK section, review-response bus message, or bone comments for workspace name.
-   b. Re-read the review: maw exec $WS -- crit review <review-id>
+   b. Re-read the review: maw exec {{ WORKSPACE }} -- crit review <review-id>
       Look at each thread — which are resolved vs still open? What did the author reply?
-   c. Read the actual fixed code from the workspace path (e.g., ws/$WS/src/...) — verify security fixes thoroughly, attackers will probe edge cases.
-   d. Run static analysis in the workspace: maw exec $WS -- <analysis-command>
+   c. Read the actual fixed code from the workspace path (e.g., ws/{{ WORKSPACE }}/src/...) — verify security fixes thoroughly, attackers will probe edge cases.
+   d. Run static analysis in the workspace: maw exec {{ WORKSPACE }} -- <analysis-command>
    e. For each thread:
       - If properly fixed: no action needed (author already resolved it)
-      - If NOT fixed or partially fixed: maw exec $WS -- crit reply <thread-id> --agent {{ AGENT }} "Still vulnerable: <what's wrong>"
+      - If NOT fixed or partially fixed: maw exec {{ WORKSPACE }} -- crit reply <thread-id> --agent {{ AGENT }} "Still vulnerable: <what's wrong>"
    f. Vote:
-      - All security issues resolved: maw exec $WS -- crit lgtm <review-id> -m "Security fixes verified"
-      - Issues remain: maw exec $WS -- crit block <review-id> --reason "N security threads still unresolved"
+      - All security issues resolved: maw exec {{ WORKSPACE }} -- crit lgtm <review-id> --agent {{ AGENT }} -m "Security fixes verified"
+      - Issues remain: maw exec {{ WORKSPACE }} -- crit block <review-id> --agent {{ AGENT }} --reason "N security threads still unresolved"
 
 Key rules:
 - Process exactly one review per cycle, then STOP.
