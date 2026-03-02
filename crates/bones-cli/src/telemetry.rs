@@ -63,10 +63,10 @@ static TUI_LOG_SINK: OnceLock<TuiLogSink> = OnceLock::new();
 /// Returns collected messages in chronological order (oldest first) and
 /// clears the internal buffer.  Returns an empty `Vec` outside TUI mode.
 pub fn tui_drain_errors() -> Vec<String> {
-    if let Some(sink) = TUI_LOG_SINK.get() {
-        if let Ok(mut s) = sink.lock() {
-            return s.drain(..).collect();
-        }
+    if let Some(sink) = TUI_LOG_SINK.get()
+        && let Ok(mut s) = sink.lock()
+    {
+        return s.drain(..).collect();
     }
     vec![]
 }

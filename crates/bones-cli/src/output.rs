@@ -218,16 +218,19 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
                     line_buf.push_str(&prefix);
                     line_buf.push_str(&style_text(&text, bold, italic));
                 } else if in_heading && colored {
-                    line_buf.push_str(&format!("{}", text.bold().with(Color::Cyan)));
+                    use std::fmt::Write as _;
+                    let _ = write!(line_buf, "{}", text.bold().with(Color::Cyan));
                 } else {
                     line_buf.push_str(&style_text(&text, bold, italic));
                 }
             }
             Event::Code(code) => {
                 if colored {
-                    line_buf.push_str(&format!("{}", code.green()));
+                    use std::fmt::Write as _;
+                    let _ = write!(line_buf, "{}", code.green());
                 } else {
-                    line_buf.push_str(&format!("`{code}`"));
+                    use std::fmt::Write as _;
+                    let _ = write!(line_buf, "`{code}`");
                 }
             }
             Event::SoftBreak | Event::HardBreak => {
@@ -270,18 +273,58 @@ fn cli_keywords_for_lang(lang: Option<&str>) -> &'static [&'static str] {
             "False", "None", "self", "async", "await", "in", "not", "and", "or",
         ],
         Some("javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx") => &[
-            "function", "const", "let", "var", "return", "if", "else", "for", "while", "class",
-            "new", "this", "import", "export", "from", "async", "await", "try", "catch", "throw",
-            "true", "false", "null", "undefined",
+            "function",
+            "const",
+            "let",
+            "var",
+            "return",
+            "if",
+            "else",
+            "for",
+            "while",
+            "class",
+            "new",
+            "this",
+            "import",
+            "export",
+            "from",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "throw",
+            "true",
+            "false",
+            "null",
+            "undefined",
         ],
         Some("bash" | "sh" | "zsh" | "fish" | "shell") => &[
             "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac",
             "function", "return", "export", "local", "set", "echo", "exit",
         ],
         Some("go" | "golang") => &[
-            "func", "package", "import", "return", "if", "else", "for", "range", "switch", "case",
-            "default", "struct", "interface", "type", "var", "const", "defer", "go", "chan",
-            "select", "map", "nil",
+            "func",
+            "package",
+            "import",
+            "return",
+            "if",
+            "else",
+            "for",
+            "range",
+            "switch",
+            "case",
+            "default",
+            "struct",
+            "interface",
+            "type",
+            "var",
+            "const",
+            "defer",
+            "go",
+            "chan",
+            "select",
+            "map",
+            "nil",
         ],
         _ => &[],
     }
@@ -313,7 +356,10 @@ fn write_highlighted_code_line(
         }
         if ch == '#'
             && lang.is_some_and(|l| {
-                matches!(l, "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell")
+                matches!(
+                    l,
+                    "python" | "py" | "bash" | "sh" | "zsh" | "fish" | "shell"
+                )
             })
         {
             let rest: String = chars[i..].iter().collect();

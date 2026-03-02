@@ -586,7 +586,11 @@ fn render_list_human(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<
         ]);
     }
 
-    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "ASSIGNED", "TITLE"], &rows)?;
+    pretty_table(
+        w,
+        &["ID", "KIND", "STATE", "URGENCY", "ASSIGNED", "TITLE"],
+        &rows,
+    )?;
 
     for a in &resp.advice {
         writeln!(w, "{}", a.message)?;
