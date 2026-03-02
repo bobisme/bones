@@ -112,6 +112,8 @@ pub struct ListItem {
     pub parent_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub assignees: Vec<String>,
     pub updated_at_us: i64,
 }
 
@@ -425,6 +427,11 @@ fn build_list_response(
                 .into_iter()
                 .map(|l| l.label)
                 .collect();
+            let assignees = query::get_assignees(conn, &qi.item_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| a.agent)
+                .collect();
             Ok(ListItem {
                 id: qi.item_id.clone(),
                 title: qi.title.clone(),
@@ -434,6 +441,7 @@ fn build_list_response(
                 size: qi.size.clone(),
                 parent_id: qi.parent_id.clone(),
                 labels,
+                assignees,
                 updated_at_us: qi.updated_at_us,
             })
         })
@@ -573,11 +581,12 @@ fn render_list_human(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<
             item.kind.clone(),
             item.state.clone(),
             item.urgency.clone(),
+            item.assignees.join(", "),
             format!("{title}{labels_suffix}"),
         ]);
     }
 
-    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "TITLE"], &rows)?;
+    pretty_table(w, &["ID", "KIND", "STATE", "URGENCY", "ASSIGNED", "TITLE"], &rows)?;
 
     for a in &resp.advice {
         writeln!(w, "{}", a.message)?;
@@ -594,7 +603,7 @@ fn render_list_text(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<(
 
     writeln!(w, "Showing {} of {} bones.", resp.showing, resp.total)?;
 
-    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS")?;
+    writeln!(w, "ID\tKIND\tSTATE\tURGENCY\tASSIGNED\tTITLE\tLABELS")?;
 
     for item in &resp.items {
         let labels = if item.labels.is_empty() {
@@ -602,13 +611,15 @@ fn render_list_text(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<(
         } else {
             item.labels.join(",")
         };
+        let assignees = item.assignees.join(",");
         writeln!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
             item.id,
             item.kind,
             item.state,
             item.urgency,
+            assignees,
             item.title.replace('\t', " "),
             labels
         )?;
@@ -857,6 +868,7 @@ mod tests {
             size: None,
             parent_id: None,
             labels: vec!["backend".into()],
+            assignees: vec!["alice".into()],
             updated_at_us: 1000,
         }]);
         let mut buf = Vec::new();
@@ -866,6 +878,7 @@ mod tests {
         assert!(out.contains("bn-abc"));
         assert!(out.contains("Fix auth"));
         assert!(out.contains("backend"));
+        assert!(out.contains("alice"));
         assert!(out.contains("Showing"));
         assert!(out.contains("1 of 1"));
     }
@@ -882,6 +895,7 @@ mod tests {
             size: None,
             parent_id: None,
             labels: vec![],
+            assignees: vec![],
             updated_at_us: 1000,
         }]);
         let mut buf = Vec::new();
@@ -903,14 +917,15 @@ mod tests {
             size: None,
             parent_id: None,
             labels: vec!["backend".into()],
+            assignees: vec![],
             updated_at_us: 1000,
         }]);
         let mut buf = Vec::new();
         render_list_text(&resp, &mut buf).expect("render text");
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("Showing 1 of 1 bones."));
-        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tTITLE\tLABELS"));
-        assert!(out.contains("bn-abc\ttask\topen\turgent\tFix auth\tbackend"));
+        assert!(out.contains("ID\tKIND\tSTATE\tURGENCY\tASSIGNED\tTITLE\tLABELS"));
+        assert!(out.contains("bn-abc\ttask\topen\turgent\t\tFix auth\tbackend"));
     }
 
     #[test]
@@ -925,6 +940,7 @@ mod tests {
                 size: None,
                 parent_id: None,
                 labels: vec![],
+                assignees: vec![],
                 updated_at_us: 1000,
             }],
             total: 75,
@@ -1138,6 +1154,7 @@ mod tests {
                 size: None,
                 parent_id: None,
                 labels: vec!["auth".into()],
+                assignees: vec![],
                 updated_at_us: 1000,
             }],
             total: 1,
@@ -1202,11 +1219,13 @@ mod tests {
             size: None,
             parent_id: None,
             labels: vec!["auth".into()],
+            assignees: vec!["bob".into()],
             updated_at_us: 1000,
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("bn-001"));
         assert!(json.contains("auth"));
+        assert!(json.contains("bob"));
         // size and parent_id should be omitted when None
         assert!(!json.contains("size"));
         assert!(!json.contains("parent_id"));
