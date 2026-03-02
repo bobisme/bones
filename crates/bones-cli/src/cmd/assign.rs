@@ -90,7 +90,7 @@ fn resolve_existing_item_id(
     }
 }
 
-fn emit_assign_event(
+pub fn emit_assign_event(
     bones_dir: &Path,
     actor: &str,
     item_id: &str,

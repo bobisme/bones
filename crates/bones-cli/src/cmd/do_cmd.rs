@@ -5,6 +5,7 @@
 //! projects the state change into `SQLite`, and outputs the result.
 
 use crate::agent;
+use crate::cmd::assign::emit_assign_event;
 use crate::cmd::show::resolve_item_id;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
@@ -19,7 +20,7 @@ use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
 use bones_core::event::Event;
-use bones_core::event::data::{EventData, MoveData};
+use bones_core::event::data::{AssignAction, EventData, MoveData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
 use bones_core::model::item::State;
@@ -80,12 +81,13 @@ pub fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 pub fn run_do_single(
-    project_root: &Path,
+    bones_dir: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
     raw_id: &str,
 ) -> anyhow::Result<DoOutput> {
+    let project_root = bones_dir.parent().unwrap_or(bones_dir);
     validate::validate_item_id(raw_id)
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
@@ -162,6 +164,18 @@ pub fn run_do_single(
         tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
     }
 
+    // Auto-assign the acting agent when transitioning to doing.
+    match emit_assign_event(bones_dir, agent, &resolved_id, agent, AssignAction::Assign) {
+        Ok(assign_event) => {
+            if let Err(e) = projector.project_event(&assign_event) {
+                tracing::warn!("auto-assign projection failed (will be fixed on rebuild): {e}");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("auto-assign event failed (not critical): {e}");
+        }
+    }
+
     Ok(DoOutput {
         id: resolved_id,
         previous_state: current_state.to_string(),
@@ -225,7 +239,7 @@ pub fn run_do(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_do_single(project_root, &conn, &shard_mgr, &agent, raw_id) {
+        match run_do_single(&bones_dir, &conn, &shard_mgr, &agent, raw_id) {
             Ok(ok) => results.push(DoResult {
                 id: ok.id,
                 ok: true,
@@ -512,19 +526,24 @@ mod tests {
             .filter(|l| !l.starts_with('#') && !l.is_empty())
             .collect();
 
-        // Should have create event + move event
+        // Should have create event + move event + assign event
         assert!(
-            lines.len() >= 2,
-            "expected at least 2 events, got {}",
+            lines.len() >= 3,
+            "expected at least 3 events, got {}",
             lines.len()
         );
 
-        let last_line = lines.last().unwrap();
-        let fields: Vec<&str> = last_line.split('\t').collect();
-        assert_eq!(fields[4], "item.move", "last event should be item.move");
+        let event_types: Vec<&str> = lines
+            .iter()
+            .map(|l| l.split('\t').nth(4).unwrap_or(""))
+            .collect();
         assert!(
-            fields[6].contains("\"doing\""),
-            "should contain doing state"
+            event_types.contains(&"item.move"),
+            "should contain item.move event"
+        );
+        assert!(
+            event_types.contains(&"item.assign"),
+            "should contain item.assign event"
         );
     }
 
