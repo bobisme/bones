@@ -689,6 +689,8 @@ enum InputMode {
     FilterPopup,
     /// Filter popup: editing a text field (label).
     FilterLabel,
+    /// Blocker/link picker modal is open.
+    BlockerModal,
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,6 +1178,90 @@ impl NoteModalState {
     }
 }
 
+/// Which relationship the blocker modal will create.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockerRelType {
+    /// Current bone blocks the selected bone.
+    Blocks,
+    /// Current bone is blocked by the selected bone.
+    BlockedBy,
+    /// Current bone becomes a child of the selected bone.
+    ChildOf,
+    /// Selected bone becomes a child of the current bone.
+    ParentOf,
+}
+
+impl BlockerRelType {
+    fn label(self) -> &'static str {
+        match self {
+            BlockerRelType::Blocks => "Blocks",
+            BlockerRelType::BlockedBy => "Blocked by",
+            BlockerRelType::ChildOf => "Child of",
+            BlockerRelType::ParentOf => "Parent of",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            BlockerRelType::Blocks => BlockerRelType::BlockedBy,
+            BlockerRelType::BlockedBy => BlockerRelType::ChildOf,
+            BlockerRelType::ChildOf => BlockerRelType::ParentOf,
+            BlockerRelType::ParentOf => BlockerRelType::Blocks,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            BlockerRelType::Blocks => BlockerRelType::ParentOf,
+            BlockerRelType::BlockedBy => BlockerRelType::Blocks,
+            BlockerRelType::ChildOf => BlockerRelType::BlockedBy,
+            BlockerRelType::ParentOf => BlockerRelType::ChildOf,
+        }
+    }
+}
+
+struct BlockerModalState {
+    rel_type: BlockerRelType,
+    search: String,
+    search_cursor: usize,
+    /// All active items (excluding the current bone).
+    items: Vec<(String, String)>,
+    /// Index into the filtered view.
+    list_idx: usize,
+}
+
+impl BlockerModalState {
+    fn new(items: Vec<(String, String)>) -> Self {
+        Self {
+            rel_type: BlockerRelType::Blocks,
+            search: String::new(),
+            search_cursor: 0,
+            items,
+            list_idx: 0,
+        }
+    }
+
+    fn filtered(&self) -> Vec<&(String, String)> {
+        let q = self.search.to_ascii_lowercase();
+        if q.is_empty() {
+            self.items.iter().collect()
+        } else {
+            self.items
+                .iter()
+                .filter(|(id, title)| {
+                    id.to_ascii_lowercase().contains(&q)
+                        || title.to_ascii_lowercase().contains(&q)
+                })
+                .collect()
+        }
+    }
+
+    fn selected_item(&self) -> Option<&(String, String)> {
+        let filtered = self.filtered();
+        filtered.get(self.list_idx).copied()
+    }
+}
+
 fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key: KeyEvent) {
     if lines.is_empty() {
         lines.push(String::new());
@@ -1638,6 +1724,8 @@ pub struct ListView {
     create_modal_edit_item_id: Option<String>,
     /// Comment/close/reopen note modal state when open.
     note_modal: Option<NoteModalState>,
+    /// Blocker/link picker modal state when open.
+    blocker_modal: Option<BlockerModalState>,
     /// Help overlay filter query.
     help_query: String,
     /// Cursor position within `help_query`.
@@ -1715,6 +1803,7 @@ impl ListView {
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
+            blocker_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,
@@ -2017,6 +2106,7 @@ impl ListView {
             InputMode::Search => self.handle_search_key(key),
             InputMode::CreateModal => self.handle_create_modal_key(key)?,
             InputMode::NoteModal => self.handle_note_modal_key(key)?,
+            InputMode::BlockerModal => self.handle_blocker_modal_key(key)?,
             InputMode::Help => self.handle_help_key(key),
             InputMode::FilterPopup => self.handle_filter_popup_key(key),
             InputMode::FilterLabel => self.handle_filter_label_key(key),
@@ -2049,6 +2139,15 @@ impl ListView {
             }
             InputMode::Help => {
                 insert_single_line_text(&mut self.help_query, &mut self.help_cursor, text);
+            }
+            InputMode::BlockerModal => {
+                if let Some(modal) = self.blocker_modal.as_mut() {
+                    let prev = modal.search.clone();
+                    insert_single_line_text(&mut modal.search, &mut modal.search_cursor, text);
+                    if modal.search != prev {
+                        modal.list_idx = 0;
+                    }
+                }
             }
             InputMode::FilterPopup | InputMode::Normal => {}
         }
@@ -2109,9 +2208,20 @@ impl ListView {
                     }
                 }
             }
-            KeyCode::PageUp | KeyCode::Char('u' | 'b') => {
+            KeyCode::PageUp | KeyCode::Char('u') => {
                 if self.show_detail {
                     self.scroll_detail_by(-10);
+                } else {
+                    for _ in 0..10 {
+                        self.select_prev();
+                    }
+                }
+            }
+
+            // 'b' in detail pane opens the blocker/link picker; in list pane it pages up.
+            KeyCode::Char('b') => {
+                if self.show_detail {
+                    self.open_blocker_modal();
                 } else {
                     for _ in 0..10 {
                         self.select_prev();
@@ -2225,6 +2335,152 @@ impl ListView {
         self.create_modal = Some(CreateModalState::from_detail(detail));
         self.create_modal_edit_item_id = Some(detail.id.clone());
         self.input_mode = InputMode::CreateModal;
+    }
+
+    fn open_blocker_modal(&mut self) {
+        let Some(ref detail) = self.detail_item else {
+            self.set_status("No bone selected".to_string());
+            return;
+        };
+        let current_id = detail.id.clone();
+
+        let conn = match query::try_open_projection(&self.db_path) {
+            Ok(Some(c)) => c,
+            _ => {
+                self.set_status("Cannot open DB for blocker modal".to_string());
+                return;
+            }
+        };
+
+        let all = match query::list_items(
+            &conn,
+            &ItemFilter {
+                include_deleted: false,
+                sort: SortOrder::UpdatedDesc,
+                ..Default::default()
+            },
+        ) {
+            Ok(items) => items,
+            Err(e) => {
+                self.set_status(format!("Error loading items: {e}"));
+                return;
+            }
+        };
+
+        let items: Vec<(String, String)> = all
+            .into_iter()
+            .filter(|item| {
+                item.item_id != current_id
+                    && item.state != "done"
+                    && item.state != "archived"
+            })
+            .map(|item| (item.item_id, item.title))
+            .collect();
+
+        self.blocker_modal = Some(BlockerModalState::new(items));
+        self.input_mode = InputMode::BlockerModal;
+    }
+
+    fn handle_blocker_modal_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(modal) = self.blocker_modal.as_mut() else {
+            self.input_mode = InputMode::Normal;
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.blocker_modal = None;
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Left => {
+                modal.rel_type = modal.rel_type.prev();
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                modal.rel_type = modal.rel_type.next();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                let count = modal.filtered().len();
+                if count > 0 {
+                    modal.list_idx = (modal.list_idx + 1).min(count - 1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                modal.list_idx = modal.list_idx.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                let selected = modal.selected_item().map(|(id, _)| id.clone());
+                let rel_type = modal.rel_type;
+                self.blocker_modal = None;
+                self.input_mode = InputMode::Normal;
+                if let Some(target_id) = selected {
+                    self.submit_blocker_link(rel_type, &target_id)?;
+                }
+            }
+            _ => {
+                let prev = modal.search.clone();
+                edit_single_line_readline(&mut modal.search, &mut modal.search_cursor, key);
+                if modal.search != prev {
+                    modal.list_idx = 0;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn submit_blocker_link(&mut self, rel_type: BlockerRelType, target_id: &str) -> Result<()> {
+        let Some(ref detail) = self.detail_item else {
+            return Ok(());
+        };
+        let current_id = detail.id.clone();
+
+        match rel_type {
+            BlockerRelType::Blocks => {
+                // current blocks target: link event on target (blocked), target=current (blocker)
+                actions::add_link(
+                    &self.project_root,
+                    &self.db_path,
+                    &self.agent,
+                    target_id,
+                    &current_id,
+                    "blocks",
+                )?;
+                self.set_status(format!("{current_id} blocks {target_id}"));
+            }
+            BlockerRelType::BlockedBy => {
+                // current blocked by target: link event on current (blocked), target=target (blocker)
+                actions::add_link(
+                    &self.project_root,
+                    &self.db_path,
+                    &self.agent,
+                    &current_id,
+                    target_id,
+                    "blocks",
+                )?;
+                self.set_status(format!("{target_id} blocks {current_id}"));
+            }
+            BlockerRelType::ChildOf => {
+                actions::set_parent(
+                    &self.project_root,
+                    &self.db_path,
+                    &self.agent,
+                    &current_id,
+                    target_id,
+                )?;
+                self.set_status(format!("{current_id} is now child of {target_id}"));
+            }
+            BlockerRelType::ParentOf => {
+                actions::set_parent(
+                    &self.project_root,
+                    &self.db_path,
+                    &self.agent,
+                    target_id,
+                    &current_id,
+                )?;
+                self.set_status(format!("{target_id} is now child of {current_id}"));
+            }
+        }
+        self.reload()?;
+        Ok(())
     }
 
     fn open_transition_modal(&mut self) {
@@ -3500,10 +3756,132 @@ fn render_note_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect)
     );
 }
 
+fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect) {
+    let Some(modal) = app.blocker_modal.as_ref() else {
+        return;
+    };
+
+    let modal_width = area.width.saturating_sub(8).min(80);
+    let modal_height = area.height.saturating_sub(6).min(24);
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let modal_area = Rect::new(x, y, modal_width, modal_height);
+
+    frame.render_widget(Clear, modal_area);
+
+    // Outer block.
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(border::ROUNDED)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Add Link ")
+        .title_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    // Split inner into: relation row (1), search row (1), list (rest), footer (1).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    // Relation type row.
+    let rel_spans = vec![
+        Span::styled("Type: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("◄ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            modal.rel_type.label(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ►", Style::default().fg(Color::DarkGray)),
+    ];
+    frame.render_widget(Paragraph::new(Line::from(rel_spans)), chunks[0]);
+
+    // Search row.
+    let search_spans = with_cursor_spans(
+        &modal.search,
+        modal.search_cursor,
+        Style::default().fg(Color::White),
+    );
+    let mut search_line_spans = vec![Span::styled("Search: ", Style::default().fg(Color::DarkGray))];
+    search_line_spans.extend(search_spans);
+    frame.render_widget(Paragraph::new(Line::from(search_line_spans)), chunks[1]);
+
+    // Item list.
+    let filtered = modal.filtered();
+    let list_height = chunks[2].height as usize;
+    let scroll = if modal.list_idx >= list_height {
+        modal.list_idx - list_height + 1
+    } else {
+        0
+    };
+    let rows: Vec<Row<'_>> = filtered
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_height)
+        .map(|(i, (id, title))| {
+            let selected = i == modal.list_idx;
+            let id_style = if selected {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let title_style = if selected {
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let prefix = if selected { "> " } else { "  " };
+            Row::new(vec![
+                Cell::from(format!("{prefix}{id}")).style(id_style),
+                Cell::from(title.clone()).style(title_style),
+            ])
+        })
+        .collect();
+
+    let col_id_w = modal_width.saturating_sub(4) / 4;
+    let col_title_w = modal_width.saturating_sub(4).saturating_sub(col_id_w);
+    frame.render_widget(
+        Table::new(rows, [Constraint::Length(col_id_w), Constraint::Min(col_title_w)])
+            .block(Block::default().borders(Borders::TOP)),
+        chunks[2],
+    );
+
+    // Footer.
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Enter", Style::default().fg(Color::Cyan)),
+            Span::styled(": add  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::Cyan)),
+            Span::styled(": navigate  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("←/→", Style::default().fg(Color::Cyan)),
+            Span::styled(": type  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Cyan)),
+            Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
+        ])),
+        chunks[3],
+    );
+}
+
 fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
         ("j/k", "list", "move selection"),
-        ("f/b", "list", "page down/up"),
+        ("f", "list", "page down"),
+        ("b", "list", "page up"),
         ("enter/l", "list", "open detail pane"),
         ("s", "list", "cycle list sort"),
         ("a", "list", "add bone"),
@@ -3513,10 +3891,12 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
         ("?", "global", "open help overlay"),
         ("q", "global", "quit tui"),
         ("j/k", "detail", "scroll detail pane"),
-        ("f/b", "detail", "page detail pane"),
+        ("f", "detail", "page detail pane down"),
+        ("u", "detail", "page detail pane up"),
         ("h/esc", "detail", "close detail pane"),
         ("e", "detail", "edit selected bone"),
         ("c", "detail", "add comment"),
+        ("b", "detail", "add blocker/link/parent"),
         ("x", "detail", "done/reopen with note"),
         ("Tab", "create", "next field"),
         ("Shift+Tab", "create", "previous field"),
@@ -3734,6 +4114,9 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
     if app.input_mode == InputMode::NoteModal {
         render_note_modal(frame, app, area);
     }
+    if app.input_mode == InputMode::BlockerModal {
+        render_blocker_modal(frame, app, area);
+    }
     if app.input_mode == InputMode::Help {
         render_help_overlay(frame, app, area);
     }
@@ -3793,6 +4176,16 @@ fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
             spans.push(Span::styled(" submit note  ", dim_style));
             spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(" cancel", dim_style));
+        }
+        InputMode::BlockerModal => {
+            spans.push(Span::styled("enter", key_style));
+            spans.push(Span::styled(": add  ", dim_style));
+            spans.push(Span::styled("j/k", key_style));
+            spans.push(Span::styled(": navigate  ", dim_style));
+            spans.push(Span::styled("←/→", key_style));
+            spans.push(Span::styled(": type  ", dim_style));
+            spans.push(Span::styled("esc", key_style));
+            spans.push(Span::styled(": cancel", dim_style));
         }
         InputMode::FilterPopup | InputMode::FilterLabel => {
             spans.push(Span::styled("tab", key_style));
@@ -4850,6 +5243,7 @@ mod tests {
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
+            blocker_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,
@@ -4957,6 +5351,7 @@ mod tests {
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
+            blocker_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,

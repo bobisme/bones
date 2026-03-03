@@ -8,7 +8,7 @@ use crate::itc_state::assign_next_itc;
 use anyhow::{Context, Result};
 use bones_core::db::{project, query};
 use bones_core::event::Event;
-use bones_core::event::data::{CommentData, CreateData, EventData, MoveData, UpdateData};
+use bones_core::event::data::{CommentData, CreateData, EventData, LinkData, MoveData, UpdateData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
 use bones_core::model::item::{Kind, Size, State, Urgency};
@@ -315,6 +315,69 @@ pub fn add_comment(
     }
 
     Ok(())
+}
+
+/// Emit an `item.link` event to add a dependency or relationship between two items.
+///
+/// `item_id` is the item the event is recorded on; `target` is the other end of the link.
+/// For a blocking relationship where A blocks B, `item_id=B` (blocked) and `target=A` (blocker)
+/// with `link_type="blocks"`.
+pub fn add_link(
+    project_root: &Path,
+    db_path: &Path,
+    agent: &str,
+    item_id: &str,
+    target: &str,
+    link_type: &str,
+) -> Result<()> {
+    let conn = Connection::open(db_path).context("open projection db")?;
+    let bones_dir = project_root.join(".bones");
+    let shard_mgr = ShardManager::new(&bones_dir);
+    let projector = project::Projector::new(&conn);
+
+    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
+    let mut event = Event {
+        wall_ts_us: ts,
+        agent: agent.to_string(),
+        itc: String::new(),
+        parents: vec![],
+        event_type: EventType::Link,
+        item_id: ItemId::new_unchecked(item_id),
+        data: EventData::Link(LinkData {
+            target: target.to_string(),
+            link_type: link_type.to_string(),
+            extra: BTreeMap::new(),
+        }),
+        event_hash: String::new(),
+    };
+
+    assign_next_itc(project_root, &mut event)?;
+    let line = writer::write_event(&mut event).context("serialize event")?;
+    shard_mgr
+        .append(&line, false, Duration::from_secs(5))
+        .context("append to shard")?;
+    if let Err(e) = projector.project_event(&event) {
+        tracing::warn!("TUI add_link projection failed (will recover on rebuild): {e}");
+    }
+
+    Ok(())
+}
+
+/// Set a bone's parent by emitting an `item.update` for the `parent` field.
+pub fn set_parent(
+    project_root: &Path,
+    db_path: &Path,
+    agent: &str,
+    item_id: &str,
+    parent_id: &str,
+) -> Result<()> {
+    update_item_fields(
+        project_root,
+        db_path,
+        agent,
+        item_id,
+        &[("parent".to_string(), Value::String(parent_id.to_string()))],
+    )
 }
 
 /// Move an item to a new lifecycle state.

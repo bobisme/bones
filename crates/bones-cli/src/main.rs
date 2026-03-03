@@ -396,12 +396,11 @@ enum Commands {
     )]
     Move(cmd::move_cmd::MoveArgs),
 
-    #[command(hide = true)]
     #[command(
         next_help_heading = "Dependencies",
         about = "Manage dependency links",
-        long_about = "Add or remove dependency links between bones.\n\nUse 'bn triage dep add <from> --blocks <to>' to establish a blocking dependency.\nUse 'bn triage dep add <from> --relates <to>' for informational links.\nUse 'bn triage dep rm <from> <to>' to remove a link.",
-        after_help = "EXAMPLES:\n    # Mark A as a blocker of B\n    bn triage dep add bn-abc --blocks bn-def\n\n    # Remove the dependency\n    bn triage dep rm bn-abc bn-def\n\n    # Emit machine-readable output\n    bn triage dep add bn-abc --blocks bn-def --format json"
+        long_about = "Add or remove dependency links between bones.\n\nUse 'bn dep add <from> --blocks <to>' to establish a blocking dependency.\nUse 'bn dep add <from> --relates <to>' for informational links.\nUse 'bn dep rm <from> <to>' to remove a link.\n\nAlso available as 'bn triage dep' for backwards compatibility.",
+        after_help = "EXAMPLES:\n    # Mark A as a blocker of B\n    bn dep add bn-abc --blocks bn-def\n\n    # Remove the dependency\n    bn dep rm bn-abc bn-def\n\n    # Emit machine-readable output\n    bn dep add bn-abc --blocks bn-def --format json"
     )]
     Dep(cmd::dep::DepArgs),
 
