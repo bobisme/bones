@@ -557,9 +557,11 @@ fn is_active_state(state: &str) -> bool {
 
 /// Walk parent chains and propagate blocked status downward.
 ///
-/// If a goal has `blocked_by_active > 0`, every descendant that currently
-/// has `blocked_by_active == 0` gets an inherited blocker count so that
-/// triage treats it as blocked.
+/// If a goal has `blocked_by_active > 0` or `urgency == "punt"`, every
+/// descendant that currently has `blocked_by_active == 0` gets an inherited
+/// blocker count so that triage treats it as blocked.  Punted goals are
+/// treated identically to blocked goals: their children should not surface
+/// in `triage` or `next` recommendations.
 fn propagate_parent_blocked(
     active_items: &[query::QueryItem],
     unresolved_blockers: &mut HashMap<String, usize>,
@@ -579,20 +581,27 @@ fn propagate_parent_blocked(
         .map(|item| item.item_id.as_str())
         .collect();
 
+    let urgency_of: HashMap<&str, &str> = active_items
+        .iter()
+        .map(|item| (item.item_id.as_str(), item.urgency.as_str()))
+        .collect();
+
     for item in active_items {
         // Only propagate to items that appear unblocked on their own.
         if unresolved_blockers.get(&item.item_id).copied().unwrap_or(0) > 0 {
             continue;
         }
 
-        // Walk up the parent chain looking for a blocked ancestor.
+        // Walk up the parent chain looking for a blocked or punted ancestor.
         let mut cursor = item.item_id.as_str();
         while let Some(&pid) = parent_of.get(cursor) {
             if !active_ids.contains(pid) {
                 break;
             }
-            if unresolved_blockers.get(pid).copied().unwrap_or(0) > 0 {
-                // Ancestor is blocked — mark this item as inherited-blocked.
+            let ancestor_blocked = unresolved_blockers.get(pid).copied().unwrap_or(0) > 0;
+            let ancestor_punted = urgency_of.get(pid).copied().unwrap_or("") == "punt";
+            if ancestor_blocked || ancestor_punted {
+                // Ancestor is blocked or punted — suppress this descendant.
                 unresolved_blockers.insert(item.item_id.clone(), 1);
                 break;
             }
@@ -1304,6 +1313,69 @@ mod tests {
         assert!(
             !unblocked_ids.contains(&"bn-leaf"),
             "leaf task should inherit blocked from grandparent g2"
+        );
+    }
+
+    #[test]
+    fn children_of_punted_goal_are_excluded_from_unblocked() {
+        let conn = test_db();
+
+        // A punted goal with two child tasks.
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-punted-goal', 'Punted goal', 'goal', 'open', 'punt', NULL, 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert punted goal");
+
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-child1', 'Child 1', 'task', 'open', 'default', NULL, 'bn-punted-goal', 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert child1");
+
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-child2', 'Child 2', 'task', 'open', 'default', NULL, 'bn-punted-goal', 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert child2");
+
+        // An unrelated normal goal with a task, to confirm it still appears.
+        insert_goal_with_children(&conn, "bn-normal", "Normal goal", &[("bn-normal-task", "Normal task")]);
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let unblocked_ids: Vec<&str> = snapshot
+            .unblocked_ranked
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        // The punted goal itself is excluded (urgency == punt filtered in unblocked_ranked).
+        assert!(
+            !unblocked_ids.contains(&"bn-punted-goal"),
+            "punted goal should not appear in unblocked_ranked"
+        );
+        // Its children should be suppressed too.
+        assert!(
+            !unblocked_ids.contains(&"bn-child1"),
+            "child of punted goal should be excluded"
+        );
+        assert!(
+            !unblocked_ids.contains(&"bn-child2"),
+            "child of punted goal should be excluded"
+        );
+        // Unrelated items are unaffected.
+        assert!(
+            unblocked_ids.contains(&"bn-normal-task"),
+            "task under normal goal should still be unblocked"
         );
     }
 
