@@ -318,7 +318,16 @@ impl ShardManager {
         std::os::unix::fs::symlink(&target, &symlink)?;
 
         #[cfg(not(unix))]
-        fs::write(&symlink, &target)?;
+        {
+            // Write to a temporary file then rename into place.  A plain
+            // `fs::write(&symlink, …)` would follow an existing symlink on
+            // Linux and overwrite the *target* file instead of replacing the
+            // symlink entry itself.  `fs::rename` replaces the directory entry
+            // atomically without following symlinks at the destination.
+            let tmp = symlink.with_extension("events.tmp");
+            fs::write(&tmp, &target)?;
+            fs::rename(&tmp, &symlink)?;
+        }
 
         Ok(())
     }
@@ -944,9 +953,12 @@ fn system_time_us() -> i64 {
 /// Return the forwarding target if `path` is a forwarding-pointer shard.
 ///
 /// A forwarding pointer is a tiny file whose trimmed content is a valid
-/// `YYYY-MM.events` filename.  It is written by [`ShardManager::update_symlink`]
-/// on non-Unix platforms (where real symlinks aren't available) and can also
-/// appear when a repository is synced from a Windows machine.
+/// `YYYY-MM.events` filename.  It is written by the `#[cfg(not(unix))]` path
+/// in [`ShardManager::update_symlink`], which stores the target filename as a
+/// plain file instead of creating a real symlink.  If such a binary runs on a
+/// Linux host (e.g. via Wine or a cross-compiled binary), `fs::write` follows
+/// the existing `current.events` symlink and overwrites the old shard file
+/// with the forwarding-pointer content rather than replacing the symlink entry.
 ///
 /// Returns `Some(target_filename)` when the file qualifies, `None` otherwise.
 fn read_forwarding_pointer(path: &Path) -> Option<String> {
