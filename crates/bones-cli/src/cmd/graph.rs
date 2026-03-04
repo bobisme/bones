@@ -29,10 +29,14 @@ use crate::validate;
 // ---------------------------------------------------------------------------
 
 /// Output format for graph rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum GraphFormat {
-    /// Default ASCII tree / layered output.
+    /// Nested tree with unicode glyphs matching TUI style (default).
     #[default]
+    Pretty,
+    /// Nested tree, ASCII-only, agent-friendly.
+    Text,
+    /// Legacy flat layered ASCII listing.
     Ascii,
     /// Mermaid diagram syntax.
     Mermaid,
@@ -58,6 +62,10 @@ pub struct GraphArgs {
     #[arg(long)]
     pub depth: Option<usize>,
 
+    /// Output format. Overrides --mermaid / --dot when given explicitly.
+    #[arg(long, value_enum)]
+    pub format: Option<GraphFormat>,
+
     /// Output as a Mermaid diagram.
     #[arg(long, conflicts_with = "dot")]
     pub mermaid: bool,
@@ -69,13 +77,16 @@ pub struct GraphArgs {
 
 impl GraphArgs {
     /// Resolve the requested graph format from CLI flags.
-    const fn format(&self) -> GraphFormat {
+    fn resolved_format(&self) -> GraphFormat {
+        if let Some(f) = self.format {
+            return f;
+        }
         if self.mermaid {
             GraphFormat::Mermaid
         } else if self.dot {
             GraphFormat::Dot
         } else {
-            GraphFormat::Ascii
+            GraphFormat::Pretty
         }
     }
 }
@@ -102,6 +113,9 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 struct ItemMeta {
     title: String,
     state: String,
+    kind: String,
+    size: Option<String>,
+    urgency: String,
 }
 
 impl ItemMeta {
@@ -112,9 +126,61 @@ impl ItemMeta {
             _ => " ",
         }
     }
+
+    /// Unicode glyph matching TUI style: shape encodes kind, fill encodes done state.
+    fn kind_glyph(&self) -> &'static str {
+        let done = self.state == "done" || self.state == "archived";
+        match self.kind.as_str() {
+            "goal" => {
+                if done {
+                    "◆"
+                } else {
+                    "◇"
+                }
+            }
+            "bug" => {
+                if done {
+                    "●"
+                } else {
+                    "⊘"
+                }
+            }
+            _ => {
+                // task and unknown
+                if done {
+                    "▶"
+                } else {
+                    "▷"
+                }
+            }
+        }
+    }
+
+    /// State indicator dot pattern (braille) matching TUI.
+    fn state_indicator(&self) -> &'static str {
+        match self.state.as_str() {
+            "doing" => "⠛",
+            "done" | "archived" => "⠿",
+            _ => "⠉",
+        }
+    }
+
+    /// Single-letter kind indicator for text/ASCII mode.
+    fn kind_letter(&self) -> &'static str {
+        match self.kind.as_str() {
+            "goal" => "G",
+            "bug" => "B",
+            _ => "T",
+        }
+    }
+
+    /// Size bracket for text/ASCII mode, e.g. `[m]`.
+    fn size_bracket(&self) -> Option<String> {
+        self.size.as_ref().map(|s| format!("[{s}]"))
+    }
 }
 
-/// Load title/state metadata for all items in the graph (best-effort).
+/// Load title/state/kind/size/urgency metadata for all items in the graph (best-effort).
 fn load_item_meta(
     conn: &rusqlite::Connection,
     ids: impl Iterator<Item = String>,
@@ -127,6 +193,9 @@ fn load_item_meta(
                 ItemMeta {
                     title: item.title,
                     state: item.state,
+                    kind: item.kind,
+                    size: item.size,
+                    urgency: item.urgency,
                 },
             );
         }
@@ -541,6 +610,167 @@ fn render_dot_summary(
 }
 
 // ---------------------------------------------------------------------------
+// Nested-tree rendering for summary (pretty + text)
+// ---------------------------------------------------------------------------
+
+/// Walk the dependency graph from roots and render a nested tree.
+///
+/// `pretty` = true renders with unicode glyphs; false = ASCII-only text mode.
+fn render_nested_tree_summary(
+    raw: &RawGraph,
+    meta: &HashMap<String, ItemMeta>,
+    open_connected: &HashSet<String>,
+    open_edges: &[(String, String)],
+    depth_limit: Option<usize>,
+    pretty: bool,
+) -> String {
+    // Build a child map: parent → sorted children (within open_connected).
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut has_parent: HashSet<&str> = HashSet::new();
+    for (src, tgt) in open_edges {
+        if open_connected.contains(src.as_str()) && open_connected.contains(tgt.as_str()) {
+            children
+                .entry(src.as_str())
+                .or_default()
+                .push(tgt.as_str());
+            has_parent.insert(tgt.as_str());
+        }
+    }
+    // Sort each child list for determinism.
+    for kids in children.values_mut() {
+        kids.sort_unstable();
+    }
+
+    // Roots: open_connected items with no incoming edges (no parent in this set).
+    let mut roots: Vec<&str> = open_connected
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !has_parent.contains(*id))
+        .collect();
+    roots.sort_unstable();
+
+    let mut out = String::new();
+    let mut visited: HashSet<String> = HashSet::new();
+
+    for root in &roots {
+        render_nested_node(
+            raw,
+            meta,
+            root,
+            &children,
+            depth_limit,
+            0,
+            "",
+            true,
+            &mut visited,
+            pretty,
+            &mut out,
+        );
+    }
+
+    out
+}
+
+/// Recursively render a single node and its children in the nested tree.
+#[allow(clippy::too_many_arguments)]
+fn render_nested_node(
+    _raw: &RawGraph,
+    meta: &HashMap<String, ItemMeta>,
+    id: &str,
+    children: &HashMap<&str, Vec<&str>>,
+    depth_limit: Option<usize>,
+    depth: usize,
+    prefix: &str,
+    is_last: bool,
+    visited: &mut HashSet<String>,
+    pretty: bool,
+    out: &mut String,
+) {
+    let indent = if depth == 0 {
+        String::new()
+    } else {
+        let connector = if is_last { "└── " } else { "├── " };
+        format!("{prefix}{connector}")
+    };
+
+    if visited.contains(id) {
+        // Cycle back-reference
+        let cycle_marker = if pretty { " [⟳]" } else { " [cycle]" };
+        let _ = writeln!(out, "{indent}{id}{cycle_marker}");
+        return;
+    }
+    visited.insert(id.to_string());
+
+    // Build the display line.
+    if let Some(m) = meta.get(id) {
+        if pretty {
+            let glyph = m.kind_glyph();
+            let state_dot = m.state_indicator();
+            let title = truncate(&m.title, 55);
+            let _ = writeln!(out, "{indent}{glyph}{state_dot} {id} — {title}");
+        } else {
+            let letter = m.kind_letter();
+            let state_abbr = match m.state.as_str() {
+                "doing" => "doing",
+                "done" | "archived" => "done",
+                _ => "open",
+            };
+            let size_part = m
+                .size_bracket()
+                .map(|s| format!(" {s}"))
+                .unwrap_or_default();
+            let urgency_part = match m.urgency.as_str() {
+                "urgent" => " [urgent]",
+                "punt" => " [punted]",
+                _ => "",
+            };
+            let title = truncate(&m.title, 55);
+            let _ = writeln!(
+                out,
+                "{indent}{letter}({state_abbr}){size_part}{urgency_part} {id} — {title}"
+            );
+        }
+    } else {
+        let _ = writeln!(out, "{indent}{id}");
+    }
+
+    // Determine child prefix for recursive calls.
+    let child_prefix = if depth == 0 {
+        String::new()
+    } else {
+        format!("{}{}", prefix, if is_last { "    " } else { "│   " })
+    };
+
+    let kids = children.get(id).map(Vec::as_slice).unwrap_or(&[]);
+    let at_limit = depth_limit.is_some_and(|d| depth + 1 >= d);
+
+    if at_limit && !kids.is_empty() {
+        let ellipsis = format!("{child_prefix}└── … {} more", kids.len());
+        let _ = writeln!(out, "{ellipsis}");
+    } else {
+        let count = kids.len();
+        for (i, kid) in kids.iter().enumerate() {
+            let last = i + 1 == count;
+            render_nested_node(
+                _raw,
+                meta,
+                kid,
+                children,
+                depth_limit,
+                depth + 1,
+                &child_prefix,
+                last,
+                visited,
+                pretty,
+                out,
+            );
+        }
+    }
+
+    visited.remove(id);
+}
+
+// ---------------------------------------------------------------------------
 // Command runner
 // ---------------------------------------------------------------------------
 
@@ -656,15 +886,15 @@ fn run_graph_item(
         return Ok(());
     }
 
-    // Mermaid / DOT / ASCII output
-    match args.format() {
+    // Mermaid / DOT / ASCII / Pretty / Text output
+    match args.resolved_format() {
         GraphFormat::Mermaid => {
             print!("{}", render_mermaid_item(raw, &meta, id, args));
         }
         GraphFormat::Dot => {
             print!("{}", render_dot_item(raw, &meta, id, args));
         }
-        GraphFormat::Ascii => {
+        GraphFormat::Pretty | GraphFormat::Text | GraphFormat::Ascii => {
             let root_meta = meta.get(id);
             let title_str = root_meta
                 .map(|m| format!(" — {}", m.title))
@@ -844,8 +1074,8 @@ fn run_graph_summary(
         .map(|(src, tgt)| (src.clone(), tgt.clone()))
         .collect();
 
-    // Mermaid / DOT / ASCII output
-    match args.format() {
+    // Mermaid / DOT / ASCII / Pretty / Text output
+    match args.resolved_format() {
         GraphFormat::Mermaid => {
             print!(
                 "{}",
@@ -857,6 +1087,53 @@ fn run_graph_summary(
                 "{}",
                 render_dot_summary(&meta, &open_connected, &open_edges_owned)
             );
+        }
+        GraphFormat::Pretty | GraphFormat::Text => {
+            let pretty = args.resolved_format() == GraphFormat::Pretty;
+            let mut out = String::new();
+
+            // Header
+            let _ = writeln!(
+                out,
+                "Dependency graph  ({} items, {} edges, {} components)",
+                stats.node_count, stats.edge_count, stats.weakly_connected_component_count
+            );
+
+            if !cycles.is_empty() {
+                let _ = writeln!(out);
+                let cycle_warn = if pretty { "  ⚠ cycles:" } else { "  ! cycles:" };
+                let _ = writeln!(out, "{cycle_warn}");
+                for cycle in &cycles {
+                    let _ = writeln!(out, "    {}", cycle.join(" -> "));
+                }
+            }
+
+            if open_edges.is_empty() {
+                let _ = writeln!(out, "\n  (no blocking dependencies among open items)");
+                print!("{out}");
+                return Ok(());
+            }
+
+            let _ = writeln!(out);
+
+            // Nested tree
+            let tree = render_nested_tree_summary(
+                raw,
+                &meta,
+                &open_connected,
+                &open_edges_owned,
+                args.depth,
+                pretty,
+            );
+            out.push_str(&tree);
+
+            // Legend for text mode
+            if !pretty {
+                let _ = writeln!(out);
+                let _ = writeln!(out, "G=Goal  T=Task  B=Bug");
+            }
+
+            print!("{out}");
         }
         GraphFormat::Ascii => {
             let mut out = String::new();
@@ -1108,6 +1385,7 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: false,
         };
@@ -1153,6 +1431,7 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: false,
         };
@@ -1282,6 +1561,7 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: false,
         };
@@ -1317,6 +1597,9 @@ mod tests {
             ItemMeta {
                 title: "Alpha".into(),
                 state: "open".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
         meta.insert(
@@ -1324,6 +1607,9 @@ mod tests {
             ItemMeta {
                 title: "Beta".into(),
                 state: "doing".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
 
@@ -1332,6 +1618,7 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: true,
             dot: false,
         };
@@ -1383,6 +1670,7 @@ mod tests {
             down: true,
             up: false,
             depth: None,
+            format: None,
             mermaid: true,
             dot: false,
         };
@@ -1399,6 +1687,7 @@ mod tests {
             down: false,
             up: true,
             depth: None,
+            format: None,
             mermaid: true,
             dot: false,
         };
@@ -1436,6 +1725,9 @@ mod tests {
             ItemMeta {
                 title: "Alpha".into(),
                 state: "open".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
         meta.insert(
@@ -1443,6 +1735,9 @@ mod tests {
             ItemMeta {
                 title: "Beta".into(),
                 state: "done".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
 
@@ -1451,6 +1746,7 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: true,
         };
@@ -1493,6 +1789,9 @@ mod tests {
             ItemMeta {
                 title: "First".into(),
                 state: "open".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
         meta.insert(
@@ -1500,6 +1799,9 @@ mod tests {
             ItemMeta {
                 title: "Second".into(),
                 state: "doing".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
 
@@ -1534,6 +1836,9 @@ mod tests {
             ItemMeta {
                 title: "First".into(),
                 state: "open".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
         meta.insert(
@@ -1541,6 +1846,9 @@ mod tests {
             ItemMeta {
                 title: "Second".into(),
                 state: "open".into(),
+                kind: "task".into(),
+                size: None,
+                urgency: "default".into(),
             },
         );
 
@@ -1586,30 +1894,44 @@ mod tests {
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: false,
         };
-        assert_eq!(args.format(), GraphFormat::Ascii);
+        assert_eq!(args.resolved_format(), GraphFormat::Pretty);
 
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: true,
             dot: false,
         };
-        assert_eq!(args.format(), GraphFormat::Mermaid);
+        assert_eq!(args.resolved_format(), GraphFormat::Mermaid);
 
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
+            format: None,
             mermaid: false,
             dot: true,
         };
-        assert_eq!(args.format(), GraphFormat::Dot);
+        assert_eq!(args.resolved_format(), GraphFormat::Dot);
+
+        let args = GraphArgs {
+            id: None,
+            down: false,
+            up: false,
+            depth: None,
+            format: Some(GraphFormat::Text),
+            mermaid: false,
+            dot: false,
+        };
+        assert_eq!(args.resolved_format(), GraphFormat::Text);
     }
 
     #[test]
