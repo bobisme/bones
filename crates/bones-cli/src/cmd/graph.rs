@@ -77,7 +77,7 @@ pub struct GraphArgs {
 
 impl GraphArgs {
     /// Resolve the requested graph format from CLI flags.
-    fn resolved_format(&self) -> GraphFormat {
+    const fn resolved_format(&self) -> GraphFormat {
         if let Some(f) = self.format {
             return f;
         }
@@ -147,11 +147,7 @@ impl ItemMeta {
             }
             _ => {
                 // task and unknown
-                if done {
-                    "▶"
-                } else {
-                    "▷"
-                }
+                if done { "▶" } else { "▷" }
             }
         }
     }
@@ -629,10 +625,7 @@ fn render_nested_tree_summary(
     let mut has_parent: HashSet<&str> = HashSet::new();
     for (src, tgt) in open_edges {
         if open_connected.contains(src.as_str()) && open_connected.contains(tgt.as_str()) {
-            children
-                .entry(src.as_str())
-                .or_default()
-                .push(tgt.as_str());
+            children.entry(src.as_str()).or_default().push(tgt.as_str());
             has_parent.insert(tgt.as_str());
         }
     }
@@ -1101,7 +1094,11 @@ fn run_graph_summary(
 
             if !cycles.is_empty() {
                 let _ = writeln!(out);
-                let cycle_warn = if pretty { "  ⚠ cycles:" } else { "  ! cycles:" };
+                let cycle_warn = if pretty {
+                    "  ⚠ cycles:"
+                } else {
+                    "  ! cycles:"
+                };
                 let _ = writeln!(out, "{cycle_warn}");
                 for cycle in &cycles {
                     let _ = writeln!(out, "    {}", cycle.join(" -> "));

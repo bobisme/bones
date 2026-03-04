@@ -1192,30 +1192,30 @@ enum BlockerRelType {
 }
 
 impl BlockerRelType {
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
-            BlockerRelType::Blocks => "Blocks",
-            BlockerRelType::BlockedBy => "Blocked by",
-            BlockerRelType::ChildOf => "Child of",
-            BlockerRelType::ParentOf => "Parent of",
+            Self::Blocks => "Blocks",
+            Self::BlockedBy => "Blocked by",
+            Self::ChildOf => "Child of",
+            Self::ParentOf => "Parent of",
         }
     }
 
-    fn next(self) -> Self {
+    const fn next(self) -> Self {
         match self {
-            BlockerRelType::Blocks => BlockerRelType::BlockedBy,
-            BlockerRelType::BlockedBy => BlockerRelType::ChildOf,
-            BlockerRelType::ChildOf => BlockerRelType::ParentOf,
-            BlockerRelType::ParentOf => BlockerRelType::Blocks,
+            Self::Blocks => Self::BlockedBy,
+            Self::BlockedBy => Self::ChildOf,
+            Self::ChildOf => Self::ParentOf,
+            Self::ParentOf => Self::Blocks,
         }
     }
 
-    fn prev(self) -> Self {
+    const fn prev(self) -> Self {
         match self {
-            BlockerRelType::Blocks => BlockerRelType::ParentOf,
-            BlockerRelType::BlockedBy => BlockerRelType::Blocks,
-            BlockerRelType::ChildOf => BlockerRelType::BlockedBy,
-            BlockerRelType::ParentOf => BlockerRelType::ChildOf,
+            Self::Blocks => Self::ParentOf,
+            Self::BlockedBy => Self::Blocks,
+            Self::ChildOf => Self::BlockedBy,
+            Self::ParentOf => Self::ChildOf,
         }
     }
 }
@@ -1231,7 +1231,7 @@ struct BlockerModalState {
 }
 
 impl BlockerModalState {
-    fn new(items: Vec<(String, String)>) -> Self {
+    const fn new(items: Vec<(String, String)>) -> Self {
         Self {
             rel_type: BlockerRelType::Blocks,
             search: String::new(),
@@ -1249,8 +1249,7 @@ impl BlockerModalState {
             self.items
                 .iter()
                 .filter(|(id, title)| {
-                    id.to_ascii_lowercase().contains(&q)
-                        || title.to_ascii_lowercase().contains(&q)
+                    id.to_ascii_lowercase().contains(&q) || title.to_ascii_lowercase().contains(&q)
                 })
                 .collect()
         }
@@ -2350,12 +2349,9 @@ impl ListView {
         };
         let current_id = detail.id.clone();
 
-        let conn = match query::try_open_projection(&self.db_path) {
-            Ok(Some(c)) => c,
-            _ => {
-                self.set_status("Cannot open DB for blocker modal".to_string());
-                return;
-            }
+        let Ok(Some(conn)) = query::try_open_projection(&self.db_path) else {
+            self.set_status("Cannot open DB for blocker modal".to_string());
+            return;
         };
 
         let all = match query::list_items(
@@ -2376,9 +2372,7 @@ impl ListView {
         let items: Vec<(String, String)> = all
             .into_iter()
             .filter(|item| {
-                item.item_id != current_id
-                    && item.state != "done"
-                    && item.state != "archived"
+                item.item_id != current_id && item.state != "done" && item.state != "archived"
             })
             .map(|item| (item.item_id, item.title))
             .collect();
@@ -2989,10 +2983,10 @@ impl ListView {
     }
 
     pub fn tick(&mut self) -> Result<()> {
-        if self.last_refresh.elapsed() >= self.refresh_interval {
-            if let Err(e) = self.reload() {
-                self.set_status(format!("DB refresh failed: {e:#}"));
-            }
+        if self.last_refresh.elapsed() >= self.refresh_interval
+            && let Err(e) = self.reload()
+        {
+            self.set_status(format!("DB refresh failed: {e:#}"));
         }
         self.clamp_detail_scroll();
         // Pick up any ERROR events captured by the TUI log layer.
@@ -3822,7 +3816,10 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
         modal.search_cursor,
         Style::default().fg(Color::White),
     );
-    let mut search_line_spans = vec![Span::styled("Search: ", Style::default().fg(Color::DarkGray))];
+    let mut search_line_spans = vec![Span::styled(
+        "Search: ",
+        Style::default().fg(Color::DarkGray),
+    )];
     search_line_spans.extend(search_spans);
     frame.render_widget(Paragraph::new(Line::from(search_line_spans)), chunks[1]);
 
@@ -3842,7 +3839,9 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
         .map(|(i, (id, title))| {
             let selected = i == modal.list_idx;
             let id_style = if selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -3864,8 +3863,11 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
     let col_id_w = modal_width.saturating_sub(4) / 4;
     let col_title_w = modal_width.saturating_sub(4).saturating_sub(col_id_w);
     frame.render_widget(
-        Table::new(rows, [Constraint::Length(col_id_w), Constraint::Min(col_title_w)])
-            .block(Block::default().borders(Borders::TOP)),
+        Table::new(
+            rows,
+            [Constraint::Length(col_id_w), Constraint::Min(col_title_w)],
+        )
+        .block(Block::default().borders(Borders::TOP)),
         chunks[2],
     );
 

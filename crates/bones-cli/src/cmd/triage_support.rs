@@ -1349,7 +1349,12 @@ mod tests {
         .expect("insert child2");
 
         // An unrelated normal goal with a task, to confirm it still appears.
-        insert_goal_with_children(&conn, "bn-normal", "Normal goal", &[("bn-normal-task", "Normal task")]);
+        insert_goal_with_children(
+            &conn,
+            "bn-normal",
+            "Normal goal",
+            &[("bn-normal-task", "Normal task")],
+        );
 
         let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
         let unblocked_ids: Vec<&str> = snapshot
