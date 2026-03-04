@@ -178,4 +178,4 @@ The default configuration passes 100,000+ seeds with 10% fault rates.
 - If unavailable, semantic search still works via Rust-side KNN over stored embeddings.
 - Set `BONES_SQLITE_VEC_AUTO=0` to disable auto-registration for troubleshooting.
 
-![bones](images/bones-card.webp)
+![bones](images/gh-embed.jpg)
