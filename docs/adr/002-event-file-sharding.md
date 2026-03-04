@@ -13,7 +13,7 @@ Use time-based monthly sharding: `.bones/events/YYYY-MM.events`.
 
 ### File Naming
 - Active shard: `.bones/events/YYYY-MM.events` (current month)
-- Symlink: `.bones/events/current.events` -> `YYYY-MM.events` (latest active shard)
+- Active shard is derived from sorted filenames (`list_shards().last()`)
 - Example: `.bones/events/2026-02.events`, `.bones/events/2026-03.events`
 
 ### Rotation Policy

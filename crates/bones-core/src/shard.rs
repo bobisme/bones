@@ -2,8 +2,7 @@
 //!
 //! Events are stored in monthly shard files under `.bones/events/YYYY-MM.events`.
 //! This module manages the directory layout, shard rotation, atomic append
-//! operations, the `current.events` symlink, and replay (reading all shards
-//! in chronological order).
+//! operations, and replay (reading all shards in chronological order).
 //!
 //! # Directory Layout
 //!
@@ -13,7 +12,6 @@
 //!     2026-01.events      # sealed shard
 //!     2026-01.manifest    # manifest for sealed shard
 //!     2026-02.events      # active shard
-//!     current.events -> 2026-02.events   # symlink to active
 //!   cache/
 //!     clock               # monotonic wall-clock file (microseconds)
 //!   lock                  # repo-wide advisory lock
@@ -23,7 +21,7 @@
 //!
 //! - Sealed (frozen) shards are never modified after rotation.
 //! - The active shard is the only one that receives appends.
-//! - `current.events` always points to the active shard.
+//! - The active shard is derived from `list_shards().last()` (sorted filenames).
 //! - Each append uses `O_APPEND` + `write_all` + `flush` for crash consistency.
 //! - Torn-write recovery truncates incomplete trailing lines on startup.
 //! - Monotonic timestamps: `wall_ts_us = max(system_time_us, last + 1)`.
@@ -60,6 +58,24 @@ pub enum ShardError {
     /// Shard file name does not match expected `YYYY-MM.events` pattern.
     #[error("invalid shard filename: {0}")]
     InvalidShardName(String),
+
+    /// Shard file has a corrupted or missing header.
+    #[error("corrupted shard {path}: {reason}")]
+    CorruptedShard {
+        /// Path to the corrupted shard file.
+        path: PathBuf,
+        /// Description of what is wrong.
+        reason: String,
+    },
+}
+
+/// A shard integrity problem found during validation.
+#[derive(Debug, Clone)]
+pub struct ShardIntegrityIssue {
+    /// Name of the shard file (e.g. `"2026-01.events"`).
+    pub shard_name: String,
+    /// Human-readable description of the problem.
+    pub problem: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -169,12 +185,6 @@ impl ShardManager {
         self.bones_dir.join("cache").join("clock")
     }
 
-    /// Path to the `current.events` symlink.
-    #[must_use]
-    pub fn current_symlink(&self) -> PathBuf {
-        self.events_dir().join("current.events")
-    }
-
     /// Generate the shard filename for a given year and month.
     #[must_use]
     pub fn shard_filename(year: i32, month: u32) -> String {
@@ -226,10 +236,8 @@ impl ShardManager {
         if shards.is_empty() {
             let (year, month) = current_year_month();
             self.create_shard(year, month)?;
-            self.update_symlink(year, month)?;
             Ok((year, month))
         } else if let Some(&(year, month)) = shards.last() {
-            self.update_symlink(year, month)?;
             Ok((year, month))
         } else {
             unreachable!("shards is non-empty")
@@ -300,38 +308,6 @@ impl ShardManager {
         Ok(path)
     }
 
-    /// Update the `current.events` symlink to point to the given shard.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ShardError::Io`] if the symlink cannot be created.
-    pub fn update_symlink(&self, year: i32, month: u32) -> Result<(), ShardError> {
-        let symlink = self.current_symlink();
-        let target = Self::shard_filename(year, month);
-
-        // Remove existing symlink (or file) if present
-        if symlink.exists() || symlink.symlink_metadata().is_ok() {
-            fs::remove_file(&symlink)?;
-        }
-
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &symlink)?;
-
-        #[cfg(not(unix))]
-        {
-            // Write to a temporary file then rename into place.  A plain
-            // `fs::write(&symlink, …)` would follow an existing symlink on
-            // Linux and overwrite the *target* file instead of replacing the
-            // symlink entry itself.  `fs::rename` replaces the directory entry
-            // atomically without following symlinks at the destination.
-            let tmp = symlink.with_extension("events.tmp");
-            fs::write(&tmp, &target)?;
-            fs::rename(&tmp, &symlink)?;
-        }
-
-        Ok(())
-    }
-
     /// Check if the current month differs from the active shard's month.
     /// If so, seal the old shard (generate manifest) and create a new one.
     ///
@@ -351,13 +327,11 @@ impl ShardManager {
                 self.write_manifest(y, m)?;
                 // Create new shard
                 self.create_shard(current_year, current_month)?;
-                self.update_symlink(current_year, current_month)?;
                 Ok((current_year, current_month))
             }
             None => {
                 // No shards exist yet, create first one
                 self.create_shard(current_year, current_month)?;
-                self.update_symlink(current_year, current_month)?;
                 Ok((current_year, current_month))
             }
         }
@@ -420,6 +394,68 @@ impl ShardManager {
     }
 
     // -----------------------------------------------------------------------
+    // Sealed shard validation
+    // -----------------------------------------------------------------------
+
+    /// Validate byte-length of sealed shards against their manifests.
+    ///
+    /// For each shard except the last (active), checks whether a `.manifest`
+    /// file exists and whether `byte_len` matches the actual file size on
+    /// disk. This is a lightweight startup check — full BLAKE3 hash
+    /// verification is deferred to `bn doctor` / `bn verify`.
+    ///
+    /// Returns a list of issues found. An empty list means all sealed shards
+    /// with manifests match.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if shard files or manifests cannot be read.
+    pub fn validate_sealed_shards(&self) -> Result<Vec<ShardIntegrityIssue>, ShardError> {
+        let shards = self.list_shards()?;
+        let mut issues = Vec::new();
+
+        // All shards except the last are sealed.
+        let sealed = if shards.len() > 1 {
+            &shards[..shards.len() - 1]
+        } else {
+            return Ok(issues);
+        };
+
+        for &(year, month) in sealed {
+            let shard_path = self.shard_path(year, month);
+            let shard_name = Self::shard_filename(year, month);
+
+            let Some(manifest) = self.read_manifest(year, month)? else {
+                tracing::warn!(shard = %shard_name, "sealed shard has no manifest");
+                issues.push(ShardIntegrityIssue {
+                    shard_name: shard_name.clone(),
+                    problem: "sealed shard has no manifest file".into(),
+                });
+                continue;
+            };
+
+            let file_len = fs::metadata(&shard_path)?.len();
+            if file_len != manifest.byte_len {
+                tracing::error!(
+                    shard = %shard_name,
+                    expected = manifest.byte_len,
+                    actual = file_len,
+                    "sealed shard byte length mismatch"
+                );
+                issues.push(ShardIntegrityIssue {
+                    shard_name,
+                    problem: format!(
+                        "byte length mismatch: manifest says {} bytes, file is {} bytes",
+                        manifest.byte_len, file_len
+                    ),
+                });
+            }
+        }
+
+        Ok(issues)
+    }
+
+    // -----------------------------------------------------------------------
     // Append
     // -----------------------------------------------------------------------
 
@@ -454,6 +490,11 @@ impl ShardManager {
         // Rotate if month changed
         let (year, month) = self.rotate_if_needed()?;
         let shard_path = self.shard_path(year, month);
+
+        // Validate shard header before appending
+        if shard_path.exists() {
+            validate_shard_header(&shard_path)?;
+        }
 
         // Update monotonic clock
         let ts = self.next_timestamp()?;
@@ -862,20 +903,29 @@ impl Iterator for ShardLineIterator {
                     .join("events")
                     .join(ShardManager::shard_filename(year, month));
 
-                // Skip forwarding-pointer shards (non-Unix symlink fallback).
-                // These are tiny files whose content is just the next shard's
-                // filename; they contain no event data.
-                if let Some(target) = read_forwarding_pointer(&shard_path) {
+                // Legacy compat: skip forwarding-pointer shards created by
+                // an older non-Unix symlink fallback.  These are tiny files
+                // whose content is just a `YYYY-MM.events` filename.
+                if is_forwarding_pointer(&shard_path) {
                     tracing::warn!(
                         shard = %shard_path.display(),
-                        target = %target,
-                        "skipping forwarding-pointer shard during replay"
+                        "skipping legacy forwarding-pointer shard during replay"
                     );
                     if let Ok(meta) = fs::metadata(&shard_path) {
                         self.cumulative_offset += usize::try_from(meta.len()).unwrap_or(0);
                     }
                     self.current_shard_idx += 1;
                     continue;
+                }
+
+                // Validate shard header before reading.
+                if let Err(e) = validate_shard_header(&shard_path) {
+                    tracing::error!(
+                        shard = %shard_path.display(),
+                        error = %e,
+                        "shard header validation failed"
+                    );
+                    return Some(Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())));
                 }
 
                 let mut file = match fs::File::open(shard_path) {
@@ -950,31 +1000,67 @@ fn system_time_us() -> i64 {
         .unwrap_or(0)
 }
 
-/// Return the forwarding target if `path` is a forwarding-pointer shard.
+/// Check if `path` is a legacy forwarding-pointer shard.
 ///
-/// A forwarding pointer is a tiny file whose trimmed content is a valid
-/// `YYYY-MM.events` filename.  It is written by the `#[cfg(not(unix))]` path
-/// in [`ShardManager::update_symlink`], which stores the target filename as a
-/// plain file instead of creating a real symlink.  If such a binary runs on a
-/// Linux host (e.g. via Wine or a cross-compiled binary), `fs::write` follows
-/// the existing `current.events` symlink and overwrites the old shard file
-/// with the forwarding-pointer content rather than replacing the symlink entry.
-///
-/// Returns `Some(target_filename)` when the file qualifies, `None` otherwise.
-fn read_forwarding_pointer(path: &Path) -> Option<String> {
-    // Forwarding pointers are at most ~30 bytes (length of "YYYY-MM.events").
-    // Any real shard starts with a multi-line header far exceeding this.
-    let meta = fs::metadata(path).ok()?;
+/// Forwarding pointers are tiny files (<=30 bytes) whose content is just a
+/// `YYYY-MM.events` filename.  They were created by an older non-Unix symlink
+/// fallback that has since been removed.  Real shards start with a multi-line
+/// header far exceeding 30 bytes.
+fn is_forwarding_pointer(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
     if meta.len() > 30 {
-        return None;
+        return false;
     }
-    let content = fs::read_to_string(path).ok()?;
-    let trimmed = content.trim();
-    if parse_shard_filename(trimmed).is_some() {
-        Some(trimmed.to_string())
-    } else {
-        None
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    parse_shard_filename(content.trim()).is_some()
+}
+
+/// Validate that a shard file starts with the expected header line.
+///
+/// Reads only the first line and checks it matches [`SHARD_HEADER`].
+/// Empty files or files starting with the correct header pass.
+/// Forwarding-pointer shards are silently accepted (legacy compat).
+///
+/// # Errors
+///
+/// Returns [`ShardError::CorruptedShard`] if the first line doesn't match,
+/// or [`ShardError::Io`] if the file can't be read.
+pub fn validate_shard_header(path: &Path) -> Result<(), ShardError> {
+    use crate::event::writer::SHARD_HEADER;
+    use std::io::{BufRead, BufReader};
+
+    // Skip forwarding-pointer shards (legacy compat).
+    if is_forwarding_pointer(path) {
+        return Ok(());
     }
+
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    let n = reader.read_line(&mut first_line)?;
+
+    // Empty file is ok (will get header on first write).
+    if n == 0 {
+        return Ok(());
+    }
+
+    let trimmed = first_line.trim_end();
+    if trimmed != SHARD_HEADER {
+        return Err(ShardError::CorruptedShard {
+            path: path.to_path_buf(),
+            reason: format!(
+                "expected header '{}', found '{}'",
+                SHARD_HEADER,
+                &trimmed[..trimmed.len().min(80)]
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 /// Parse a shard filename like `"2026-02.events"` into (year, month).
@@ -1078,10 +1164,6 @@ mod tests {
         assert_eq!(mgr.lock_path(), PathBuf::from("/repo/.bones/lock"));
         assert_eq!(mgr.clock_path(), PathBuf::from("/repo/.bones/cache/clock"));
         assert_eq!(
-            mgr.current_symlink(),
-            PathBuf::from("/repo/.bones/events/current.events")
-        );
-        assert_eq!(
             mgr.shard_path(2026, 2),
             PathBuf::from("/repo/.bones/events/2026-02.events")
         );
@@ -1132,10 +1214,6 @@ mod tests {
         assert!(shard_path.exists());
         let content = fs::read_to_string(&shard_path).expect("read");
         assert!(content.starts_with("# bones event log v1"));
-
-        // Symlink exists
-        let symlink = mgr.current_symlink();
-        assert!(symlink.exists() || symlink.symlink_metadata().is_ok());
     }
 
     #[test]
@@ -1222,44 +1300,6 @@ mod tests {
         assert_eq!(p1, p2);
         let content = fs::read_to_string(&p2).expect("read");
         assert_eq!(content, "modified");
-    }
-
-    // -----------------------------------------------------------------------
-    // Symlink
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn update_symlink_creates_link() {
-        let (_tmp, mgr) = setup();
-        mgr.ensure_dirs().expect("dirs");
-        mgr.create_shard(2026, 2).expect("create");
-        mgr.update_symlink(2026, 2).expect("symlink");
-
-        let symlink = mgr.current_symlink();
-        assert!(symlink.symlink_metadata().is_ok());
-
-        #[cfg(unix)]
-        {
-            let target = fs::read_link(&symlink).expect("readlink");
-            assert_eq!(target, PathBuf::from("2026-02.events"));
-        }
-    }
-
-    #[test]
-    fn update_symlink_replaces_existing() {
-        let (_tmp, mgr) = setup();
-        mgr.ensure_dirs().expect("dirs");
-        mgr.create_shard(2026, 1).expect("create");
-        mgr.create_shard(2026, 2).expect("create");
-
-        mgr.update_symlink(2026, 1).expect("first");
-        mgr.update_symlink(2026, 2).expect("second");
-
-        #[cfg(unix)]
-        {
-            let target = fs::read_link(&mgr.current_symlink()).expect("readlink");
-            assert_eq!(target, PathBuf::from("2026-02.events"));
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -1619,7 +1659,6 @@ mod tests {
         // Create an old shard
         mgr.create_shard(2025, 11).expect("create");
         mgr.append_raw(2025, 11, "old event\n").expect("append");
-        mgr.update_symlink(2025, 11).expect("symlink");
 
         // Rotate should seal old and create new
         let (y, m) = mgr.rotate_if_needed().expect("rotate");
@@ -1631,13 +1670,6 @@ mod tests {
 
         // New shard should exist
         assert!(mgr.shard_path(ey, em).exists());
-
-        // Symlink should point to new shard
-        #[cfg(unix)]
-        {
-            let target = fs::read_link(mgr.current_symlink()).expect("readlink");
-            assert_eq!(target, PathBuf::from(ShardManager::shard_filename(ey, em)));
-        }
     }
 
     // -----------------------------------------------------------------------

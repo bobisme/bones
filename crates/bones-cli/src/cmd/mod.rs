@@ -14,6 +14,7 @@ pub mod dedup;
 pub mod delete;
 pub mod dep;
 pub mod diagnose;
+pub mod doctor;
 pub mod do_cmd;
 pub mod done;
 pub mod dup;

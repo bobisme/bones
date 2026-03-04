@@ -74,15 +74,13 @@ fn init_creates_expected_event_structure() {
     bn_cmd(dir.path()).args(["init"]).assert().success();
 
     let events_dir = dir.path().join(".bones/events");
-    assert!(events_dir.join("current.events").is_symlink());
-
     let entries: Vec<_> = fs::read_dir(&events_dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
     assert!(
-        entries.len() >= 2,
-        "expected shard + current.events symlink"
+        !entries.is_empty(),
+        "expected at least one shard file"
     );
 }
 
@@ -96,8 +94,21 @@ fn first_item_appends_event_to_active_shard() {
         .assert()
         .success();
 
-    let current = dir.path().join(".bones/events/current.events");
-    let content = fs::read_to_string(&current).expect("current.events should be readable");
+    // Find the active shard by looking for YYYY-MM.events files
+    let events_dir = dir.path().join(".bones/events");
+    let shard_path = fs::read_dir(&events_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().and_then(|ext| ext.to_str()) == Some("events")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n != "current.events")
+        })
+        .expect("should find an events shard");
+
+    let content = fs::read_to_string(&shard_path).expect("shard should be readable");
     let lines: Vec<_> = content.lines().collect();
     assert!(
         lines.len() >= 3,

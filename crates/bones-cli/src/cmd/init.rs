@@ -45,7 +45,6 @@ const SHARD_HEADER: &str =
 /// .bones/
 ///   events/
 ///     YYYY-MM.events    (active shard with header comment)
-///     current.events    (symlink -> YYYY-MM.events)
 ///   config.toml         (default project config template)
 ///   .gitignore          (derived/runtime files: db/cache/itc/lock)
 ///   .gitattributes      (local merge policy for events)
@@ -89,15 +88,6 @@ pub fn run_init(args: &InitArgs, output: OutputMode, project_root: &Path) -> Res
     let shard_path = events_dir.join(&shard_name);
     std::fs::write(&shard_path, SHARD_HEADER)
         .with_context(|| format!("Failed to write shard file: {}", shard_path.display()))?;
-
-    // Create current.events symlink pointing to the active shard
-    let symlink_path = events_dir.join("current.events");
-    if symlink_path.exists() || symlink_path.is_symlink() {
-        std::fs::remove_file(&symlink_path)
-            .with_context(|| "Failed to remove existing current.events symlink")?;
-    }
-    std::os::unix::fs::symlink(&shard_name, &symlink_path)
-        .with_context(|| "Failed to create current.events symlink")?;
 
     // Write default config.toml
     let config_path = bones_dir.join("config.toml");
@@ -203,18 +193,15 @@ mod tests {
         assert!(root.join(".bones/.gitignore").is_file());
         assert!(root.join(".bones/.gitattributes").is_file());
 
-        // Events dir must have at least the shard + symlink
+        // Events dir must have the shard file
         let count = fs::read_dir(root.join(".bones/events"))
             .expect("events dir readable")
             .filter_map(|e| e.ok())
             .count();
         assert!(
-            count >= 2,
-            "events dir should have shard + current.events symlink"
+            count >= 1,
+            "events dir should have at least one shard file"
         );
-
-        let symlink = root.join(".bones/events/current.events");
-        assert!(symlink.is_symlink(), "current.events must be a symlink");
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -376,9 +363,10 @@ mod tests {
         )
         .expect("init should succeed");
 
-        // Read via the symlink so we confirm the symlink is wired correctly
-        let symlink = root.join(".bones/events/current.events");
-        let content = fs::read_to_string(&symlink).expect("current.events readable via symlink");
+        // Read the active shard directly
+        let expected_name = Local::now().format("%Y-%m.events").to_string();
+        let shard_path = root.join(".bones/events").join(&expected_name);
+        let content = fs::read_to_string(&shard_path).expect("shard readable");
         assert!(
             content.contains("# bones event log v1"),
             "missing log version header"

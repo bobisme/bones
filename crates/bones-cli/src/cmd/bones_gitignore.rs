@@ -12,6 +12,7 @@ const MANAGED_ENTRIES: &[&str] = &[
     "cache/",
     "itc/",
     "lock",
+    "events/current.events",
 ];
 
 pub fn ensure_bones_gitignore(bones_dir: &Path) -> Result<()> {

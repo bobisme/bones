@@ -584,6 +584,17 @@ enum Commands {
     #[command(hide = true)]
     #[command(
         next_help_heading = "Project Maintenance",
+        about = "Find and fix repository integrity issues",
+        long_about = "Comprehensive health check that validates shard headers, manifests,\n\
+                      parse integrity, orphaned events, projection drift, and stale symlinks.\n\
+                      With --fix, automatically repairs safe-to-fix issues.",
+        after_help = "EXAMPLES:\n    # Check repository health\n    bn doctor\n\n    # Auto-repair safe issues\n    bn doctor --fix\n\n    # Machine-readable output\n    bn doctor --format json"
+    )]
+    Doctor(cmd::doctor::DoctorArgs),
+
+    #[command(hide = true)]
+    #[command(
+        next_help_heading = "Project Maintenance",
         about = "Inspect and update configuration",
         long_about = "Show resolved config values, inspect raw scope files, and update supported keys in project or user scope.",
         after_help = "EXAMPLES:\n    # Show resolved config\n    bn admin config show\n\n    # Show raw project config\n    bn admin config show --project\n\n    # Set project threshold\n    bn admin config set search.duplicate_threshold 0.85\n\n    # Set user output preference\n    bn admin config set --scope user user.output json"
@@ -848,6 +859,14 @@ enum AdminCommand {
     Compact(cmd::compact::CompactArgs),
     #[command(about = "Run repository diagnostics")]
     Diagnose,
+    #[command(
+        about = "Find and fix repository integrity issues",
+        long_about = "Comprehensive health check that validates shard headers, manifests,\n\
+                      parse integrity, orphaned events, projection drift, and stale symlinks.\n\
+                      With --fix, automatically repairs safe-to-fix issues.",
+        after_help = "EXAMPLES:\n    # Check repository health\n    bn admin doctor\n\n    # Auto-repair safe issues\n    bn admin doctor --fix\n\n    # Machine-readable output\n    bn admin doctor --format json"
+    )]
+    Doctor(cmd::doctor::DoctorArgs),
     #[command(about = "Inspect and update configuration")]
     Config(cmd::config::ConfigArgs),
     #[command(about = "Rewrite event shards to current format version")]
@@ -1291,6 +1310,7 @@ fn main() -> anyhow::Result<()> {
             }
             AdminCommand::Compact(args) => cmd::compact::run_compact(args, output, &project_root),
             AdminCommand::Diagnose => cmd::diagnose::run_diagnose(output, &project_root),
+            AdminCommand::Doctor(args) => cmd::doctor::run_doctor(args, output, &project_root),
             AdminCommand::Config(args) => cmd::config::run_config(args, &project_root, output),
             AdminCommand::MigrateFormat(args) => {
                 cmd::migrate_format::run_migrate_format(args, output, &project_root)
@@ -1379,6 +1399,9 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::Diagnose => timing::timed("cmd.diagnose", || {
             cmd::diagnose::run_diagnose(output, &project_root)
+        }),
+        Commands::Doctor(ref args) => timing::timed("cmd.doctor", || {
+            cmd::doctor::run_doctor(args, output, &project_root)
         }),
         Commands::Config(ref args) => timing::timed("cmd.config", || {
             cmd::config::run_config(args, &project_root, output)

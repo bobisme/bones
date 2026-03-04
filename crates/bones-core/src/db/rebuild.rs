@@ -36,6 +36,27 @@ pub struct RebuildReport {
 // rebuild
 // ---------------------------------------------------------------------------
 
+/// Validate sealed shard manifests, bailing on corruption.
+fn check_sealed_shard_integrity(shard_mgr: &ShardManager) -> Result<()> {
+    let issues = shard_mgr
+        .validate_sealed_shards()
+        .map_err(|e| anyhow::anyhow!("sealed shard validation: {e}"))?;
+    if !issues.is_empty() {
+        for issue in &issues {
+            tracing::error!(
+                shard = %issue.shard_name,
+                problem = %issue.problem,
+                "sealed shard integrity check failed"
+            );
+        }
+        anyhow::bail!(
+            "sealed shard corrupted: {} (run `bn doctor` to diagnose)",
+            issues[0].problem
+        );
+    }
+    Ok(())
+}
+
 /// Drop the existing DB and rebuild it from the canonical event log.
 ///
 /// 1. Deletes the existing database file (if any)
@@ -78,6 +99,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
         .list_shards()
         .map_err(|e| anyhow::anyhow!("list shards: {e}"))?;
     let shard_count = shards.len();
+
+    check_sealed_shard_integrity(&shard_mgr)?;
 
     // We need a custom loop because EventParser expects Iterator<Item = String>
     // and returns Result<Event, ...>.
