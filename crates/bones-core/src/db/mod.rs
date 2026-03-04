@@ -79,11 +79,11 @@ pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
         if offset == 0 && hash.is_none() {
             true
         } else {
-            // Check if there are events beyond the cursor.
+            // Check if cursor and shard content are out of sync (new events beyond cursor, or cursor overshoots after sync).
             let mgr = crate::shard::ShardManager::new(bones_dir);
             let total_bytes = mgr.total_content_len().unwrap_or(0);
             let cursor = usize::try_from(offset).unwrap_or(0);
-            total_bytes > cursor
+            total_bytes != cursor
         }
     });
 
