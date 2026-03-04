@@ -852,6 +852,23 @@ impl Iterator for ShardLineIterator {
                     .bones_dir
                     .join("events")
                     .join(ShardManager::shard_filename(year, month));
+
+                // Skip forwarding-pointer shards (non-Unix symlink fallback).
+                // These are tiny files whose content is just the next shard's
+                // filename; they contain no event data.
+                if let Some(target) = read_forwarding_pointer(&shard_path) {
+                    tracing::warn!(
+                        shard = %shard_path.display(),
+                        target = %target,
+                        "skipping forwarding-pointer shard during replay"
+                    );
+                    if let Ok(meta) = fs::metadata(&shard_path) {
+                        self.cumulative_offset += usize::try_from(meta.len()).unwrap_or(0);
+                    }
+                    self.current_shard_idx += 1;
+                    continue;
+                }
+
                 let mut file = match fs::File::open(shard_path) {
                     Ok(f) => f,
                     Err(e) => return Some(Err(e)),
@@ -922,6 +939,30 @@ fn system_time_us() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_micros() as i64)
         .unwrap_or(0)
+}
+
+/// Return the forwarding target if `path` is a forwarding-pointer shard.
+///
+/// A forwarding pointer is a tiny file whose trimmed content is a valid
+/// `YYYY-MM.events` filename.  It is written by [`ShardManager::update_symlink`]
+/// on non-Unix platforms (where real symlinks aren't available) and can also
+/// appear when a repository is synced from a Windows machine.
+///
+/// Returns `Some(target_filename)` when the file qualifies, `None` otherwise.
+fn read_forwarding_pointer(path: &Path) -> Option<String> {
+    // Forwarding pointers are at most ~30 bytes (length of "YYYY-MM.events").
+    // Any real shard starts with a multi-line header far exceeding this.
+    let meta = fs::metadata(path).ok()?;
+    if meta.len() > 30 {
+        return None;
+    }
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+    if parse_shard_filename(trimmed).is_some() {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 /// Parse a shard filename like `"2026-02.events"` into (year, month).
@@ -1822,6 +1863,54 @@ mod tests {
         assert_eq!(
             total, replay_total,
             "total_content_len and replay_from_offset total must agree"
+        );
+    }
+
+    /// A shard whose content is just a `YYYY-MM.events` filename (the
+    /// non-Unix symlink fallback) must be silently skipped during replay,
+    /// not treated as a parse error.
+    #[test]
+    fn replay_lines_skips_forwarding_pointer_shard() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let mgr = ShardManager::new(dir.path());
+        mgr.ensure_dirs().expect("dirs");
+
+        // Jan shard has real events.
+        mgr.create_shard(2026, 1).expect("create jan");
+        mgr.append_raw(2026, 1, "# bones event log v1\n")
+            .expect("header");
+        mgr.append_raw(2026, 1, "real-event-line\n")
+            .expect("event");
+
+        // Feb shard is a forwarding pointer (non-Unix symlink fallback).
+        let feb_path = dir.path().join("events").join("2026-02.events");
+        fs::write(&feb_path, "2026-03.events").expect("write forwarding pointer");
+
+        // Mar shard has real events too.
+        mgr.create_shard(2026, 3).expect("create mar");
+        mgr.append_raw(2026, 3, "# bones event log v1\n")
+            .expect("mar header");
+        mgr.append_raw(2026, 3, "another-event-line\n")
+            .expect("mar event");
+
+        let lines: Vec<String> = mgr
+            .replay_lines()
+            .expect("replay_lines")
+            .map(|r| r.expect("line").1)
+            .collect();
+
+        // Should see Jan and Mar lines; Feb forwarding pointer is silently skipped.
+        assert!(
+            lines.iter().any(|l| l.contains("real-event-line")),
+            "jan event missing"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("another-event-line")),
+            "mar event missing"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("2026-03.events")),
+            "forwarding pointer content must not appear in replay"
         );
     }
 }
