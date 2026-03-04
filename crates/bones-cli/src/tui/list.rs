@@ -1808,7 +1808,9 @@ impl ListView {
             help_cursor: 0,
             needs_terminal_refresh: false,
         };
-        view.reload()?;
+        if let Err(e) = view.reload() {
+            view.set_status(format!("DB load failed: {e:#}"));
+        }
         Ok(view)
     }
 
@@ -2988,7 +2990,9 @@ impl ListView {
 
     pub fn tick(&mut self) -> Result<()> {
         if self.last_refresh.elapsed() >= self.refresh_interval {
-            self.reload()?;
+            if let Err(e) = self.reload() {
+                self.set_status(format!("DB refresh failed: {e:#}"));
+            }
         }
         self.clamp_detail_scroll();
         // Pick up any ERROR events captured by the TUI log layer.
