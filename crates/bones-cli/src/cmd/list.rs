@@ -25,6 +25,10 @@ pub struct ListArgs {
 
     /// Include all states when no explicit state filter is provided.
     #[arg(long, conflicts_with = "state")]
+    pub all_states: bool,
+
+    /// Hidden alias: --all sets all states and no limit (limit=0).
+    #[arg(long, hide = true, conflicts_with = "state")]
     pub all: bool,
 
     /// Filter by kind: task, goal, bug.
@@ -194,7 +198,7 @@ pub fn run_list(
                 items: Vec::new(),
                 total: 0,
                 showing: 0,
-                limit: effective_limit(args.limit, 0, args.offset),
+                limit: effective_limit(if args.all { 0 } else { args.limit }, 0, args.offset),
                 offset: args.offset,
                 has_more: false,
                 advice: vec![Advice {
@@ -359,6 +363,7 @@ fn build_list_response(
     // Default to showing open items unless any filter is explicitly set.
     // Pagination/sort alone should not disable this default behavior.
     let has_any_filter = args.state.is_some()
+        || args.all_states
         || args.all
         || args.kind.is_some()
         || !all_labels.is_empty()
@@ -410,14 +415,15 @@ fn build_list_response(
 
     sort_query_items(&mut raw, sort);
 
+    let effective_limit_val = if args.all { 0 } else { args.limit };
     let total = raw.len();
     let start = args.offset.min(total);
-    let end = if args.limit == 0 {
+    let end = if effective_limit_val == 0 {
         total
     } else {
-        start.saturating_add(args.limit).min(total)
+        start.saturating_add(effective_limit_val).min(total)
     };
-    let has_more = args.limit > 0 && end < total;
+    let has_more = effective_limit_val > 0 && end < total;
 
     let items: anyhow::Result<Vec<ListItem>> = raw[start..end]
         .iter()
@@ -463,7 +469,7 @@ fn build_list_response(
         items,
         total,
         showing,
-        limit: effective_limit(args.limit, total, args.offset),
+        limit: effective_limit(effective_limit_val, total, args.offset),
         offset: args.offset,
         has_more,
         advice,
@@ -652,6 +658,7 @@ mod tests {
     fn default_args() -> ListArgs {
         ListArgs {
             state: None,
+            all_states: false,
             all: false,
             kind: None,
             label: vec![],
@@ -682,6 +689,7 @@ mod tests {
         }
         let w = Wrapper::parse_from(["test"]);
         assert!(w.args.state.is_none());
+        assert!(!w.args.all_states);
         assert!(!w.args.all);
         assert!(w.args.kind.is_none());
         assert!(w.args.label.is_empty());
@@ -730,6 +738,7 @@ mod tests {
             "priority",
         ]);
         assert_eq!(w.args.state.as_deref(), Some("doing"));
+        assert!(!w.args.all_states);
         assert!(!w.args.all);
         assert_eq!(w.args.kind.as_deref(), Some("bug"));
         assert_eq!(w.args.label, vec!["backend", "urgent"]);
@@ -750,9 +759,17 @@ mod tests {
             #[command(flatten)]
             args: ListArgs,
         }
-        let w = Wrapper::parse_from(["test", "--all"]);
-        assert!(w.args.all);
+        // --all-states sets all_states, not all
+        let w = Wrapper::parse_from(["test", "--all-states"]);
+        assert!(w.args.all_states);
+        assert!(!w.args.all);
         assert!(w.args.state.is_none());
+
+        // --all (hidden alias) sets all, not all_states
+        let w2 = Wrapper::parse_from(["test", "--all"]);
+        assert!(w2.args.all);
+        assert!(!w2.args.all_states);
+        assert!(w2.args.state.is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -1073,7 +1090,7 @@ mod tests {
         let conn = Connection::open(db_path).unwrap();
 
         let mut args = default_args();
-        args.all = true;
+        args.all_states = true;
 
         let response =
             build_list_response(&conn, &args, ListSort::UpdatedDesc, None, None).unwrap();
