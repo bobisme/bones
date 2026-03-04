@@ -78,10 +78,7 @@ fn init_creates_expected_event_structure() {
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
-    assert!(
-        !entries.is_empty(),
-        "expected at least one shard file"
-    );
+    assert!(!entries.is_empty(), "expected at least one shard file");
 }
 
 #[test]

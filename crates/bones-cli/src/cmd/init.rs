@@ -198,10 +198,7 @@ mod tests {
             .expect("events dir readable")
             .filter_map(|e| e.ok())
             .count();
-        assert!(
-            count >= 1,
-            "events dir should have at least one shard file"
-        );
+        assert!(count >= 1, "events dir should have at least one shard file");
 
         let _ = fs::remove_dir_all(&root);
     }

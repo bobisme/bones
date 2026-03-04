@@ -88,7 +88,11 @@ fn build_doctor_report(args: &DoctorArgs, project_root: &Path) -> Result<DoctorR
     let mut fixes_applied = Vec::new();
 
     // 1. Shard integrity (manifests)
-    sections.push(check_shard_integrity(&bones_dir, args.fix, &mut fixes_applied)?);
+    sections.push(check_shard_integrity(
+        &bones_dir,
+        args.fix,
+        &mut fixes_applied,
+    )?);
 
     // 2. Shard headers
     sections.push(check_shard_headers(&bones_dir)?);
@@ -113,9 +117,7 @@ fn build_doctor_report(args: &DoctorArgs, project_root: &Path) -> Result<DoctorR
         &mut fixes_applied,
     )?);
 
-    let ok = sections
-        .iter()
-        .all(|s| s.status != SectionStatus::Fail);
+    let ok = sections.iter().all(|s| s.status != SectionStatus::Fail);
 
     Ok(DoctorReport {
         ok,
@@ -289,9 +291,7 @@ fn check_orphaned_events(bones_dir: &Path) -> Result<DoctorSection> {
         .take(20)
         .cloned()
         .collect();
-    let orphan_count = non_create_items
-        .difference(&created_items)
-        .count();
+    let orphan_count = non_create_items.difference(&created_items).count();
 
     Ok(DoctorSection {
         name: "orphaned_events".into(),
@@ -422,9 +422,7 @@ fn check_stale_symlink(
             return Ok(DoctorSection {
                 name: "stale_symlink".into(),
                 status: SectionStatus::Fail,
-                details: vec![format!(
-                    "failed to remove stale current.events: {e}"
-                )],
+                details: vec![format!("failed to remove stale current.events: {e}")],
             });
         }
         fixes.push("removed stale current.events symlink".into());
@@ -438,9 +436,7 @@ fn check_stale_symlink(
     Ok(DoctorSection {
         name: "stale_symlink".into(),
         status: SectionStatus::Warn,
-        details: vec![
-            "stale current.events exists; run with --fix to remove".into(),
-        ],
+        details: vec!["stale current.events exists; run with --fix to remove".into()],
     })
 }
 

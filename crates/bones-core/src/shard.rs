@@ -925,7 +925,10 @@ impl Iterator for ShardLineIterator {
                         error = %e,
                         "shard header validation failed"
                     );
-                    return Some(Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())));
+                    return Some(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        e.to_string(),
+                    )));
                 }
 
                 let mut file = match fs::File::open(shard_path) {
@@ -1923,8 +1926,7 @@ mod tests {
         mgr.create_shard(2026, 1).expect("create jan");
         mgr.append_raw(2026, 1, "# bones event log v1\n")
             .expect("header");
-        mgr.append_raw(2026, 1, "real-event-line\n")
-            .expect("event");
+        mgr.append_raw(2026, 1, "real-event-line\n").expect("event");
 
         // Feb shard is a forwarding pointer (non-Unix symlink fallback).
         let feb_path = dir.path().join("events").join("2026-02.events");
