@@ -2218,15 +2218,19 @@ impl ListView {
                 }
             }
 
-            // 'b' in detail pane opens the blocker/link picker; in list pane it pages up.
             KeyCode::Char('b') => {
                 if self.show_detail {
-                    self.open_blocker_modal();
+                    self.scroll_detail_by(-10);
                 } else {
                     for _ in 0..10 {
                         self.select_prev();
                     }
                 }
+            }
+
+            // 'L' (shift+l) in detail pane opens the blocker/link picker.
+            KeyCode::Char('L') if self.show_detail => {
+                self.open_blocker_modal();
             }
 
             // Open detail pane for current selection.
@@ -3881,7 +3885,7 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
         ("j/k", "list", "move selection"),
         ("f", "list", "page down"),
-        ("b", "list", "page up"),
+        ("b/u", "list", "page up"),
         ("enter/l", "list", "open detail pane"),
         ("s", "list", "cycle list sort"),
         ("a", "list", "add bone"),
@@ -3896,7 +3900,7 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
         ("h/esc", "detail", "close detail pane"),
         ("e", "detail", "edit selected bone"),
         ("c", "detail", "add comment"),
-        ("b", "detail", "add blocker/link/parent"),
+        ("L", "detail", "add link/blocker/parent"),
         ("x", "detail", "done/reopen with note"),
         ("Tab", "create", "next field"),
         ("Shift+Tab", "create", "previous field"),
