@@ -282,6 +282,31 @@ fn split_fields(line: &str) -> impl Iterator<Item = &str> {
     line.split('\t')
 }
 
+/// Accept legacy terseid-like IDs where the suffix starts with a letter
+/// (older generator didn't enforce digit-first).  Format: `prefix-suffix`
+/// where prefix is 1-4 lowercase alpha and suffix uses crockford base32
+/// charset (`0-9a-hjkmnp-tv-z`, no `i/l/o/u`) with optional `.` for child IDs.
+fn parse_legacy_item_id(raw: &str) -> Option<ItemId> {
+    fn is_crockford(c: char) -> bool {
+        matches!(c, '0'..='9' | 'a'..='h' | 'j' | 'k' | 'm' | 'n' | 'p'..='t' | 'v'..='z')
+    }
+    let normalized = raw.trim().to_lowercase();
+    let (prefix, rest) = normalized.split_once('-')?;
+    if prefix.is_empty() || prefix.len() > 4 || !prefix.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    if rest.is_empty() || rest.len() > 20 {
+        return None;
+    }
+    // Each segment (split on `.`) must be non-empty crockford base32
+    for seg in rest.split('.') {
+        if seg.is_empty() || !seg.chars().all(is_crockford) {
+            return None;
+        }
+    }
+    Some(ItemId::new_unchecked(normalized))
+}
+
 // ---------------------------------------------------------------------------
 // Partial parse (zero-copy)
 // ---------------------------------------------------------------------------
@@ -424,8 +449,13 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
 
     // --- Field 6: item_id ---
     // Accept any valid terseid prefix (not just bn-) to support migrated IDs.
-    let item_id = ItemId::parse_any_prefix(fields[5])
-        .map_err(|_| ParseError::InvalidItemId(fields[5].to_string()))?;
+    // Fall back to unchecked for legacy IDs (e.g. letter-first terseids from
+    // older generators where the validator and generator were out of sync).
+    let item_id = match ItemId::parse_any_prefix(fields[5]) {
+        Ok(id) => id,
+        Err(_) => parse_legacy_item_id(fields[5])
+            .ok_or_else(|| ParseError::InvalidItemId(fields[5].to_string()))?,
+    };
 
     // --- Field 7: data (JSON) ---
     let data_json = fields[6];
