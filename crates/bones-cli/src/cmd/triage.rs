@@ -61,7 +61,11 @@ pub fn run_triage(
     let mut actionable_blockers: Vec<&RankedItem> = snapshot
         .ranked
         .iter()
-        .filter(|item| item.blocked_by_active == 0 && item.unblocks_active > 0)
+        .filter(|item| {
+            item.blocked_by_active == 0
+                && item.unblocks_active > 0
+                && !snapshot.punt_suppressed.contains(&item.id)
+        })
         .collect();
     actionable_blockers.sort_by(|a, b| {
         b.unblocks_active
@@ -74,7 +78,11 @@ pub fn run_triage(
     let mut blocked_hubs: Vec<&RankedItem> = snapshot
         .ranked
         .iter()
-        .filter(|item| item.unblocks_active > 0 && item.blocked_by_active > 0)
+        .filter(|item| {
+            item.unblocks_active > 0
+                && item.blocked_by_active > 0
+                && !snapshot.punt_suppressed.contains(&item.id)
+        })
         .collect();
     blocked_hubs.sort_by(|a, b| {
         b.unblocks_active

@@ -2738,17 +2738,17 @@ impl ListView {
                 modal.list_idx = modal.list_idx.saturating_sub(1);
             }
             KeyCode::Left => {
-                if let Some(link) = modal.links.get_mut(modal.list_idx) {
-                    if !link.deleted {
-                        link.current_type = link.current_type.prev();
-                    }
+                if let Some(link) = modal.links.get_mut(modal.list_idx)
+                    && !link.deleted
+                {
+                    link.current_type = link.current_type.prev();
                 }
             }
             KeyCode::Right | KeyCode::Tab => {
-                if let Some(link) = modal.links.get_mut(modal.list_idx) {
-                    if !link.deleted {
-                        link.current_type = link.current_type.next();
-                    }
+                if let Some(link) = modal.links.get_mut(modal.list_idx)
+                    && !link.deleted
+                {
+                    link.current_type = link.current_type.next();
                 }
             }
             KeyCode::Char('d') => {
@@ -4418,9 +4418,7 @@ fn render_edit_link_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: 
             };
 
             let type_style = if link.deleted {
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else if changed {
                 Style::default()
                     .fg(Color::Yellow)

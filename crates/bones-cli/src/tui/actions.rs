@@ -412,12 +412,7 @@ pub fn remove_link(
 }
 
 /// Clear a bone's parent by emitting an `item.update` setting parent to null.
-pub fn clear_parent(
-    project_root: &Path,
-    db_path: &Path,
-    agent: &str,
-    item_id: &str,
-) -> Result<()> {
+pub fn clear_parent(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) -> Result<()> {
     update_item_fields(
         project_root,
         db_path,

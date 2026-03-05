@@ -287,7 +287,7 @@ fn split_fields(line: &str) -> impl Iterator<Item = &str> {
 /// where prefix is 1-4 lowercase alpha and suffix uses crockford base32
 /// charset (`0-9a-hjkmnp-tv-z`, no `i/l/o/u`) with optional `.` for child IDs.
 fn parse_legacy_item_id(raw: &str) -> Option<ItemId> {
-    fn is_crockford(c: char) -> bool {
+    const fn is_crockford(c: char) -> bool {
         matches!(c, '0'..='9' | 'a'..='h' | 'j' | 'k' | 'm' | 'n' | 'p'..='t' | 'v'..='z')
     }
     let normalized = raw.trim().to_lowercase();

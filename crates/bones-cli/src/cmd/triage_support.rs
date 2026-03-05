@@ -49,6 +49,8 @@ pub struct TriageSnapshot {
     pub unblocked_ranked: Vec<RankedItem>,
     pub needs_decomposition: Vec<RankedItem>,
     pub cycles: Vec<Vec<String>>,
+    /// IDs suppressed due to punt (directly punted or descendants of punted goals).
+    pub punt_suppressed: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +92,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
             unblocked_ranked: Vec::new(),
             needs_decomposition: Vec::new(),
             cycles,
+            punt_suppressed: HashSet::new(),
         });
     }
 
@@ -100,7 +103,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
     // If a goal is blocked (e.g. Phase I blocks Phase II), all children of
     // Phase II should also be treated as blocked so triage doesn't recommend
     // them before their parent's blockers are resolved.
-    propagate_parent_blocked(&active_items, &mut unresolved_blockers);
+    let punt_suppressed = propagate_parent_blocked(&active_items, &mut unresolved_blockers);
     let urgency_by_id: HashMap<String, Urgency> = active_items
         .iter()
         .map(|item| {
@@ -312,6 +315,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
         .filter(|item| {
             matches!(item.size.as_deref(), Some("l" | "xl"))
                 && !ids_with_children.contains(item.id.as_str())
+                && !punt_suppressed.contains(&item.id)
         })
         .filter(|item| {
             // Exclude goals -- only tasks/bugs/etc.
@@ -330,6 +334,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
         unblocked_ranked,
         needs_decomposition,
         cycles,
+        punt_suppressed,
     })
 }
 
@@ -562,10 +567,14 @@ fn is_active_state(state: &str) -> bool {
 /// blocker count so that triage treats it as blocked.  Punted goals are
 /// treated identically to blocked goals: their children should not surface
 /// in `triage` or `next` recommendations.
+///
+/// Returns the set of item IDs that are suppressed due to punt (either
+/// directly punted or descendants of a punted ancestor). These items should
+/// be excluded from all triage sections, not just `unblocked_ranked`.
 fn propagate_parent_blocked(
     active_items: &[query::QueryItem],
     unresolved_blockers: &mut HashMap<String, usize>,
-) {
+) -> HashSet<String> {
     // Build parent_id lookup for active items.
     let parent_of: HashMap<&str, &str> = active_items
         .iter()
@@ -586,6 +595,13 @@ fn propagate_parent_blocked(
         .map(|item| (item.item_id.as_str(), item.urgency.as_str()))
         .collect();
 
+    // Collect directly punted items.
+    let mut punt_suppressed: HashSet<String> = active_items
+        .iter()
+        .filter(|item| item.urgency == "punt")
+        .map(|item| item.item_id.clone())
+        .collect();
+
     for item in active_items {
         // Only propagate to items that appear unblocked on their own.
         if unresolved_blockers.get(&item.item_id).copied().unwrap_or(0) > 0 {
@@ -603,11 +619,16 @@ fn propagate_parent_blocked(
             if ancestor_blocked || ancestor_punted {
                 // Ancestor is blocked or punted — suppress this descendant.
                 unresolved_blockers.insert(item.item_id.clone(), 1);
+                if ancestor_punted {
+                    punt_suppressed.insert(item.item_id.clone());
+                }
                 break;
             }
             cursor = pid;
         }
     }
+
+    punt_suppressed
 }
 
 fn load_unresolved_blocker_counts(conn: &Connection) -> Result<HashMap<String, usize>> {
@@ -1626,6 +1647,75 @@ mod tests {
             !parent.explanation.contains("Score reduced"),
             "L task with children should not be penalized, got: {}",
             parent.explanation
+        );
+    }
+
+    #[test]
+    fn punted_goal_excluded_from_punt_suppressed_set() {
+        let conn = test_db();
+
+        // A punted goal that unblocks another item.
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-punted', 'Punted goal', 'goal', 'open', 'punt', NULL, 0, '', 0, 10)",
+            [],
+        )
+        .expect("insert punted goal");
+
+        // A child of the punted goal.
+        conn.execute(
+            "INSERT INTO items (
+                item_id, title, kind, state, urgency, size,
+                parent_id, is_deleted, search_labels, created_at_us, updated_at_us
+            ) VALUES ('bn-child', 'Child task', 'task', 'open', 'default', 's', 'bn-punted', 0, '', 0, 20)",
+            [],
+        )
+        .expect("insert child");
+
+        // An item that the punted goal unblocks.
+        insert_item(
+            &conn,
+            "bn-downstream",
+            "Downstream",
+            "open",
+            "default",
+            None,
+            30,
+        );
+        insert_blocks_edge(&conn, "bn-punted", "bn-downstream");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+
+        // Punted goal and its child should be in punt_suppressed.
+        assert!(
+            snapshot.punt_suppressed.contains("bn-punted"),
+            "punted goal should be in punt_suppressed"
+        );
+        assert!(
+            snapshot.punt_suppressed.contains("bn-child"),
+            "child of punted goal should be in punt_suppressed"
+        );
+
+        // Neither should appear in any triage recommendation.
+        let all_ranked_ids: Vec<&str> = snapshot
+            .ranked
+            .iter()
+            .filter(|item| !snapshot.punt_suppressed.contains(&item.id))
+            .map(|item| item.id.as_str())
+            .collect();
+        assert!(
+            !all_ranked_ids.contains(&"bn-punted"),
+            "punted goal should not appear in filtered ranked"
+        );
+        assert!(
+            !all_ranked_ids.contains(&"bn-child"),
+            "child of punted goal should not appear in filtered ranked"
+        );
+        assert!(
+            all_ranked_ids.contains(&"bn-downstream"),
+            "downstream item should still appear"
         );
     }
 
