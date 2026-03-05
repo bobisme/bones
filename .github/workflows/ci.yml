@@ -11,22 +11,52 @@ env:
 
 jobs:
   check:
-    name: Check
-    runs-on: ubuntu-latest
+    name: Check (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        features: [default, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ matrix.os }}-${{ matrix.features }}
       - name: Check
-        run: cargo check
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.features }}" = "all" ]; then
+            cargo check --workspace --all-features --exclude bones-search
+            cargo check -p bones-search --features semantic-ort
+          else
+            cargo check
+          fi
 
   test:
-    name: Test Suite
-    runs-on: ubuntu-latest
+    name: Test Suite (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        features: [default, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-${{ matrix.os }}-${{ matrix.features }}
       - name: Run tests
-        run: cargo test
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.features }}" = "all" ]; then
+            cargo test --workspace --all-features --exclude bones-search
+            cargo test -p bones-search --features semantic-ort
+          else
+            cargo test
+          fi
 
   fmt:
     name: Rustfmt
@@ -40,21 +70,115 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+    name: Clippy (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        features: [default, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-${{ matrix.os }}-${{ matrix.features }}
       - name: Lint
-        run: cargo clippy -- -D warnings
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.features }}" = "all" ]; then
+            cargo clippy --workspace --all-features --exclude bones-search -- -D warnings
+            cargo clippy -p bones-search --features semantic-ort -- -D warnings
+          else
+            cargo clippy -- -D warnings
+          fi
 
-  bench:
-    name: Bench Check
+  sim:
+    name: Simulation Invariants
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Check benches
-        run: cargo bench --no-run
+      - name: Run deterministic simulation campaign
+        run: |
+          set -euo pipefail
+          cargo run -p bones-cli -- dev sim run --seeds 50 --agents 5 --rounds 24 --faults 0.1 --format json | tee sim-report.json
+      - name: Replay first failing seed
+        if: failure()
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import pathlib
+          import subprocess
+
+          report_path = pathlib.Path("sim-report.json")
+          if not report_path.exists():
+              print("sim-report.json not found; skipping replay")
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text())
+          seed = report.get("first_failure")
+          if seed is None:
+              print("No first_failure seed present; skipping replay")
+              raise SystemExit(0)
+
+          cmd = [
+              "cargo",
+              "run",
+              "-p",
+              "bones-cli",
+              "--",
+              "dev",
+              "sim",
+              "replay",
+              "--seed",
+              str(seed),
+              "--agents",
+              "5",
+              "--rounds",
+              "24",
+              "--faults",
+              "0.1",
+              "--format",
+              "json",
+          ]
+          print("Replaying failing seed:", seed)
+          with open("sim-replay.json", "w", encoding="utf-8") as out:
+              proc = subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT, check=False)
+          print("Replay exit code:", proc.returncode)
+          raise SystemExit(0)
+          PY
+      - name: Upload simulation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-results
+          path: |
+            sim-report.json
+            sim-replay.json
+          if-no-files-found: ignore
+
+  bench:
+    name: Benchmark SLO Gate
+    runs-on: ubuntu-latest
+    env:
+      BONES_BENCH_MAX_EVENTS: 25000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run large-repo benchmark
+        run: |
+          set -euo pipefail
+          cargo bench -p bones-core --bench large_repo -- --noplot 2>&1 | tee large-repo-bench.log
+      - name: Enforce large-repo SLO thresholds
+        run: python scripts/check_large_repo_slo.py large-repo-bench.log
+      - name: Upload benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-repo-bench-log
+          path: large-repo-bench.log
+          if-no-files-found: warn

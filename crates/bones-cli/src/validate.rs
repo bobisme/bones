@@ -244,6 +244,68 @@ pub fn validate_kind(s: &str) -> Result<Kind, ValidationError> {
     })
 }
 
+pub fn detect_secret_kind(s: &str) -> Option<&'static str> {
+    if s.contains("-----BEGIN ") && s.contains(" PRIVATE KEY-----") {
+        return Some("private_key_block");
+    }
+
+    if has_prefixed_run(s, "ghp_", 30) || has_prefixed_run(s, "github_pat_", 20) {
+        return Some("github_token");
+    }
+
+    if has_aws_access_key_pattern(s) {
+        return Some("aws_access_key_id");
+    }
+
+    None
+}
+
+pub fn validate_no_secrets(field: &'static str, s: &str) -> Result<(), ValidationError> {
+    if let Some(kind) = detect_secret_kind(s) {
+        return Err(ValidationError::new(
+            field,
+            "<redacted>",
+            format!("contains a high-confidence secret pattern ({kind})"),
+            "remove credentials from text or pass --allow-secret to override intentionally",
+            "secret_detected",
+        ));
+    }
+    Ok(())
+}
+
+fn has_prefixed_run(s: &str, prefix: &str, min_len: usize) -> bool {
+    let mut start = 0;
+    while let Some(idx) = s[start..].find(prefix) {
+        let abs = start + idx + prefix.len();
+        let run = s[abs..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .count();
+        if run >= min_len {
+            return true;
+        }
+        start = abs;
+    }
+    false
+}
+
+fn has_aws_access_key_pattern(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len().saturating_sub(19) {
+        if &bytes[i..i + 4] != b"AKIA" {
+            continue;
+        }
+        let tail = &bytes[i + 4..i + 20];
+        if tail
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +329,27 @@ mod tests {
         assert!(validate_label("backend_api").is_ok());
         assert!(validate_label("-bad").is_err());
         assert!(validate_label("bad label").is_err());
+    }
+
+    #[test]
+    fn detects_private_key_like_material() {
+        let s = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAA";
+        assert_eq!(detect_secret_kind(s), Some("private_key_block"));
+        assert!(validate_no_secrets("title", s).is_err());
+    }
+
+    #[test]
+    fn detects_github_and_aws_tokens() {
+        let gh = "token=ghp_abcdefghijklmnopqrstuvwxyz012345";
+        let aws = "AKIA1234567890ABCD12";
+        assert_eq!(detect_secret_kind(gh), Some("github_token"));
+        assert_eq!(detect_secret_kind(aws), Some("aws_access_key_id"));
+    }
+
+    #[test]
+    fn ignores_regular_text() {
+        let s = "normal project update text with no credentials";
+        assert_eq!(detect_secret_kind(s), None);
+        assert!(validate_no_secrets("description", s).is_ok());
     }
 }

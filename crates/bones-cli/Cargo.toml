@@ -17,10 +17,10 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 blake3 = { workspace = true }
-bones-core = { path = "../bones-core", version = "0.19.5" }
-bones-search = { path = "../bones-search", version = "0.19.5", features = ["semantic-ort"] }
-bones-sim = { path = "../bones-sim", version = "0.19.5" }
-bones-triage = { path = "../bones-triage", version = "0.19.5" }
+bones-core = { workspace = true }
+bones-search = { workspace = true, features = ["semantic-ort"] }
+bones-sim = { workspace = true }
+bones-triage = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }

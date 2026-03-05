@@ -264,7 +264,15 @@ fn update_requires_agent() {
         .args(["update", &id, "--title", "X"]);
     // Should fail without agent
     let output = cmd.output().unwrap();
-    assert!(!output.status.success() || true); // agent check
+    assert!(
+        !output.status.success(),
+        "update should fail without agent identity"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Agent identity required"),
+        "stderr should explain missing agent; got: {stderr}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -367,8 +375,7 @@ fn reopen_done_item_succeeds() {
     assert_eq!(get_item_state(dir.path(), &id), "open");
 }
 
-// Note: reopen_archived_item_succeeds is covered in unit tests (reopen.rs).
-// E2E archiving requires a future `bn archive` command not yet implemented.
+// Reopen-from-archived E2E coverage lives in e2e_safety.rs.
 
 #[test]
 fn reopen_already_open_fails() {

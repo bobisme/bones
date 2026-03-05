@@ -60,6 +60,10 @@ pub struct UpdateArgs {
     /// New kind (task|bug|goal).
     #[arg(long)]
     pub kind: Option<String>,
+
+    /// Allow writing high-confidence secret-like text.
+    #[arg(long)]
+    pub allow_secret: bool,
 }
 
 /// One applied field patch in the output.
@@ -312,6 +316,17 @@ pub fn run_update(
             )?;
             anyhow::bail!("{msg}");
         }
+        if args.allow_secret {
+            if let Some(kind) = validate::detect_secret_kind(title) {
+                tracing::warn!(
+                    secret_kind = kind,
+                    "allowing secret-like title update due to --allow-secret"
+                );
+            }
+        } else if let Err(e) = validate::validate_no_secrets("title", title) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
         pending.push((
             "title".to_string(),
             serde_json::Value::String(title.clone()),
@@ -319,6 +334,17 @@ pub fn run_update(
     }
 
     if let Some(ref desc) = args.description {
+        if args.allow_secret {
+            if let Some(kind) = validate::detect_secret_kind(desc) {
+                tracing::warn!(
+                    secret_kind = kind,
+                    "allowing secret-like description update due to --allow-secret"
+                );
+            }
+        } else if let Err(e) = validate::validate_no_secrets("description", desc) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
         pending.push((
             "description".to_string(),
             serde_json::Value::String(desc.clone()),
@@ -511,6 +537,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "update failed: {:?}", result.err());
@@ -532,6 +559,7 @@ mod tests {
             size: None,
             urgency: Some("urgent".to_string()),
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "update failed: {:?}", result.err());
@@ -553,6 +581,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: Some("bug".to_string()),
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_ok(), "update failed: {:?}", result.err());
@@ -574,6 +603,7 @@ mod tests {
             size: Some("l".to_string()),
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         run_update(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
@@ -606,6 +636,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -628,6 +659,7 @@ mod tests {
             size: Some("huge".to_string()),
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -645,6 +677,7 @@ mod tests {
             size: None,
             urgency: Some("super-urgent".to_string()),
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -662,6 +695,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: Some("chore".to_string()),
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -679,6 +713,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -710,6 +745,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, root);
         assert!(result.is_err());
@@ -726,6 +762,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(
@@ -753,6 +790,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         run_update(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
 
@@ -776,6 +814,46 @@ mod tests {
     }
 
     #[test]
+    fn update_blocks_secret_like_text_without_override() {
+        let (dir, item_id) = setup_project();
+        let args = UpdateArgs {
+            id: item_id,
+            ids: vec![],
+            title: Some("ghp_abcdefghijklmnopqrstuvwxyz012345".to_string()),
+            description: None,
+            size: None,
+            urgency: None,
+            kind: None,
+            allow_secret: false,
+        };
+        let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("secret pattern"));
+    }
+
+    #[test]
+    fn update_allows_secret_like_text_with_override() {
+        let (dir, item_id) = setup_project();
+        let args = UpdateArgs {
+            id: item_id.clone(),
+            ids: vec![],
+            title: Some("ghp_abcdefghijklmnopqrstuvwxyz012345".to_string()),
+            description: None,
+            size: None,
+            urgency: None,
+            kind: None,
+            allow_secret: true,
+        };
+        let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
+        assert!(result.is_ok());
+
+        let db_path = dir.path().join(".bones/bones.db");
+        let conn = db::open_projection(&db_path).unwrap();
+        let item = query::get_item(&conn, &item_id, false).unwrap().unwrap();
+        assert_eq!(item.title, "ghp_abcdefghijklmnopqrstuvwxyz012345");
+    }
+
+    #[test]
     fn update_not_bones_project() {
         let dir = TempDir::new().unwrap();
         let args = UpdateArgs {
@@ -786,6 +864,7 @@ mod tests {
             size: None,
             urgency: None,
             kind: None,
+            allow_secret: false,
         };
         let result = run_update(&args, Some("test-agent"), OutputMode::Json, dir.path());
         assert!(result.is_err());
@@ -794,7 +873,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Not a bones project")
-                || true
         );
     }
 }

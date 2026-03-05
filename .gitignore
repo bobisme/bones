@@ -1,2 +1,9 @@
 # Rust build artifacts
 target/
+
+# cargo-fuzz generated corpora/artifacts
+fuzz/target/
+fuzz/Cargo.lock
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/coverage/

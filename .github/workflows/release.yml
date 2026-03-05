@@ -104,14 +104,39 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          # Publish in dependency order. --no-verify skips rebuilding
-          # (already verified by the test + build jobs).
-          # Sleep between publishes to let crates.io index catch up.
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is required for tagged releases" >&2
+            exit 1
+          fi
+
+          crates=(bones-sqlite-vec bones-core bones-triage bones-search bones-sim bones-cli)
+
+          # Preflight: all crates must pass a dry-run before any publish starts.
+          for crate in "${crates[@]}"; do
+            echo "::group::Dry-run ${crate}"
+            cargo publish -p "${crate}" --dry-run --locked
+            echo "::endgroup::"
+          done
+
+          # Publish in dependency order; fail fast on any crate publish failure.
+          # A short retry loop handles transient crates.io/index hiccups.
           for crate in bones-sqlite-vec bones-core bones-triage bones-search bones-sim bones-cli; do
             echo "::group::Publishing ${crate}"
-            cargo publish -p "${crate}" --no-verify || {
-              echo "::warning::cargo publish -p ${crate} failed (may already be published)"
-            }
+            published=0
+            for attempt in 1 2 3; do
+              if cargo publish -p "${crate}" --locked; then
+                published=1
+                break
+              fi
+              if [ "${attempt}" -lt 3 ]; then
+                echo "publish retry ${attempt}/3 for ${crate} after transient failure"
+                sleep 30
+              fi
+            done
+            if [ "${published}" -ne 1 ]; then
+              echo "cargo publish -p ${crate} failed after retries" >&2
+              exit 1
+            fi
             echo "::endgroup::"
             sleep 30
           done

@@ -25,6 +25,7 @@ fn to_update_args(args: &UrgencyQuickArgs, urgency: &str) -> UpdateArgs {
         size: None,
         urgency: Some(urgency.to_string()),
         kind: None,
+        allow_secret: false,
     }
 }
 

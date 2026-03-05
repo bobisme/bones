@@ -109,6 +109,17 @@ impl<'conn> Projector<'conn> {
             .execute_batch("COMMIT")
             .context("commit projection transaction")?;
 
+        if stats.errors > 0 {
+            let reason = format!(
+                "project_batch encountered {} projection errors while applying {} events",
+                stats.errors,
+                events.len()
+            );
+            if let Err(err) = crate::db::mark_projection_dirty_from_connection(self.conn, &reason) {
+                tracing::warn!(error = %err, "failed to mark projection dirty after batch errors");
+            }
+        }
+
         Ok(stats)
     }
 
@@ -121,9 +132,25 @@ impl<'conn> Projector<'conn> {
     ///
     /// Returns an error if the projection fails.
     pub fn project_event(&self, event: &Event) -> Result<bool> {
-        let projected = match self.project_event_inner(event)? {
-            ProjectResult::Projected => true,
-            ProjectResult::Duplicate => false,
+        let projected = match self.project_event_inner(event) {
+            Ok(ProjectResult::Projected) => true,
+            Ok(ProjectResult::Duplicate) => false,
+            Err(err) => {
+                let reason = format!(
+                    "project_event failed hash={} type={}",
+                    event.event_hash, event.event_type
+                );
+                if let Err(mark_err) =
+                    crate::db::mark_projection_dirty_from_connection(self.conn, &reason)
+                {
+                    tracing::warn!(
+                        error = %mark_err,
+                        event_hash = %event.event_hash,
+                        "failed to mark projection dirty after single-event projection failure"
+                    );
+                }
+                return Err(err);
+            }
         };
 
         if let Err(err) = self.update_cursor_to_event_log_end(&event.event_hash) {
@@ -132,6 +159,11 @@ impl<'conn> Projector<'conn> {
                 error = %err,
                 "failed to update projection cursor after single-event projection"
             );
+            let reason = format!(
+                "cursor update failed after projecting hash={} error={err}",
+                event.event_hash
+            );
+            let _ = crate::db::mark_projection_dirty_from_connection(self.conn, &reason);
         }
 
         Ok(projected)

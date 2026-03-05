@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "bones-cli"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "bones-core"
-version = "0.19.5"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "bones-search"
-version = "0.19.5"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sim"
-version = "0.19.5"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sqlite-vec"
-version = "0.19.5"
+version = "0.21.1"
 dependencies = [
  "rusqlite",
  "sqlite-vec",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "bones-triage"
-version = "0.19.5"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2028,9 +2028,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ort"
-version = "2.0.0-rc.11"
+version = "2.0.0-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a5df903c0d2c07b56950f1058104ab0c8557159f2741782223704de9be73c3c"
+checksum = "d7de3af33d24a745ffb8fab904b13478438d1cd52868e6f17735ef6e1f8bf133"
 dependencies = [
  "ndarray",
  "ort-sys",
@@ -2041,9 +2041,9 @@ dependencies = [
 
 [[package]]
 name = "ort-sys"
-version = "2.0.0-rc.11"
+version = "2.0.0-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06503bb33f294c5f1ba484011e053bfa6ae227074bdb841e9863492dc5960d4b"
+checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
 dependencies = [
  "hmac-sha256",
  "lzma-rust2",
@@ -4074,9 +4074,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]

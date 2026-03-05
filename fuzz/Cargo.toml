@@ -1,0 +1,37 @@
+[package]
+name = "bones-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1.0"
+rusqlite = { version = "0.30", features = ["bundled"] }
+bones-core = { path = "../crates/bones-core", version = "0.21.0" }
+
+[[bin]]
+name = "parse_line"
+path = "fuzz_targets/parse_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "replay_state"
+path = "fuzz_targets/replay_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_event"
+path = "fuzz_targets/project_event.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -80,6 +80,10 @@ pub struct CreateArgs {
     /// Skip duplicate check entirely.
     #[arg(long)]
     pub force: bool,
+
+    /// Allow writing high-confidence secret-like text.
+    #[arg(long)]
+    pub allow_secret: bool,
 }
 
 impl CreateArgs {
@@ -233,6 +237,34 @@ pub fn run_create(
 
     // 5. Read description
     let description = read_description(&args.description)?;
+
+    if args.allow_secret {
+        if let Some(kind) = validate::detect_secret_kind(&args.title) {
+            tracing::warn!(
+                secret_kind = kind,
+                "allowing secret-like title due to --allow-secret"
+            );
+        }
+        if let Some(desc) = &description
+            && let Some(kind) = validate::detect_secret_kind(desc)
+        {
+            tracing::warn!(
+                secret_kind = kind,
+                "allowing secret-like description due to --allow-secret"
+            );
+        }
+    } else {
+        if let Err(e) = validate::validate_no_secrets("title", &args.title) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+        if let Some(desc) = &description
+            && let Err(e) = validate::validate_no_secrets("description", desc)
+        {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
+    }
 
     // 6. Find .bones directory
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
@@ -646,6 +678,7 @@ mod tests {
             description: Some("A test description".to_string()),
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("test-agent"), OutputMode::Json, root);
@@ -690,6 +723,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         // Just verify it doesn't error
@@ -726,6 +760,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Pretty, dir.path());
@@ -755,6 +790,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
@@ -784,6 +820,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
@@ -813,6 +850,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Pretty, root);
@@ -844,6 +882,7 @@ mod tests {
                 description: None,
                 blocks: vec![],
                 force: false,
+                allow_secret: false,
             };
             let result = run_create(&args, Some("agent"), OutputMode::Json, root);
             assert!(
@@ -890,6 +929,7 @@ mod tests {
             description: Some("Detailed description here".to_string()),
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Json, root);
@@ -932,6 +972,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result = run_create(&args, Some("agent"), OutputMode::Json, root);
@@ -962,6 +1003,67 @@ mod tests {
     }
 
     #[test]
+    fn create_blocks_secret_without_override() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        let args = CreateArgs {
+            title: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
+            description: None,
+            blocks: vec![],
+            force: false,
+            allow_secret: false,
+        };
+
+        let result = run_create(&args, Some("agent"), OutputMode::Json, root);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("secret pattern"));
+    }
+
+    #[test]
+    fn create_allows_secret_with_override() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        let args = CreateArgs {
+            title: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
+            description: None,
+            blocks: vec![],
+            force: false,
+            allow_secret: true,
+        };
+
+        let result = run_create(&args, Some("agent"), OutputMode::Json, root);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn create_with_duplicate_detection() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
@@ -985,6 +1087,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result1 = run_create(&args1, Some("agent"), OutputMode::Json, root);
@@ -1004,6 +1107,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result2 = run_create(&args2, Some("agent"), OutputMode::Json, root);
@@ -1042,6 +1146,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: false,
+            allow_secret: false,
         };
 
         let result1 = run_create(&args1, Some("agent"), OutputMode::Json, root);
@@ -1061,6 +1166,7 @@ mod tests {
             description: None,
             blocks: vec![],
             force: true, // Force skip duplicate check
+            allow_secret: false,
         };
 
         let result2 = run_create(&args2, Some("agent"), OutputMode::Json, root);

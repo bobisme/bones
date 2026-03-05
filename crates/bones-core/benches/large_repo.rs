@@ -386,9 +386,14 @@ fn emit_large_repo_slo_report() {
         black_box(report.event_count);
     });
     let rebuild_stats = summarize_latencies(&rebuild_samples);
+    let rebuild_slo_pass = rebuild_stats.p99 < std::time::Duration::from_secs(5);
     eprintln!(
-        "SLO tier={} op=full_rebuild p50={:?} p95={:?} p99={:?}",
-        TIER_M.name, rebuild_stats.p50, rebuild_stats.p95, rebuild_stats.p99
+        "SLO tier={} op=full_rebuild p50={:?} p95={:?} p99={:?} target=5s {}",
+        TIER_M.name,
+        rebuild_stats.p50,
+        rebuild_stats.p95,
+        rebuild_stats.p99,
+        if rebuild_slo_pass { "PASS" } else { "FAIL" },
     );
 }
 

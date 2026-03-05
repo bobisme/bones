@@ -1,6 +1,6 @@
 [package]
 name = "bones-sim"
-version = "0.19.5"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,7 +11,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bones-core = { path = "../bones-core", version = "0.19.5" }
+bones-core = { workspace = true }
 anyhow = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }

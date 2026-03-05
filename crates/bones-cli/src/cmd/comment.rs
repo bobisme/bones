@@ -43,6 +43,10 @@ pub struct CommentAddArgs {
 
     /// Comment body.
     pub body: String,
+
+    /// Allow writing high-confidence secret-like text.
+    #[arg(long)]
+    pub allow_secret: bool,
 }
 
 #[derive(Args, Debug)]
@@ -183,6 +187,17 @@ fn run_comment_add(
             ),
         )?;
         anyhow::bail!("{msg}");
+    }
+    if args.allow_secret {
+        if let Some(kind) = validate::detect_secret_kind(&args.body) {
+            tracing::warn!(
+                secret_kind = kind,
+                "allowing secret-like comment due to --allow-secret"
+            );
+        }
+    } else if let Err(e) = validate::validate_no_secrets("body", &args.body) {
+        render_error(output, &e.to_cli_error())?;
+        anyhow::bail!("{}", e.reason);
     }
 
     let bones_dir = find_bones_dir(project_root).ok_or_else(|| {
@@ -523,6 +538,7 @@ mod tests {
         let args = CommentAddArgs {
             id: item_id.clone(),
             body: "Root cause found".to_string(),
+            allow_secret: false,
         };
 
         run_comment_add(&args, Some("alice"), OutputMode::Json, &root)
@@ -546,6 +562,7 @@ mod tests {
         let args = CommentAddArgs {
             id: "cmt1".to_string(),
             body: "Using partial id".to_string(),
+            allow_secret: false,
         };
 
         run_comment_add(&args, Some("alice"), OutputMode::Json, &root)
@@ -566,6 +583,7 @@ mod tests {
         let add = CommentAddArgs {
             id: item_id.clone(),
             body: "first".to_string(),
+            allow_secret: false,
         };
         run_comment_add(&add, Some("alice"), OutputMode::Json, &root).expect("add comment");
 
@@ -575,5 +593,40 @@ mod tests {
             offset: None,
         };
         run_comments(&args, OutputMode::Json, &root).expect("comments listing should succeed");
+    }
+
+    #[test]
+    fn run_comment_add_blocks_secret_without_override() {
+        let (_dir, root, item_id) = setup_test_project();
+
+        let args = CommentAddArgs {
+            id: item_id,
+            body: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            allow_secret: false,
+        };
+
+        let result = run_comment_add(&args, Some("alice"), OutputMode::Json, &root);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("secret pattern"));
+    }
+
+    #[test]
+    fn run_comment_add_allows_secret_with_override() {
+        let (_dir, root, item_id) = setup_test_project();
+
+        let args = CommentAddArgs {
+            id: item_id.clone(),
+            body: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            allow_secret: true,
+        };
+
+        run_comment_add(&args, Some("alice"), OutputMode::Json, &root).expect("comment add");
+
+        let db_path = root.join(".bones/bones.db");
+        let conn = query::try_open_projection(&db_path)
+            .expect("open projection")
+            .expect("projection exists");
+        let comments = query::get_comments(&conn, &item_id, None, None).expect("load comments");
+        assert_eq!(comments.len(), 1);
     }
 }

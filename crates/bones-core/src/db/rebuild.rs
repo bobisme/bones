@@ -13,6 +13,26 @@ use crate::event::Event;
 use crate::shard::ShardManager;
 use std::io;
 
+const DEFAULT_REBUILD_BATCH_SIZE: usize = 4_000;
+
+fn rebuild_batch_size() -> usize {
+    std::env::var("BONES_REBUILD_BATCH_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_REBUILD_BATCH_SIZE)
+}
+
+fn configure_rebuild_pragmas(conn: &rusqlite::Connection) -> Result<()> {
+    conn.pragma_update(None, "temp_store", "MEMORY")
+        .context("PRAGMA temp_store = MEMORY")?;
+    conn.pragma_update(None, "cache_size", -131_072_i64)
+        .context("PRAGMA cache_size")?;
+    conn.pragma_update(None, "mmap_size", 268_435_456_i64)
+        .context("PRAGMA mmap_size")?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // RebuildReport
 // ---------------------------------------------------------------------------
@@ -89,6 +109,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
 
     // 2. Create fresh schema
     let conn = open_projection(db_path).context("create fresh projection database")?;
+    configure_rebuild_pragmas(&conn).context("configure rebuild sqlite pragmas")?;
     project::ensure_tracking_table(&conn).context("create tracking table")?;
 
     // 3. Read and replay all events in streaming batches
@@ -112,7 +133,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let mut last_event_hash = None;
     let mut total_byte_len = 0;
 
-    let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
+    let batch_size = rebuild_batch_size();
+    let mut current_batch: Vec<Event> = Vec::with_capacity(batch_size);
     let projector = project::Projector::new(&conn);
 
     let shard_line_iter = shard_mgr.replay_lines()?;
@@ -138,7 +160,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
                 last_event_hash = Some(event.event_hash.clone());
                 current_batch.push(event);
 
-                if current_batch.len() >= 1000 {
+                if current_batch.len() >= batch_size {
                     let stats = projector
                         .project_batch(&current_batch)
                         .context("project batch during rebuild")?;
@@ -182,6 +204,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     tracing::info!(
         event_count = total_projected,
         duplicates = total_duplicates,
+        batch_size,
         item_count,
         shard_count,
         elapsed_ms = elapsed.as_millis(),
