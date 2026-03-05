@@ -691,6 +691,8 @@ enum InputMode {
     FilterLabel,
     /// Blocker/link picker modal is open.
     BlockerModal,
+    /// Edit-link modal is open.
+    EditLinkModal,
 }
 
 // ---------------------------------------------------------------------------
@@ -1261,6 +1263,114 @@ impl BlockerModalState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Edit-link modal types
+// ---------------------------------------------------------------------------
+
+/// Direction of a link relative to the current bone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkDirection {
+    /// The link event is recorded on the current bone (`item_id = current`).
+    Outgoing,
+    /// The link event is recorded on the peer bone (`item_id = peer`).
+    Incoming,
+}
+
+/// Display type for a link in the edit-link modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditLinkType {
+    Blocks,
+    BlockedBy,
+    Related,
+    /// Current bone is a child of the peer (parent relationship).
+    ChildOf,
+    /// Peer bone is a child of the current bone.
+    ParentOf,
+}
+
+impl EditLinkType {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Blocks => "Blocks",
+            Self::BlockedBy => "Blocked by",
+            Self::Related => "Related",
+            Self::ChildOf => "Child of",
+            Self::ParentOf => "Parent of",
+        }
+    }
+
+    /// Cycle to next type. Parent/child types only cycle among themselves;
+    /// link types (Blocks/BlockedBy/Related) cycle among themselves.
+    const fn next(self) -> Self {
+        match self {
+            Self::Blocks => Self::BlockedBy,
+            Self::BlockedBy => Self::Related,
+            Self::Related => Self::Blocks,
+            Self::ChildOf => Self::ParentOf,
+            Self::ParentOf => Self::ChildOf,
+        }
+    }
+
+    const fn prev(self) -> Self {
+        match self {
+            Self::Blocks => Self::Related,
+            Self::BlockedBy => Self::Blocks,
+            Self::Related => Self::BlockedBy,
+            Self::ChildOf => Self::ParentOf,
+            Self::ParentOf => Self::ChildOf,
+        }
+    }
+}
+
+/// A single link row in the edit-link modal.
+#[derive(Debug, Clone)]
+struct EditableLink {
+    peer_id: String,
+    peer_title: Option<String>,
+    /// Original link type as stored in the event model.
+    original_type: String,
+    /// Original direction relative to the current bone.
+    original_direction: LinkDirection,
+    /// Current (proposed) display type.
+    current_type: EditLinkType,
+    /// Whether this link is marked for deletion.
+    deleted: bool,
+}
+
+impl EditableLink {
+    /// Whether this link has been changed from its original state.
+    fn is_changed(&self) -> bool {
+        self.deleted || self.display_type_for_original() != self.current_type
+    }
+
+    /// Compute the display type that corresponds to the original link.
+    fn display_type_for_original(&self) -> EditLinkType {
+        if self.original_type == "parent" {
+            match self.original_direction {
+                LinkDirection::Outgoing => EditLinkType::ChildOf,
+                LinkDirection::Incoming => EditLinkType::ParentOf,
+            }
+        } else if is_related_link(&self.original_type) {
+            EditLinkType::Related
+        } else {
+            match self.original_direction {
+                LinkDirection::Outgoing => EditLinkType::BlockedBy,
+                LinkDirection::Incoming => EditLinkType::Blocks,
+            }
+        }
+    }
+}
+
+/// State for the edit-link modal.
+struct EditLinkModalState {
+    /// The bone whose links we are editing.
+    item_id: String,
+    /// Editable link rows.
+    links: Vec<EditableLink>,
+    /// Currently selected row index.
+    list_idx: usize,
+}
+
 fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key: KeyEvent) {
     if lines.is_empty() {
         lines.push(String::new());
@@ -1725,6 +1835,8 @@ pub struct ListView {
     note_modal: Option<NoteModalState>,
     /// Blocker/link picker modal state when open.
     blocker_modal: Option<BlockerModalState>,
+    /// Edit-link modal state when open.
+    edit_link_modal: Option<EditLinkModalState>,
     /// Help overlay filter query.
     help_query: String,
     /// Cursor position within `help_query`.
@@ -1803,6 +1915,7 @@ impl ListView {
             create_modal_edit_item_id: None,
             note_modal: None,
             blocker_modal: None,
+            edit_link_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,
@@ -2108,6 +2221,7 @@ impl ListView {
             InputMode::CreateModal => self.handle_create_modal_key(key)?,
             InputMode::NoteModal => self.handle_note_modal_key(key)?,
             InputMode::BlockerModal => self.handle_blocker_modal_key(key)?,
+            InputMode::EditLinkModal => self.handle_edit_link_modal_key(key)?,
             InputMode::Help => self.handle_help_key(key),
             InputMode::FilterPopup => self.handle_filter_popup_key(key),
             InputMode::FilterLabel => self.handle_filter_label_key(key),
@@ -2150,7 +2264,7 @@ impl ListView {
                     }
                 }
             }
-            InputMode::FilterPopup | InputMode::Normal => {}
+            InputMode::FilterPopup | InputMode::Normal | InputMode::EditLinkModal => {}
         }
     }
 
@@ -2232,6 +2346,11 @@ impl ListView {
             // 'L' (shift+l) in detail pane opens the blocker/link picker.
             KeyCode::Char('L') if self.show_detail => {
                 self.open_blocker_modal();
+            }
+
+            // 'E' (shift+e) in detail pane opens the edit-link modal.
+            KeyCode::Char('E') if self.show_detail => {
+                self.open_edit_link_modal();
             }
 
             // Open detail pane for current selection.
@@ -2480,6 +2599,323 @@ impl ListView {
             }
         }
         self.reload()?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Edit-link modal
+    // -----------------------------------------------------------------------
+
+    fn open_edit_link_modal(&mut self) {
+        let Some(ref detail) = self.detail_item else {
+            self.set_status("No bone selected".to_string());
+            return;
+        };
+        let item_id = detail.id.clone();
+
+        let Ok(Some(conn)) = query::try_open_projection(&self.db_path) else {
+            self.set_status("Cannot open DB for edit-link modal".to_string());
+            return;
+        };
+
+        let mut links = Vec::new();
+
+        // Dependencies: current bone depends on peer (link recorded on current,
+        // target = peer). For "blocks" type this means "current is blocked by peer".
+        if let Ok(deps) = query::get_dependencies(&conn, &item_id) {
+            for dep in deps {
+                let title = query::get_item(&conn, &dep.depends_on_item_id, false)
+                    .ok()
+                    .flatten()
+                    .map(|i| i.title);
+                links.push(EditableLink {
+                    peer_id: dep.depends_on_item_id,
+                    peer_title: title,
+                    original_type: dep.link_type.clone(),
+                    original_direction: LinkDirection::Outgoing,
+                    current_type: if is_related_link(&dep.link_type) {
+                        EditLinkType::Related
+                    } else {
+                        EditLinkType::BlockedBy
+                    },
+                    deleted: false,
+                });
+            }
+        }
+
+        // Dependents: peer depends on current (link recorded on peer,
+        // target = current). For "blocks" type this means "current blocks peer".
+        if let Ok(deps) = query::get_dependents(&conn, &item_id) {
+            for dep in deps {
+                let title = query::get_item(&conn, &dep.item_id, false)
+                    .ok()
+                    .flatten()
+                    .map(|i| i.title);
+                links.push(EditableLink {
+                    peer_id: dep.item_id,
+                    peer_title: title,
+                    original_type: dep.link_type.clone(),
+                    original_direction: LinkDirection::Incoming,
+                    current_type: if is_related_link(&dep.link_type) {
+                        EditLinkType::Related
+                    } else {
+                        EditLinkType::Blocks
+                    },
+                    deleted: false,
+                });
+            }
+        }
+
+        // Parent relationship: current bone is a child of parent.
+        if let Some(ref parent_id) = detail.parent_id {
+            let title = query::get_item(&conn, parent_id, false)
+                .ok()
+                .flatten()
+                .map(|i| i.title);
+            links.push(EditableLink {
+                peer_id: parent_id.clone(),
+                peer_title: title,
+                original_type: "parent".to_string(),
+                original_direction: LinkDirection::Outgoing,
+                current_type: EditLinkType::ChildOf,
+                deleted: false,
+            });
+        }
+
+        // Children: bones that have current bone as their parent.
+        if let Ok(all_items) = query::list_items(
+            &conn,
+            &ItemFilter {
+                include_deleted: false,
+                sort: SortOrder::UpdatedDesc,
+                ..Default::default()
+            },
+        ) {
+            for child in all_items {
+                if child.parent_id.as_deref() == Some(&*item_id) {
+                    links.push(EditableLink {
+                        peer_id: child.item_id.clone(),
+                        peer_title: Some(child.title),
+                        original_type: "parent".to_string(),
+                        original_direction: LinkDirection::Incoming,
+                        current_type: EditLinkType::ParentOf,
+                        deleted: false,
+                    });
+                }
+            }
+        }
+
+        if links.is_empty() {
+            self.set_status("No links to edit".to_string());
+            return;
+        }
+
+        self.edit_link_modal = Some(EditLinkModalState {
+            item_id,
+            links,
+            list_idx: 0,
+        });
+        self.input_mode = InputMode::EditLinkModal;
+    }
+
+    fn handle_edit_link_modal_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(modal) = self.edit_link_modal.as_mut() else {
+            self.input_mode = InputMode::Normal;
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.edit_link_modal = None;
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !modal.links.is_empty() {
+                    modal.list_idx = (modal.list_idx + 1).min(modal.links.len() - 1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                modal.list_idx = modal.list_idx.saturating_sub(1);
+            }
+            KeyCode::Left => {
+                if let Some(link) = modal.links.get_mut(modal.list_idx) {
+                    if !link.deleted {
+                        link.current_type = link.current_type.prev();
+                    }
+                }
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                if let Some(link) = modal.links.get_mut(modal.list_idx) {
+                    if !link.deleted {
+                        link.current_type = link.current_type.next();
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(link) = modal.links.get_mut(modal.list_idx) {
+                    link.deleted = !link.deleted;
+                }
+            }
+            KeyCode::Enter => {
+                // Collect changes, then apply.
+                let item_id = modal.item_id.clone();
+                let changes: Vec<EditableLink> = modal
+                    .links
+                    .iter()
+                    .filter(|l| l.is_changed())
+                    .cloned()
+                    .collect();
+                self.edit_link_modal = None;
+                self.input_mode = InputMode::Normal;
+                self.apply_edit_link_changes(&item_id, &changes)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn apply_edit_link_changes(
+        &mut self,
+        current_id: &str,
+        changes: &[EditableLink],
+    ) -> Result<()> {
+        let mut count = 0usize;
+        for link in changes {
+            let is_hierarchy = link.original_type == "parent";
+
+            if is_hierarchy {
+                // Parent/child relationships use the `parent` field, not link events.
+                match link.original_direction {
+                    LinkDirection::Outgoing => {
+                        // Current is child of peer — clear current's parent.
+                        if link.deleted || link.current_type == EditLinkType::ParentOf {
+                            actions::clear_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                current_id,
+                            )?;
+                        }
+                        if !link.deleted && link.current_type == EditLinkType::ParentOf {
+                            // Flip: peer becomes child of current.
+                            actions::set_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                &link.peer_id,
+                                current_id,
+                            )?;
+                        }
+                    }
+                    LinkDirection::Incoming => {
+                        // Peer is child of current — clear peer's parent.
+                        if link.deleted || link.current_type == EditLinkType::ChildOf {
+                            actions::clear_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                &link.peer_id,
+                            )?;
+                        }
+                        if !link.deleted && link.current_type == EditLinkType::ChildOf {
+                            // Flip: current becomes child of peer.
+                            actions::set_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                current_id,
+                                &link.peer_id,
+                            )?;
+                        }
+                    }
+                }
+            } else {
+                // Link-based relationships (blocks, related_to).
+                // First, remove the original link.
+                match link.original_direction {
+                    LinkDirection::Outgoing => {
+                        actions::remove_link(
+                            &self.project_root,
+                            &self.db_path,
+                            &self.agent,
+                            current_id,
+                            &link.peer_id,
+                            Some(&link.original_type),
+                        )?;
+                    }
+                    LinkDirection::Incoming => {
+                        actions::remove_link(
+                            &self.project_root,
+                            &self.db_path,
+                            &self.agent,
+                            &link.peer_id,
+                            current_id,
+                            Some(&link.original_type),
+                        )?;
+                    }
+                }
+
+                // If not deleted, add the new link.
+                if !link.deleted {
+                    match link.current_type {
+                        EditLinkType::BlockedBy => {
+                            actions::add_link(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                current_id,
+                                &link.peer_id,
+                                "blocks",
+                            )?;
+                        }
+                        EditLinkType::Blocks => {
+                            actions::add_link(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                &link.peer_id,
+                                current_id,
+                                "blocks",
+                            )?;
+                        }
+                        EditLinkType::Related => {
+                            actions::add_link(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                current_id,
+                                &link.peer_id,
+                                "related_to",
+                            )?;
+                        }
+                        EditLinkType::ChildOf => {
+                            actions::set_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                current_id,
+                                &link.peer_id,
+                            )?;
+                        }
+                        EditLinkType::ParentOf => {
+                            actions::set_parent(
+                                &self.project_root,
+                                &self.db_path,
+                                &self.agent,
+                                &link.peer_id,
+                                current_id,
+                            )?;
+                        }
+                    }
+                }
+            }
+            count += 1;
+        }
+
+        if count > 0 {
+            self.set_status(format!("Updated {count} link(s)"));
+            self.reload()?;
+        }
         Ok(())
     }
 
@@ -3887,6 +4323,151 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
     );
 }
 
+fn render_edit_link_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect) {
+    let Some(modal) = app.edit_link_modal.as_ref() else {
+        return;
+    };
+
+    let modal_width = area.width.saturating_sub(8).min(80);
+    let modal_height = area.height.saturating_sub(6).min(24);
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let modal_area = Rect::new(x, y, modal_width, modal_height);
+
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(border::ROUNDED)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Edit Links ")
+        .title_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    // Split inner into: list (rest), footer (1).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(2), Constraint::Length(1)])
+        .split(inner);
+
+    let list_height = chunks[0].height as usize;
+    let scroll = if modal.list_idx >= list_height {
+        modal.list_idx - list_height + 1
+    } else {
+        0
+    };
+
+    let col_id_w = 12u16;
+    let col_type_w = 16u16;
+    let col_title_w = modal_width
+        .saturating_sub(4)
+        .saturating_sub(col_id_w)
+        .saturating_sub(col_type_w);
+
+    let rows: Vec<Row<'_>> = modal
+        .links
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_height)
+        .map(|(i, link)| {
+            let selected = i == modal.list_idx;
+            let changed = link.is_changed();
+
+            let base_fg = if link.deleted {
+                Color::DarkGray
+            } else if changed {
+                Color::Yellow
+            } else {
+                Color::Gray
+            };
+
+            let id_style = if selected {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(base_fg)
+            };
+            let title_style = if selected && !link.deleted {
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(base_fg)
+            };
+
+            let prefix = if selected { "> " } else { "  " };
+            let title_text = link
+                .peer_title
+                .as_deref()
+                .unwrap_or("(untitled)")
+                .to_string();
+
+            let type_text = if link.deleted {
+                "DELETED".to_string()
+            } else if selected {
+                format!("\u{25c4} {} \u{25ba}", link.current_type.label())
+            } else {
+                link.current_type.label().to_string()
+            };
+
+            let type_style = if link.deleted {
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD)
+            } else if changed {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(base_fg)
+            };
+
+            Row::new(vec![
+                Cell::from(format!("{prefix}{}", link.peer_id)).style(id_style),
+                Cell::from(title_text).style(title_style),
+                Cell::from(type_text).style(type_style),
+            ])
+        })
+        .collect();
+
+    frame.render_widget(
+        Table::new(
+            rows,
+            [
+                Constraint::Length(col_id_w),
+                Constraint::Min(col_title_w),
+                Constraint::Length(col_type_w),
+            ],
+        )
+        .block(Block::default().borders(Borders::TOP)),
+        chunks[0],
+    );
+
+    // Footer.
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Enter", Style::default().fg(Color::Cyan)),
+            Span::styled(": save  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("d", Style::default().fg(Color::Cyan)),
+            Span::styled(": delete  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("\u{2190}/\u{2192}", Style::default().fg(Color::Cyan)),
+            Span::styled(": type  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::Cyan)),
+            Span::styled(": navigate  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Cyan)),
+            Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
+        ])),
+        chunks[1],
+    );
+}
+
 fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
         ("j/k", "list", "move selection"),
@@ -3907,6 +4488,7 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
         ("e", "detail", "edit selected bone"),
         ("c", "detail", "add comment"),
         ("L", "detail", "add link/blocker/parent"),
+        ("E", "detail", "edit/remove links"),
         ("x", "detail", "done/reopen with note"),
         ("Tab", "create", "next field"),
         ("Shift+Tab", "create", "previous field"),
@@ -4127,6 +4709,9 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
     if app.input_mode == InputMode::BlockerModal {
         render_blocker_modal(frame, app, area);
     }
+    if app.input_mode == InputMode::EditLinkModal {
+        render_edit_link_modal(frame, app, area);
+    }
     if app.input_mode == InputMode::Help {
         render_help_overlay(frame, app, area);
     }
@@ -4194,6 +4779,18 @@ fn build_status_bar(app: &ListView, width: u16) -> Line<'static> {
             spans.push(Span::styled(": navigate  ", dim_style));
             spans.push(Span::styled("←/→", key_style));
             spans.push(Span::styled(": type  ", dim_style));
+            spans.push(Span::styled("esc", key_style));
+            spans.push(Span::styled(": cancel", dim_style));
+        }
+        InputMode::EditLinkModal => {
+            spans.push(Span::styled("enter", key_style));
+            spans.push(Span::styled(": save  ", dim_style));
+            spans.push(Span::styled("d", key_style));
+            spans.push(Span::styled(": delete  ", dim_style));
+            spans.push(Span::styled("←/→", key_style));
+            spans.push(Span::styled(": type  ", dim_style));
+            spans.push(Span::styled("j/k", key_style));
+            spans.push(Span::styled(": navigate  ", dim_style));
             spans.push(Span::styled("esc", key_style));
             spans.push(Span::styled(": cancel", dim_style));
         }
@@ -5254,6 +5851,7 @@ mod tests {
             create_modal_edit_item_id: None,
             note_modal: None,
             blocker_modal: None,
+            edit_link_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,
@@ -5362,6 +5960,7 @@ mod tests {
             create_modal_edit_item_id: None,
             note_modal: None,
             blocker_modal: None,
+            edit_link_modal: None,
             help_query: String::new(),
             help_cursor: 0,
             needs_terminal_refresh: false,
