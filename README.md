@@ -1,10 +1,12 @@
 # bones
 
-![bones UI](images/ui.webp)
-
 bones is a CRDT-native issue tracker for distributed human and agent collaboration.
 
+![The Ossuary of the Unfinished](images/bones-embed.jpg)
+
 It is designed for teams where multiple people and coding agents are editing the same backlog concurrently, and where machine-readable CLI output matters as much as human UX.
+
+![bones UI](images/ui.webp)
 
 ## Why bones exists
 
@@ -177,5 +179,3 @@ The default configuration passes 100,000+ seeds with 10% fault rates.
 - When available, `bn` reports vector acceleration in capability/health output.
 - If unavailable, semantic search still works via Rust-side KNN over stored embeddings.
 - Set `BONES_SQLITE_VEC_AUTO=0` to disable auto-registration for troubleshooting.
-
-![bones](images/gh-embed.jpg)
