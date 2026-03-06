@@ -57,7 +57,7 @@ pub struct TriageSnapshot {
 }
 
 /// Number of days without an update before a "doing" item is considered stale.
-const STALE_DOING_THRESHOLD_DAYS: f64 = 3.0;
+const STALE_DOING_THRESHOLD_DAYS: f64 = 1.0;
 
 #[derive(Debug, Clone)]
 struct ChainPressureResult {
