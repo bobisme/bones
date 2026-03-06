@@ -49,10 +49,15 @@ pub struct TriageSnapshot {
     pub ranked: Vec<RankedItem>,
     pub unblocked_ranked: Vec<RankedItem>,
     pub needs_decomposition: Vec<RankedItem>,
+    /// Items in "doing" state that haven't been updated recently.
+    pub stale_in_progress: Vec<RankedItem>,
     pub cycles: Vec<Vec<String>>,
     /// IDs suppressed due to punt (directly punted or descendants of punted goals).
     pub punt_suppressed: HashSet<String>,
 }
+
+/// Number of days without an update before a "doing" item is considered stale.
+const STALE_DOING_THRESHOLD_DAYS: f64 = 3.0;
 
 #[derive(Debug, Clone)]
 struct ChainPressureResult {
@@ -92,6 +97,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
             ranked: Vec::new(),
             unblocked_ranked: Vec::new(),
             needs_decomposition: Vec::new(),
+            stale_in_progress: Vec::new(),
             cycles,
             punt_suppressed: HashSet::new(),
         });
@@ -333,10 +339,31 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
     needs_decomposition.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
     needs_decomposition.truncate(5);
 
+    // Items in "doing" state that haven't been updated in a while.
+    let stale_threshold_us = (STALE_DOING_THRESHOLD_DAYS * MICROS_PER_DAY) as i64;
+    let mut stale_in_progress: Vec<RankedItem> = ranked
+        .iter()
+        .filter(|item| {
+            item.state == "doing"
+                && (now_us - item.updated_at_us) > stale_threshold_us
+                && !punt_suppressed.contains(&item.id)
+        })
+        .cloned()
+        .collect();
+    stale_in_progress.sort_by(|a, b| {
+        // Oldest updates first (most stale at top).
+        a.updated_at_us
+            .cmp(&b.updated_at_us)
+            .then_with(|| b.score.total_cmp(&a.score))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    stale_in_progress.truncate(5);
+
     Ok(TriageSnapshot {
         ranked,
         unblocked_ranked,
         needs_decomposition,
+        stale_in_progress,
         cycles,
         punt_suppressed,
     })

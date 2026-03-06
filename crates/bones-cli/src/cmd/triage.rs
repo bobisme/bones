@@ -64,6 +64,7 @@ pub fn run_triage(
         .filter(|item| {
             item.blocked_by_active == 0
                 && item.unblocks_active > 0
+                && item.state != "doing"
                 && !snapshot.punt_suppressed.contains(&item.id)
         })
         .collect();
@@ -81,6 +82,7 @@ pub fn run_triage(
         .filter(|item| {
             item.unblocks_active > 0
                 && item.blocked_by_active > 0
+                && item.state != "doing"
                 && !snapshot.punt_suppressed.contains(&item.id)
         })
         .collect();
@@ -105,6 +107,8 @@ pub fn run_triage(
 
     let needs_decomposition: Vec<&RankedItem> = snapshot.needs_decomposition.iter().collect();
 
+    let stale_in_progress: Vec<&RankedItem> = snapshot.stale_in_progress.iter().collect();
+
     let cycles: Vec<Vec<String>> = snapshot.cycles.iter().take(5).cloned().collect();
 
     let title_map: HashMap<String, String> = snapshot
@@ -118,12 +122,14 @@ pub fn run_triage(
         .map(|item| (item.id.clone(), item.score))
         .collect();
 
+    let now_us = chrono::Utc::now().timestamp_micros();
     let rows = build_rows(
         &top_picks,
         &actionable_blockers,
         &blocked_hubs,
         &quick_wins,
         &needs_decomposition,
+        &stale_in_progress,
         &cycles,
         &title_map,
         &score_map,
@@ -140,7 +146,9 @@ pub fn run_triage(
                 &blocked_hubs,
                 &quick_wins,
                 &needs_decomposition,
+                &stale_in_progress,
                 &cycles,
+                now_us,
             )
         },
         |_, w| {
@@ -151,7 +159,9 @@ pub fn run_triage(
                 &blocked_hubs,
                 &quick_wins,
                 &needs_decomposition,
+                &stale_in_progress,
                 &cycles,
+                now_us,
             )
         },
     )
@@ -164,6 +174,7 @@ fn build_rows(
     blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
+    stale_in_progress: &[&RankedItem],
     cycles: &[Vec<String>],
     title_map: &HashMap<String, String>,
     score_map: &HashMap<String, f64>,
@@ -175,6 +186,7 @@ fn build_rows(
     push_rows(&mut rows, blocked_hubs, "blocked_hub");
     push_rows(&mut rows, quick_wins, "quick_win");
     push_rows(&mut rows, needs_decomposition, "needs_decomposition");
+    push_rows(&mut rows, stale_in_progress, "stale_in_progress");
 
     for cycle in cycles {
         for id in cycle {
@@ -204,6 +216,7 @@ fn push_rows(rows: &mut Vec<TriageRow>, section_rows: &[&RankedItem], section: &
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_triage_human(
     w: &mut dyn Write,
     top_picks: &[&RankedItem],
@@ -211,7 +224,9 @@ fn render_triage_human(
     blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
+    stale_in_progress: &[&RankedItem],
     cycles: &[Vec<String>],
+    now_us: i64,
 ) -> std::io::Result<()> {
     let color = pretty_color_enabled();
     pretty_section(w, "Triage report")?;
@@ -296,6 +311,28 @@ fn render_triage_human(
     }
     writeln!(w)?;
 
+    write_section_heading(w, "Stale In-Progress", color)?;
+    if stale_in_progress.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        for item in stale_in_progress {
+            write_item_line(w, item, color)?;
+            writeln!(
+                w,
+                "    {}",
+                style_if(
+                    color,
+                    &format!(
+                        "doing for {}",
+                        format_stale_duration(now_us, item.updated_at_us)
+                    ),
+                    YELLOW
+                )
+            )?;
+        }
+    }
+    writeln!(w)?;
+
     write_section_heading(w, "Cycles", color)?;
     if cycles.is_empty() {
         writeln!(w, "  (none)")?;
@@ -359,6 +396,7 @@ fn write_item_line(w: &mut dyn Write, item: &RankedItem, color: bool) -> std::io
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_triage_text(
     w: &mut dyn Write,
     top_picks: &[&RankedItem],
@@ -366,7 +404,9 @@ fn render_triage_text(
     blocked_hubs: &[&RankedItem],
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
+    stale_in_progress: &[&RankedItem],
     cycles: &[Vec<String>],
+    now_us: i64,
 ) -> std::io::Result<()> {
     writeln!(w, "SECTION\tID\tSTATUS\tSCORE\tTITLE")?;
     for item in top_picks {
@@ -418,6 +458,16 @@ fn render_triage_text(
             item.title.replace('\t', " ")
         )?;
     }
+    for item in stale_in_progress {
+        writeln!(
+            w,
+            "stale_in_progress\t{}\tdoing for {}\t{}\t{}",
+            item.id,
+            format_stale_duration(now_us, item.updated_at_us),
+            format_score(item.score),
+            item.title.replace('\t', " ")
+        )?;
+    }
 
     writeln!(w)?;
     writeln!(w, "CYCLES\tINDEX\tPATH")?;
@@ -434,6 +484,7 @@ fn render_triage_text(
         && blocked_hubs.is_empty()
         && quick_wins.is_empty()
         && needs_decomposition.is_empty()
+        && stale_in_progress.is_empty()
         && cycles.is_empty()
     {
         writeln!(w, "advice  no-triage-items")?;
@@ -453,6 +504,17 @@ fn format_score(score: f64) -> String {
 
 fn is_small_size(size: Option<&str>) -> bool {
     matches!(size, Some("xs" | "s"))
+}
+
+fn format_stale_duration(now_us: i64, updated_at_us: i64) -> String {
+    let delta_us = (now_us - updated_at_us).max(0);
+    let hours = delta_us / 3_600_000_000;
+    let days = hours / 24;
+    if days > 0 {
+        format!("{days}d {}h", hours % 24)
+    } else {
+        format!("{hours}h")
+    }
 }
 
 #[cfg(test)]
@@ -547,12 +609,16 @@ mod tests {
             ("bn-c2".to_string(), 0.2),
         ]);
 
+        let stale: Vec<RankedItem> = vec![];
+        let stale_refs: Vec<&RankedItem> = stale.iter().collect();
+
         let rows = build_rows(
             &top_refs,
             &actionable_refs,
             &hub_refs,
             &quick_refs,
             &decomp_refs,
+            &stale_refs,
             &cycles,
             &title_map,
             &score_map,
@@ -581,6 +647,9 @@ mod tests {
         let quick_refs: Vec<&RankedItem> = quick.iter().collect();
         let decomp_refs: Vec<&RankedItem> = decomp.iter().collect();
 
+        let stale: Vec<RankedItem> = vec![];
+        let stale_refs: Vec<&RankedItem> = stale.iter().collect();
+
         let mut buf = Vec::new();
         render_triage_text(
             &mut buf,
@@ -589,7 +658,9 @@ mod tests {
             &hub_refs,
             &quick_refs,
             &decomp_refs,
+            &stale_refs,
             &cycles,
+            100,
         )
         .expect("render triage text");
         let out = String::from_utf8(buf).expect("utf8");
@@ -633,6 +704,7 @@ mod tests {
             &hub_refs,
             &empty_refs,
             &empty_refs,
+            &empty_refs,
             &[],
             &title_map,
             &score_map,
@@ -658,7 +730,9 @@ mod tests {
             &hub_refs,
             &empty_refs,
             &empty_refs,
+            &empty_refs,
             &[],
+            100,
         )
         .expect("render human");
         let out = String::from_utf8(buf).expect("utf8");
