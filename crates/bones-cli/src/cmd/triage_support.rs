@@ -34,6 +34,7 @@ const PAGERANK_CACHE_FILE: &str = "triage_pagerank.json";
 pub struct RankedItem {
     pub id: String,
     pub title: String,
+    pub state: String,
     pub size: Option<String>,
     pub urgency: Urgency,
     pub score: f64,
@@ -284,6 +285,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
             RankedItem {
                 id: item.item_id.clone(),
                 title: item.title.clone(),
+                state: item.state.clone(),
                 size: item.size.clone(),
                 urgency,
                 score,
@@ -305,7 +307,9 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
 
     let unblocked_ranked = ranked
         .iter()
-        .filter(|item| item.blocked_by_active == 0 && item.urgency != Urgency::Punt)
+        .filter(|item| {
+            item.blocked_by_active == 0 && item.urgency != Urgency::Punt && item.state != "doing"
+        })
         .cloned()
         .collect();
 
