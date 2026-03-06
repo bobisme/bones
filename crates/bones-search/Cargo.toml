@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 description = "Hybrid search (lexical BM25 + semantic embeddings + structural graph) for bones"
 readme = "README.md"
+include = ["src/**/*", "Cargo.toml", "README.md"]
 
 [lints]
 workspace = true

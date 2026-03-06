@@ -6,6 +6,7 @@ license.workspace = true
 description = "CLI binary for bones issue tracker"
 repository.workspace = true
 readme = "README.md"
+include = ["src/**/*", "Cargo.toml", "Cargo.lock", "README.md", "images/bones-embed.jpg", "images/ui.webp"]
 
 [[bin]]
 name = "bn"
