@@ -194,7 +194,17 @@ All commands support JSON output with `--format json` for parsing. If a command 
 - Post progress comments during work for crash recovery.
 - **Run checks before committing**: `just check` (or your project's build/test command). Fix any failures before proceeding.
 - After finishing a bone, follow [finish.md](.agents/edict/finish.md). **Workers: do NOT push** — the lead handles merges and pushes.
-- **Install locally** after releasing: `maw exec default -- just install`
+
+### Release Instructions
+
+- Bump the version of all crates
+- Regenerate the Cargo.lock
+- Add notes to CHANGELOG.md
+- If the README.md references the version, update it.
+- Commit
+- Tag and push: `maw release vX.Y.Z`
+- use `gh release create vX.Y.Z --notes "..."`
+- Install locally: `maw exec default -- just install`
 
 ### Identity
 

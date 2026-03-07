@@ -10,7 +10,16 @@ type = ["cli", "tui"]
 languages = ["rust"]
 default_agent = "bones-dev"
 channel = "bones"
-install_command = "maw exec default -- just install"
+release_instructions = """
+- Bump the version of all crates
+- Regenerate the Cargo.lock
+- Add notes to CHANGELOG.md
+- If the README.md references the version, update it.
+- Commit
+- Tag and push: `maw release vX.Y.Z`
+- use `gh release create vX.Y.Z --notes "..."`
+- Install locally: `maw exec default -- just install`
+"""
 
 # Companion tools to enable
 [tools]
@@ -18,7 +27,7 @@ beads = true
 maw = true
 crit = true
 botbus = true
-botty = true
+vessel = true
 
 # Code review configuration
 [review]
