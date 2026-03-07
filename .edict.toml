@@ -11,6 +11,7 @@ languages = ["rust"]
 default_agent = "bones-dev"
 channel = "bones"
 release_instructions = """
+- Make sure 'just check' passes
 - Bump the version of all crates
 - Regenerate the Cargo.lock
 - Add notes to CHANGELOG.md

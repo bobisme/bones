@@ -197,6 +197,7 @@ All commands support JSON output with `--format json` for parsing. If a command 
 
 ### Release Instructions
 
+- Make sure 'just check' passes
 - Bump the version of all crates
 - Regenerate the Cargo.lock
 - Add notes to CHANGELOG.md
