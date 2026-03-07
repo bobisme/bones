@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.22.1"
+version = "0.22.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A CRDT-native issue tracker for distributed teams and AI agents"
@@ -25,11 +25,11 @@ unnecessary_wraps = "allow"                  # main returning anyhow::Result is 
 [workspace.dependencies]
 anyhow = "1.0"
 blake3 = "1.5"
-bones-core = { path = "crates/bones-core", version = "0.22.1" }
-bones-search = { path = "crates/bones-search", version = "0.22.1" }
-bones-sim = { path = "crates/bones-sim", version = "0.22.1" }
-bones-sqlite-vec = { path = "crates/bones-sqlite-vec", version = "0.22.1" }
-bones-triage = { path = "crates/bones-triage", version = "0.22.1" }
+bones-core = { path = "crates/bones-core", version = "0.22.2" }
+bones-search = { path = "crates/bones-search", version = "0.22.2" }
+bones-sim = { path = "crates/bones-sim", version = "0.22.2" }
+bones-sqlite-vec = { path = "crates/bones-sqlite-vec", version = "0.22.2" }
+bones-triage = { path = "crates/bones-triage", version = "0.22.2" }
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive"] }
 fs2 = "0.4"
