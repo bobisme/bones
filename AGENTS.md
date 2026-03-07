@@ -1,7 +1,7 @@
 # bones
 
 Project type: cli, tui
-Tools: `beads`, `maw`, `crit`, `botbus`, `botty`
+Tools: `bones`, `maw`, `seal`, `rite`, `vessel`
 
 ## Project Overview
 
