@@ -52,7 +52,24 @@ use tracing::info;
     version,
     about = "bones: pile-first tracker for humans and agents",
     long_about = None,
-    after_help = "QUICK REFERENCE:\n    bn triage                # triage report (default)\n    bn triage dup <id>       # duplicate check for one bone\n    bn triage plan           # parallel execution layers\n    bn bone log <id>         # bone event timeline\n    bn bone assign <id> <a>  # assign bone to agent\n    bn bone comment add <id> <text>\n    bn admin verify          # verify event/manifests\n    bn data export --output events.jsonl\n    bn dev sim run --seeds 100\n    bn ui                    # open interactive UI"
+    after_help = "QUICK REFERENCE:\n\n  \
+    Create a bone\n\n      \
+    bn create --title \"Fix login bug\"\n\n  \
+    Start work on a bone\n\n      \
+    bn do <id>\n\n  \
+    Mark a bone as done\n\n      \
+    bn done <id>\n\n  \
+    Update a bone field\n\n      \
+    bn update <id> --title \"New title\"\n\n  \
+    Add a comment\n\n      \
+    bn bone comment add <id> \"progress note\"\n\n  \
+    Get next recommended bone\n\n      \
+    bn next\n\n  \
+    Get next N bones for dispatch\n\n      \
+    bn next N\n\n  \
+    Run triage report\n\n      \
+    bn triage\n\n  \
+    See all commands: bn tldr"
 )]
 struct Cli {
     /// Enable verbose logging.
@@ -647,6 +664,13 @@ enum Commands {
 
     #[command(
         next_help_heading = "Read",
+        about = "Show quick command reference",
+        long_about = "Print a compact quick reference of the most common bn commands."
+    )]
+    Tldr,
+
+    #[command(
+        next_help_heading = "Read",
         about = "Open interactive UI",
         long_about = "Open the interactive terminal user interface for browsing and triaging work.",
         after_help = "EXAMPLES:\n    # Open the interactive UI\n    bn ui"
@@ -1024,6 +1048,64 @@ fn setup_merge_tool() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn print_tldr() {
+    println!(
+        "\
+QUICK REFERENCE
+
+  Create a bone
+
+      bn create --title \"Fix login bug\"
+      bn create --title \"Launch v2\" --kind goal
+      bn create --title \"Sub-task\" --parent <goal-id>
+
+  Start work on a bone
+
+      bn do <id>
+
+  Mark a bone as done
+
+      bn done <id>
+
+  Update a bone field
+
+      bn update <id> --title \"New title\"
+      bn update <id> --urgency urgent
+
+  Add a comment
+
+      bn bone comment add <id> \"progress note\"
+
+  Get next recommended bone
+
+      bn next
+
+  Get next N bones for dispatch
+
+      bn next N
+
+  Run triage report
+
+      bn triage
+
+  List bones
+
+      bn list                              # open bones (default)
+      bn list --all                        # all states
+      bn list --state doing                # filter by state
+      bn list --sort newest                # sort by creation
+
+  Show bone details
+
+      bn show <id>
+
+  Search bones
+
+      bn search \"query\"
+"
+    );
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let is_tui = matches!(cli.command, Commands::Ui | Commands::Tui);
@@ -1047,6 +1129,7 @@ fn main() -> anyhow::Result<()> {
     let needs_project = !matches!(
         cli.command,
         Commands::Init(_)
+            | Commands::Tldr
             | Commands::Completions(_)
             | Commands::MergeTool { .. }
             | Commands::MergeDriver { .. }
@@ -1437,6 +1520,10 @@ fn main() -> anyhow::Result<()> {
             timing::timed("cmd.sim", || cmd::sim::run_sim(args, output, &project_root))
         }
 
+        Commands::Tldr => timing::timed("cmd.tldr", || {
+            print_tldr();
+            Ok(())
+        }),
         Commands::Ui => timing::timed("cmd.ui", || tui::run_tui(&project_root)),
         Commands::Tui => timing::timed("cmd.ui", || tui::run_tui(&project_root)),
         Commands::MergeDriver { base, ours, theirs } => timing::timed("cmd.merge-driver", || {
