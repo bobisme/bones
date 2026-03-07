@@ -1603,8 +1603,10 @@ mod tests {
     fn default_output_uses_auto_detection() {
         let cli = Cli::parse_from(["bn", "list"]);
         assert!(!cli.json);
-        // In test (non-TTY), resolve_output_mode defaults to Text.
-        assert!(cli.output_mode().is_text());
+        // Use the deterministic inner function to avoid env var races.
+        // In non-TTY, resolve_output_mode defaults to Text.
+        let mode = output::resolve_output_mode_for_test(cli.format, cli.json, None, false);
+        assert!(mode.is_text());
     }
 
     #[test]

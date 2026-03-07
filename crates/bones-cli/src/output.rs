@@ -590,6 +590,17 @@ pub fn resolve_output_mode(format_flag: Option<OutputMode>, json_flag: bool) -> 
     resolve_output_mode_inner(format_flag, json_flag, env_val.as_deref(), is_tty)
 }
 
+/// Deterministic version for tests — bypasses env vars and TTY detection.
+#[cfg(test)]
+pub fn resolve_output_mode_for_test(
+    format_flag: Option<OutputMode>,
+    json_flag: bool,
+    format_env: Option<&str>,
+    is_tty: bool,
+) -> OutputMode {
+    resolve_output_mode_inner(format_flag, json_flag, format_env, is_tty)
+}
+
 /// Trait implemented by any CLI result type that can be rendered in all modes.
 ///
 /// Implementors provide rendering methods used by pretty/text/json dispatch.
