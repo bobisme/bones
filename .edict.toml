@@ -1,0 +1,47 @@
+# Botbox project configuration
+# See: https://github.com/anthropics/botbox
+
+version = "1.0.16"
+push_main = false
+
+[project]
+name = "bones"
+type = ["cli", "tui"]
+languages = ["rust"]
+default_agent = "bones-dev"
+channel = "bones"
+install_command = "maw exec default -- just install"
+
+# Companion tools to enable
+[tools]
+beads = true
+maw = true
+crit = true
+botbus = true
+botty = true
+
+# Code review configuration
+[review]
+enabled = false
+reviewers = []
+
+[agents.dev.missions]
+enabled = true
+max_workers = 4
+max_children = 12
+checkpoint_interval_sec = 30
+
+# Model tier pools for load balancing
+# Each tier maps to a list of "provider/model:thinking" strings
+[models]
+fast = [
+  "anthropic/claude-haiku-4-5:low",
+  "google-gemini-cli/gemini-3-flash-preview:low",
+  "openai-codex/gpt-5.3-codex-spark:low",
+]
+balanced = [
+  "anthropic/claude-sonnet-4-6:medium",
+  "google-gemini-cli/gemini-3-pro-preview:medium",
+  "openai-codex/gpt-5.3-codex:medium",
+]
+strong = ["anthropic/claude-opus-4-6:high", "openai-codex/gpt-5.3-codex:xhigh"]
