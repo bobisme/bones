@@ -1,13 +1,16 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+default:
+  just --list
+
 # Run all pre-release checks (same gates as CI release pipeline)
 check:
     cargo fmt --all -- --check
-    cargo clippy --workspace -- -D warnings
-    cargo test --workspace
+    rtk cargo clippy --workspace -- -D warnings
+    rtk cargo test --workspace
 
 install:
-    cargo install --path crates/bones-cli
+    rtk cargo install --path crates/bones-cli
 
 completions:
     mkdir -p ~/.local/share/bash-completion/completions
