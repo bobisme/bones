@@ -225,11 +225,10 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
                 }
             }
             Event::Code(code) => {
+                use std::fmt::Write as _;
                 if colored {
-                    use std::fmt::Write as _;
                     let _ = write!(line_buf, "{}", code.green());
                 } else {
-                    use std::fmt::Write as _;
                     let _ = write!(line_buf, "`{code}`");
                 }
             }

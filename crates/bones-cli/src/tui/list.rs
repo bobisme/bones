@@ -2081,7 +2081,7 @@ impl ListView {
         // Clamp selection into valid range.
         let len = self.visible_items.len();
         match self.table_state.selected() {
-            Some(i) if len == 0 => self.table_state.select(None),
+            Some(_) if len == 0 => self.table_state.select(None),
             Some(i) if i >= len => self.table_state.select(Some(len.saturating_sub(1))),
             None if len > 0 => self.table_state.select(Some(0)),
             _ => {}
