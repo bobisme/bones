@@ -1102,6 +1102,30 @@ QUICK REFERENCE
   Search bones
 
       bn search \"query\"
+
+  Move a bone under a parent (reparent)
+
+      bn bone move <id> --parent <goal-id>
+      bn bone move <id> --parent none        # make top-level
+
+  Dependencies (blocking)
+
+      bn dep add <blocker> --blocks <blocked>
+      bn dep rm <blocker> <blocked>
+
+PATTERNS
+
+  Plan a goal with child tasks
+
+      bn create --title \"Launch v2\" --kind goal
+      bn create --title \"Write docs\" --parent <goal-id>
+      bn create --title \"Add tests\" --parent <goal-id>
+
+  Phased work (goals block each other)
+
+      bn create --title \"Phase 1: Core\" --kind goal    # → bn-aaa
+      bn create --title \"Phase 2: Polish\" --kind goal  # → bn-bbb
+      bn dep add bn-aaa --blocks bn-bbb
 "
     );
 }
