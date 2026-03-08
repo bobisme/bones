@@ -137,7 +137,7 @@ pub enum SortField {
     Created,
     /// Sort by `updated_at` descending (most recently changed first).
     Updated,
-    /// Sort by label/tag alphabetically, then by updated_at within each group.
+    /// Sort by label/tag alphabetically, then by `updated_at` within each group.
     Tags,
 }
 
@@ -4381,10 +4381,7 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
             Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
         ]
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(footer_spans)),
-        chunks[3],
-    );
+    frame.render_widget(Paragraph::new(Line::from(footer_spans)), chunks[3]);
 }
 
 fn render_edit_link_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rect) {

@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "bones-cli"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "bones-core"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "anyhow",
  "blake3",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "bones-search"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sim"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sqlite-vec"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "rusqlite",
  "sqlite-vec",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "bones-triage"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "anyhow",
  "blake3",
@@ -1547,9 +1547,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.182"
+version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
+checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
 name = "libm"
