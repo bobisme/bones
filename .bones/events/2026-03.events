@@ -133,3 +133,23 @@
 1772739927472889	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEy6gE		item.move	bn-nv6s	{"state":"done"}	blake3:NsYIxCe1gLLgv6Sy4Zdv82YLCIiIQMRc9A6KgwmjJyA
 1772739927492450	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEy6wE		item.move	bn-k932	{"state":"done"}	blake3:ldvHP1zanmmD-vWhb9x6jrG6A9YNsysXLHqFsmZF4RY
 1772739927496410	1	itc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEy7AE		item.move	bn-9ap6	{"reason":"auto-completed: all children of bn-9ap6 are done","state":"done"}	blake3:0Flv9D-1VJaG3kiLfx5GGkeXu5mvpcmF9OnHQlEHojs
+1773000275699760	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzew		item.create	bn-29mk	{"kind":"task","title":"user wants to sort by tags in ui"}	blake3:YzQMrvhrt678XidMGbdbpH5Ub3gUYwjLDEtZY3X4rSc
+1773000379790817	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzfA		item.create	bn-nnk8	{"description":"should type / to focus search or esc clear focus","kind":"bug","title":"can't type j or k in link search"}	blake3:ZAtAk1h-1NtRNrtHJcUc9CjeZLHip2A8K-aLZjkpTUI
+1773000404167010	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzfQ		item.update	bn-nnk8	{"field":"title","value":"can't type j or k in link search"}	blake3:GxES-tG3av3GocSKwaCA13t0esOYPL61Xiexn4aiLc8
+1773000404186226	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzfg		item.update	bn-nnk8	{"field":"description","value":"should type / to focus search or esc clear focus"}	blake3:O2cjNsKwakRGMS9vgqiLky6wHeyFgW4AXHu1oYa7a5g
+1773000404195217	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzfw		item.update	bn-nnk8	{"field":"kind","value":"bug"}	blake3:fmlRibwbsAbJz3oRGh0zGRxzAml6BTJaPs69cIMdGyg
+1773000404204340	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzgAE		item.update	bn-nnk8	{"field":"size","value":null}	blake3:iQcv92X3FWqKvtkeNZMDAmendTaLb4xp4bbeMe25p9M
+1773000404212986	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzgQE		item.update	bn-nnk8	{"field":"urgency","value":"default"}	blake3:qxhx9R4t6vEBoLSkLVGzCcsHvNbxzab4CCMt8YLUy34
+1773000404221938	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzggE		item.update	bn-nnk8	{"field":"labels","value":["ui"]}	blake3:gpCcwmFvD-xJ2gDnbIrqjX28JY4j0k3t3Vfkt8f-Zdk
+1773000409941875	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzgwE		item.update	bn-29mk	{"field":"title","value":"user wants to sort by tags in ui"}	blake3:8aDd3Z0xfbZavZCcCBJ1lV8z8EoRcBA6Y0SC-sPutXU
+1773000409954128	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzhAE		item.update	bn-29mk	{"field":"description","value":null}	blake3:A6ljXr1sUMsgrUWPvHWIs4D5bIV-HClzPvKeoRRIj7g
+1773000409963032	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzhQE		item.update	bn-29mk	{"field":"kind","value":"task"}	blake3:dPZZmblX7_Wh69oa4YRHm26N3XtPyV3HIhl2Ko7RTYQ
+1773000409971899	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzhgE		item.update	bn-29mk	{"field":"size","value":null}	blake3:pQJtLr86Mv9DNMI8EjnvFwkwmpTYnb1YJDmDZ4Eb54Q
+1773000409980424	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzhwE		item.update	bn-29mk	{"field":"urgency","value":"default"}	blake3:fbCaQgRAQj9rVHMLhTBwX1dUIL8TSK8pUgckkJmdKFY
+1773000409989216	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEziAE		item.update	bn-29mk	{"field":"labels","value":["ui"]}	blake3:qHX3vWh0MD8A-5ZE1ptpIaL_OudBAYz7cVJBDI-afqQ
+1773000608851172	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3qgs		item.move	bn-nnk8	{"state":"doing"}	blake3:IwzpwjgXJ_6Y0gtZzwJA7TToWul2Y0ZgMStguv5Kxcs
+1773000608866232	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3qws		item.assign	bn-nnk8	{"action":"assign","agent":"bones-dev"}	blake3:Wmz34P8gOac38HgYl94iJg4VwGwtx-J7PgNpQ9dv6ew
+1773000608886175	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3rAs		item.move	bn-29mk	{"state":"doing"}	blake3:79zsBykYdAcYK7se6uFdjlsNj0LMb5UIT9bH6SwWoOs
+1773000608890211	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3rQs		item.assign	bn-29mk	{"action":"assign","agent":"bones-dev"}	blake3:XHLn9CtPDRWoHt7OY-gx7TLrX2Hxr2nFIqOos4r-0bg
+1773000847524628	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3rgs		item.move	bn-nnk8	{"state":"done"}	blake3:gtY4JUOOGbGyZWnFmf8ffhUoljA1epJoi9XV-VOSdkI
+1773000847550534	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3rws		item.move	bn-29mk	{"state":"done"}	blake3:RWj-pWM6wsYZQ1GSj-hkFwqA6ZsxM6RSliOM0xDAIcQ
