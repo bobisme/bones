@@ -109,17 +109,10 @@ jobs:
             exit 1
           fi
 
-          crates=(bones-sqlite-vec bones-core bones-triage bones-search bones-sim bones-cli)
-
-          # Preflight: all crates must pass a dry-run before any publish starts.
-          for crate in "${crates[@]}"; do
-            echo "::group::Dry-run ${crate}"
-            cargo publish -p "${crate}" --dry-run --locked
-            echo "::endgroup::"
-          done
-
           # Publish in dependency order; fail fast on any crate publish failure.
           # A short retry loop handles transient crates.io/index hiccups.
+          # Note: dry-run preflight was removed because it fails on workspace
+          # crates whose deps haven't been published yet (chicken-and-egg).
           for crate in bones-sqlite-vec bones-core bones-triage bones-search bones-sim bones-cli; do
             echo "::group::Publishing ${crate}"
             published=0

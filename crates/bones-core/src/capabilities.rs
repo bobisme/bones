@@ -429,10 +429,12 @@ mod tests {
     #[test]
     fn bones_dir_is_parent_of_db_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("bones-projection.sqlite3");
+        // Canonicalize to resolve macOS /var → /private/var symlinks.
+        let canonical_dir = dir.path().canonicalize().expect("canonicalize tempdir");
+        let db_path = canonical_dir.join("bones-projection.sqlite3");
         let conn = Connection::open(&db_path).expect("open");
         let bones_dir = bones_dir_from_db(&conn);
-        assert_eq!(bones_dir.as_deref(), Some(dir.path()));
+        assert_eq!(bones_dir.as_deref(), Some(canonical_dir.as_path()));
     }
 
     // -----------------------------------------------------------------------
