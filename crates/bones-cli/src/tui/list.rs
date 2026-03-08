@@ -137,6 +137,8 @@ pub enum SortField {
     Created,
     /// Sort by `updated_at` descending (most recently changed first).
     Updated,
+    /// Sort by label/tag alphabetically, then by updated_at within each group.
+    Tags,
 }
 
 impl SortField {
@@ -146,6 +148,7 @@ impl SortField {
             Self::Priority => "priority",
             Self::Created => "created",
             Self::Updated => "updated",
+            Self::Tags => "tags",
         }
     }
 
@@ -154,7 +157,8 @@ impl SortField {
             Self::Execution => Self::Priority,
             Self::Priority => Self::Created,
             Self::Created => Self::Updated,
-            Self::Updated => Self::Execution,
+            Self::Updated => Self::Tags,
+            Self::Tags => Self::Execution,
         }
     }
 }
@@ -266,6 +270,14 @@ pub fn sort_items(items: &mut [WorkItem], sort: SortField) {
             .updated_at_us
             .cmp(&a.updated_at_us)
             .then_with(|| a.item_id.cmp(&b.item_id)),
+        SortField::Tags => {
+            let a_tag = a.labels.first().map(String::as_str).unwrap_or("\u{ffff}");
+            let b_tag = b.labels.first().map(String::as_str).unwrap_or("\u{ffff}");
+            a_tag
+                .cmp(b_tag)
+                .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))
+                .then_with(|| a.item_id.cmp(&b.item_id))
+        }
     });
 }
 
@@ -1230,6 +1242,8 @@ struct BlockerModalState {
     items: Vec<(String, String)>,
     /// Index into the filtered view.
     list_idx: usize,
+    /// Whether the search field is focused (accepts all character input).
+    search_focused: bool,
 }
 
 impl BlockerModalState {
@@ -1240,6 +1254,7 @@ impl BlockerModalState {
             search_cursor: 0,
             items,
             list_idx: 0,
+            search_focused: false,
         }
     }
 
@@ -2508,22 +2523,44 @@ impl ListView {
 
         match key.code {
             KeyCode::Esc => {
-                self.blocker_modal = None;
-                self.input_mode = InputMode::Normal;
+                if modal.search_focused {
+                    modal.search.clear();
+                    modal.search_cursor = 0;
+                    modal.list_idx = 0;
+                    modal.search_focused = false;
+                } else {
+                    self.blocker_modal = None;
+                    self.input_mode = InputMode::Normal;
+                }
             }
-            KeyCode::Left => {
+            KeyCode::Char('/') if !modal.search_focused => {
+                modal.search_focused = true;
+            }
+            KeyCode::Enter if modal.search_focused => {
+                modal.search_focused = false;
+            }
+            KeyCode::Left if !modal.search_focused => {
                 modal.rel_type = modal.rel_type.prev();
             }
-            KeyCode::Right | KeyCode::Tab => {
+            KeyCode::Right | KeyCode::Tab if !modal.search_focused => {
                 modal.rel_type = modal.rel_type.next();
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Down if !modal.search_focused => {
                 let count = modal.filtered().len();
                 if count > 0 {
                     modal.list_idx = (modal.list_idx + 1).min(count - 1);
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            KeyCode::Char('j') if !modal.search_focused => {
+                let count = modal.filtered().len();
+                if count > 0 {
+                    modal.list_idx = (modal.list_idx + 1).min(count - 1);
+                }
+            }
+            KeyCode::Up if !modal.search_focused => {
+                modal.list_idx = modal.list_idx.saturating_sub(1);
+            }
+            KeyCode::Char('k') if !modal.search_focused => {
                 modal.list_idx = modal.list_idx.saturating_sub(1);
             }
             KeyCode::Enter => {
@@ -4247,15 +4284,29 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
     frame.render_widget(Paragraph::new(Line::from(rel_spans)), chunks[0]);
 
     // Search row.
-    let search_spans = with_cursor_spans(
-        &modal.search,
-        modal.search_cursor,
-        Style::default().fg(Color::White),
-    );
-    let mut search_line_spans = vec![Span::styled(
-        "Search: ",
-        Style::default().fg(Color::DarkGray),
-    )];
+    let search_label_style = if modal.search_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let search_spans = if modal.search_focused {
+        with_cursor_spans(
+            &modal.search,
+            modal.search_cursor,
+            Style::default().fg(Color::White),
+        )
+    } else if modal.search.is_empty() {
+        vec![Span::styled(
+            "(press / to search)",
+            Style::default().fg(Color::DarkGray),
+        )]
+    } else {
+        vec![Span::styled(
+            modal.search.as_str(),
+            Style::default().fg(Color::White),
+        )]
+    };
+    let mut search_line_spans = vec![Span::styled("Search: ", search_label_style)];
     search_line_spans.extend(search_spans);
     frame.render_widget(Paragraph::new(Line::from(search_line_spans)), chunks[1]);
 
@@ -4308,17 +4359,30 @@ fn render_blocker_modal(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Re
     );
 
     // Footer.
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
+    let footer_spans = if modal.search_focused {
+        vec![
+            Span::styled("type to search", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Enter", Style::default().fg(Color::Cyan)),
+            Span::styled(": confirm  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Cyan)),
+            Span::styled(": clear", Style::default().fg(Color::DarkGray)),
+        ]
+    } else {
+        vec![
             Span::styled("Enter", Style::default().fg(Color::Cyan)),
             Span::styled(": add  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("/", Style::default().fg(Color::Cyan)),
+            Span::styled(": search  ", Style::default().fg(Color::DarkGray)),
             Span::styled("j/k", Style::default().fg(Color::Cyan)),
             Span::styled(": navigate  ", Style::default().fg(Color::DarkGray)),
             Span::styled("←/→", Style::default().fg(Color::Cyan)),
             Span::styled(": type  ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Cyan)),
             Span::styled(": cancel", Style::default().fg(Color::DarkGray)),
-        ])),
+        ]
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(footer_spans)),
         chunks[3],
     );
 }
@@ -5766,10 +5830,12 @@ mod tests {
         let s2 = s1.next();
         let s3 = s2.next();
         let s4 = s3.next();
+        let s5 = s4.next();
         assert_eq!(s1, SortField::Priority);
         assert_eq!(s2, SortField::Created);
         assert_eq!(s3, SortField::Updated);
-        assert_eq!(s4, SortField::Execution);
+        assert_eq!(s4, SortField::Tags);
+        assert_eq!(s5, SortField::Execution);
     }
 
     // -----------------------------------------------------------------------
