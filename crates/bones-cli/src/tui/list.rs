@@ -51,6 +51,50 @@ use serde_json::json;
 use super::actions;
 
 // ---------------------------------------------------------------------------
+// Clipboard
+// ---------------------------------------------------------------------------
+
+/// Copy text to the system clipboard using platform-native tools.
+///
+/// macOS: `pbcopy`
+/// Linux: tries `wl-copy` (Wayland), then `xclip`, then `xsel`.
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+
+    let candidates: &[&[&str]] = if cfg!(target_os = "macos") {
+        &[&["pbcopy"]]
+    } else {
+        &[
+            &["wl-copy"],
+            &["xclip", "-selection", "clipboard"],
+            &["xsel", "--clipboard", "--input"],
+        ]
+    };
+
+    for args in candidates {
+        let prog = args[0];
+        let extra = &args[1..];
+        if let Ok(mut child) = Command::new(prog)
+            .args(extra)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok_and(|s| s.success()) {
+                return Ok(());
+            }
+        }
+    }
+
+    Err("no clipboard tool found (install xclip, xsel, or wl-copy)".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
@@ -2444,6 +2488,17 @@ impl ListView {
                 ));
             }
 
+            // Copy bone ID to clipboard
+            KeyCode::Char('y') => {
+                if let Some(item) = self.selected_item() {
+                    let id = item.item_id.clone();
+                    match copy_to_clipboard(&id) {
+                        Ok(()) => self.set_status(format!("Copied {id}")),
+                        Err(e) => self.set_status(format!("Copy failed: {e}")),
+                    }
+                }
+            }
+
             // Clear filter
             KeyCode::Esc => {
                 if self.show_detail {
@@ -4549,6 +4604,7 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
         ("L", "detail", "add link/blocker/parent"),
         ("E", "detail", "edit/remove links"),
         ("x", "detail", "done/reopen with note"),
+        ("y", "global", "copy bone ID to clipboard"),
         ("Tab", "create", "next field"),
         ("Shift+Tab", "create", "previous field"),
         ("Ctrl+S", "create", "save/create bone"),
