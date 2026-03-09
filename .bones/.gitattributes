@@ -1,2 +1,2 @@
 # bones: merge policy for event logs
-events merge=union
+events/** merge=union

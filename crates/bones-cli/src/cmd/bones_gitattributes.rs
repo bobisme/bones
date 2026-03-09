@@ -3,8 +3,11 @@ use std::io::Write;
 use std::path::Path;
 
 const MANAGED_HEADER: &str = "# bones: merge policy for event logs";
-const BONES_ENTRY: &str = "events merge=union";
+const BONES_ENTRY: &str = "events/** merge=union";
 const LEGACY_ROOT_ENTRY: &str = ".bones/events merge=union";
+/// Old pattern that matched only a file literally named `events`, not files
+/// inside the `events/` directory.
+const LEGACY_BONES_ENTRY: &str = "events merge=union";
 
 pub fn ensure_bones_gitattributes(bones_dir: &Path) -> Result<()> {
     let path = bones_dir.join(".gitattributes");
@@ -14,6 +17,17 @@ pub fn ensure_bones_gitattributes(bones_dir: &Path) -> Result<()> {
     } else {
         String::new()
     };
+
+    // Migrate: replace the old buggy pattern with the correct one.
+    if existing
+        .lines()
+        .any(|line| line.trim() == LEGACY_BONES_ENTRY)
+    {
+        let updated = existing.replace(LEGACY_BONES_ENTRY, BONES_ENTRY);
+        std::fs::write(&path, updated)
+            .with_context(|| format!("failed to update {}", path.display()))?;
+        return Ok(());
+    }
 
     if existing.lines().any(|line| line.trim() == BONES_ENTRY) {
         return Ok(());
@@ -123,5 +137,27 @@ mod tests {
         remove_legacy_root_gitattributes_entry(root).expect("cleanup");
 
         assert!(!root.join(".gitattributes").exists());
+    }
+
+    #[test]
+    fn migrates_legacy_bones_entry_to_glob() {
+        let dir = TempDir::new().expect("tmp");
+        std::fs::write(
+            dir.path().join(".gitattributes"),
+            "# bones: merge policy for event logs\nevents merge=union\n",
+        )
+        .expect("seed");
+
+        ensure_bones_gitattributes(dir.path()).expect("migrate");
+
+        let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
+        assert!(
+            content.contains("events/** merge=union"),
+            "new pattern missing:\n{content}"
+        );
+        assert!(
+            !content.contains("\nevents merge=union"),
+            "old pattern still present:\n{content}"
+        );
     }
 }

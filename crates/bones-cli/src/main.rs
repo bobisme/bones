@@ -1170,6 +1170,11 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("not a bones project");
     }
 
+    // Silently fix .bones/.gitattributes if it has the old buggy pattern.
+    if needs_project {
+        let _ = cmd::bones_gitattributes::ensure_bones_gitattributes(&project_root.join(".bones"));
+    }
+
     let command_result = match cli.command {
         Commands::Init(args) => timing::timed("cmd.init", || {
             cmd::init::run_init(&args, output, &project_root)

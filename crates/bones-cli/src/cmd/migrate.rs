@@ -1280,7 +1280,7 @@ mod tests {
 
         let bones_attrs = std::fs::read_to_string(root.join(".bones/.gitattributes"))
             .expect("read .bones/.gitattributes");
-        assert!(bones_attrs.contains("events merge=union"));
+        assert!(bones_attrs.contains("events/** merge=union"));
 
         let root_attrs =
             std::fs::read_to_string(root.join(".gitattributes")).expect("read root .gitattributes");

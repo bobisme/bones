@@ -38,7 +38,8 @@ pub fn init() {
     }
 
     let gitattributes_path = bones_dir.join(".gitattributes");
-    let attr_line = "events merge=union\n";
+    let attr_line = "events/** merge=union\n";
+    let legacy_attr = "events merge=union";
 
     let mut content = if gitattributes_path.exists() {
         std::fs::read_to_string(&gitattributes_path).unwrap_or_default()
@@ -46,7 +47,11 @@ pub fn init() {
         String::new()
     };
 
-    if !content.contains("events merge=union") {
+    // Migrate old buggy pattern that only matched a file named `events`.
+    if content.contains(legacy_attr) && !content.contains("events/**") {
+        content = content.replace(legacy_attr, "events/** merge=union");
+        let _ = std::fs::write(&gitattributes_path, &content);
+    } else if !content.contains("events/** merge=union") {
         if !content.is_empty() && !content.ends_with('\n') {
             content.push('\n');
         }

@@ -229,7 +229,7 @@ mod tests {
 
         let bones_content = fs::read_to_string(root.join(".bones/.gitattributes"))
             .expect(".bones/.gitattributes readable");
-        assert!(bones_content.contains("events merge=union"));
+        assert!(bones_content.contains("events/** merge=union"));
 
         let _ = fs::remove_dir_all(&root);
     }
