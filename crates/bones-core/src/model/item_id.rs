@@ -347,8 +347,13 @@ mod tests {
         assert!(ItemId::parse("notanid").is_err());
         assert!(ItemId::parse("bn-").is_err());
         assert!(ItemId::parse("").is_err());
-        // 4-char hash without digit → invalid format per terseid rules
-        assert!(ItemId::parse("bn-abcd").is_err());
+    }
+
+    #[test]
+    fn parse_accepts_all_letter_hash() {
+        // All-letter 4+ char hashes are valid (backward compat with old terseid)
+        assert!(ItemId::parse("bn-abcd").is_ok());
+        assert!(ItemId::parse("bn-unwi").is_ok());
     }
 
     #[test]
