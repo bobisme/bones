@@ -608,7 +608,7 @@ mod tests {
 
     #[test]
     fn validate_event_invalid_item_id() {
-        let line = "1000\tagent\titc:A\t\titem.create\tnot-valid\t{\"title\":\"T\",\"kind\":\"task\"}\tblake3:aaa";
+        let line = "1000\tagent\titc:A\t\titem.create\tnotvalid\t{\"title\":\"T\",\"kind\":\"task\"}\tblake3:aaa";
         let err = validate_event(line, 1).unwrap_err();
         assert_eq!(err.kind, ValidationErrorKind::InvalidItemId);
     }
