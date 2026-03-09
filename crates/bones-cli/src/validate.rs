@@ -92,8 +92,10 @@ pub fn validate_item_id(s: &str) -> Result<(), ValidationError> {
         ));
     }
 
-    if let Some(rest) = value.strip_prefix("bn-") {
-        if is_valid_item_id_segments(rest) {
+    // Accept any terseid-prefixed ID (e.g. bn-xxx, bd-xxx from beads migration).
+    if let Some((prefix, rest)) = value.split_once('-') {
+        let valid_prefix = !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_lowercase());
+        if valid_prefix && is_valid_item_id_segments(rest) {
             return Ok(());
         }
     } else if value.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -315,6 +317,9 @@ mod tests {
         assert!(validate_item_id("bn-abc123").is_ok());
         assert!(validate_item_id("bn-abc123.1").is_ok());
         assert!(validate_item_id("abc123").is_ok());
+        // Migrated beads IDs use bd- prefix
+        assert!(validate_item_id("bd-abc123").is_ok());
+        assert!(validate_item_id("bd-abc123.1").is_ok());
     }
 
     #[test]
@@ -322,6 +327,8 @@ mod tests {
         assert!(validate_item_id("bn-ABC").is_err());
         assert!(validate_item_id("bn-abc.").is_err());
         assert!(validate_item_id("bn-abc.x").is_err());
+        // Numeric prefix is not valid
+        assert!(validate_item_id("123-abc").is_err());
     }
 
     #[test]
