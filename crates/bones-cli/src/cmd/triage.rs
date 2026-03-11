@@ -62,7 +62,8 @@ pub fn run_triage(
         .ranked
         .iter()
         .filter(|item| {
-            item.blocked_by_active == 0
+            is_recommendable(item)
+                && item.blocked_by_active == 0
                 && item.unblocks_active > 0
                 && item.state != "doing"
                 && !snapshot.punt_suppressed.contains(&item.id)
@@ -80,7 +81,8 @@ pub fn run_triage(
         .ranked
         .iter()
         .filter(|item| {
-            item.unblocks_active > 0
+            is_recommendable(item)
+                && item.unblocks_active > 0
                 && item.blocked_by_active > 0
                 && item.state != "doing"
                 && !snapshot.punt_suppressed.contains(&item.id)
@@ -506,6 +508,10 @@ fn is_small_size(size: Option<&str>) -> bool {
     matches!(size, Some("xs" | "s"))
 }
 
+fn is_recommendable(item: &RankedItem) -> bool {
+    item.kind != "goal"
+}
+
 fn format_stale_duration(now_us: i64, updated_at_us: i64) -> String {
     let delta_us = (now_us - updated_at_us).max(0);
     let hours = delta_us / 3_600_000_000;
@@ -526,6 +532,7 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
+            kind: "task".to_string(),
             state: "open".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
@@ -541,6 +548,7 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
+            kind: "task".to_string(),
             state: "open".to_string(),
             size: Some("s".to_string()),
             urgency: Urgency::Default,
@@ -556,6 +564,7 @@ mod tests {
         RankedItem {
             id: id.to_string(),
             title: title.to_string(),
+            kind: "task".to_string(),
             state: "open".to_string(),
             size: Some(size.to_string()),
             urgency: Urgency::Default,
@@ -573,6 +582,17 @@ mod tests {
         assert!(is_small_size(Some("s")));
         assert!(!is_small_size(Some("m")));
         assert!(!is_small_size(None));
+    }
+
+    #[test]
+    fn recommendable_filter_excludes_goals() {
+        assert!(is_recommendable(&ranked("bn-task", "Task", 1.0)));
+
+        let goal = RankedItem {
+            kind: "goal".to_string(),
+            ..ranked("bn-goal", "Goal", 1.0)
+        };
+        assert!(!is_recommendable(&goal));
     }
 
     #[test]
