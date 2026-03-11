@@ -37,6 +37,7 @@ proptest = "1.4"
 rusqlite = { version = "0.30", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 tracing = "0.1"
 thiserror = "1.0"
 tracing-subscriber = "0.3"

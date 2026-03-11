@@ -129,7 +129,7 @@ enum Commands {
         next_help_heading = "Lifecycle",
         about = "Add a new bone to the pile",
         long_about = "Add a new bone and append a create event.",
-        after_help = "EXAMPLES:\n    # Create a task bone\n    bn create --title \"Fix login timeout\"\n\n    # Create with richer fields\n    bn create --title \"Title of your bone here\" --description \"Detailed description of the work\" --label first-label --label second-label --size xl\n\n    # Create a goal bone\n    bn create --title \"Launch v2\" --kind goal\n\n    # Machine-readable output\n    bn create --title \"Fix login timeout\" --format json"
+        after_help = "EXAMPLES:\n    # Create a task bone\n    bn create --title \"Fix login timeout\"\n\n    # Create with richer fields\n    bn create --title \"Title of your bone here\" --description \"Detailed description of the work\" --label first-label --label second-label --size xl\n\n    # Create a goal bone\n    bn create --title \"Launch v2\" --kind goal\n\n    # Create one or more bones from a file\n    bn create --from-file bones.yaml\n\n    # Machine-readable output\n    bn create --title \"Fix login timeout\" --format json"
     )]
     Create(cmd::create::CreateArgs),
 
@@ -1695,6 +1695,12 @@ mod tests {
     #[test]
     fn create_subcommand_parses() {
         let cli = Cli::parse_from(["bn", "create", "--title", "My task"]);
+        assert!(matches!(cli.command, Commands::Create(_)));
+    }
+
+    #[test]
+    fn create_from_file_subcommand_parses() {
+        let cli = Cli::parse_from(["bn", "create", "--from-file", "bones.yaml"]);
         assert!(matches!(cli.command, Commands::Create(_)));
     }
 

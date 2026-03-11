@@ -8,10 +8,12 @@ use crate::cmd::dup::build_fts_query;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
+use anyhow::Context;
 use clap::Args;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bones_core::config::load_project_config;
@@ -34,8 +36,27 @@ use bones_triage::graph::RawGraph;
 #[derive(Args, Debug)]
 pub struct CreateArgs {
     /// Title of the new bone.
-    #[arg(short, long)]
-    pub title: String,
+    #[arg(short, long, required_unless_present = "from_file")]
+    pub title: Option<String>,
+
+    /// Load one or more bones from a YAML, JSON, or TOML file.
+    #[arg(
+        long,
+        value_name = "path",
+        conflicts_with_all = [
+            "kind",
+            "size",
+            "urgency",
+            "parent",
+            "label",
+            "tag",
+            "labels",
+            "tags",
+            "description",
+            "blocks"
+        ]
+    )]
+    pub from_file: Option<PathBuf>,
 
     /// Bone kind: task, goal, or bug.
     #[arg(short, long, default_value = "task")]
@@ -95,10 +116,126 @@ impl CreateArgs {
         out.extend(self.tags.iter().cloned());
         out
     }
+
+    fn to_request(&self) -> anyhow::Result<CreateRequest> {
+        let title = self
+            .title
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("--title is required unless --from-file is used"))?;
+
+        Ok(CreateRequest {
+            title,
+            kind: self.kind.clone(),
+            size: self.size.clone(),
+            urgency: self.urgency.clone(),
+            parent: self.parent.clone(),
+            labels: self.all_labels(),
+            description: self.description.clone(),
+            blocks: self.blocks.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CreateRequest {
+    title: String,
+    kind: String,
+    size: Option<String>,
+    urgency: Option<String>,
+    parent: Option<String>,
+    labels: Vec<String>,
+    description: Option<String>,
+    blocks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CreateFileEntry {
+    title: String,
+    #[serde(default = "default_kind")]
+    kind: String,
+    size: Option<String>,
+    urgency: Option<String>,
+    parent: Option<String>,
+    #[serde(default)]
+    label: Vec<String>,
+    #[serde(default)]
+    tag: Vec<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    description: Option<String>,
+    #[serde(default)]
+    blocks: Vec<String>,
+}
+
+impl CreateFileEntry {
+    fn all_labels(&self) -> Vec<String> {
+        let mut out = self.label.clone();
+        out.extend(self.tag.iter().cloned());
+        out.extend(self.labels.iter().cloned());
+        out.extend(self.tags.iter().cloned());
+        out
+    }
+
+    fn into_request(self) -> CreateRequest {
+        let labels = self.all_labels();
+        CreateRequest {
+            title: self.title,
+            kind: self.kind,
+            size: self.size,
+            urgency: self.urgency,
+            parent: self.parent,
+            labels,
+            description: self.description,
+            blocks: self.blocks,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CreateFileCollection {
+    bones: Vec<CreateFileEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum CreateFileDocument {
+    One(CreateFileEntry),
+    Many(Vec<CreateFileEntry>),
+    Collection(CreateFileCollection),
+}
+
+impl CreateFileDocument {
+    fn into_requests(self) -> Vec<CreateRequest> {
+        match self {
+            Self::One(entry) => vec![entry.into_request()],
+            Self::Many(entries) => entries
+                .into_iter()
+                .map(CreateFileEntry::into_request)
+                .collect(),
+            Self::Collection(collection) => collection
+                .bones
+                .into_iter()
+                .map(CreateFileEntry::into_request)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CreateFileFormat {
+    Json,
+    Toml,
+    Yaml,
+}
+
+fn default_kind() -> String {
+    "task".to_string()
 }
 
 /// JSON output for a created bone.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct CreateOutput {
     id: String,
     title: String,
@@ -119,8 +256,13 @@ struct CreateOutput {
     duplicates: Vec<DuplicateMatch>,
 }
 
-/// A duplicate candidate match in JSON output.
 #[derive(Debug, Serialize)]
+struct CreateBatchOutput {
+    created: Vec<CreateOutput>,
+}
+
+/// A duplicate candidate match in JSON output.
+#[derive(Debug, Clone, Serialize)]
 struct DuplicateMatch {
     item_id: String,
     score: f32,
@@ -145,7 +287,6 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 fn read_description(desc: &Option<String>) -> anyhow::Result<Option<String>> {
     match desc.as_deref() {
         Some("-") => {
-            use std::io::Read;
             let mut buf = String::new();
             std::io::stdin().read_to_string(&mut buf)?;
             let trimmed = buf.trim().to_string();
@@ -160,6 +301,127 @@ fn read_description(desc: &Option<String>) -> anyhow::Result<Option<String>> {
     }
 }
 
+fn detect_create_file_format(path: &Path, raw: &str) -> anyhow::Result<CreateFileFormat> {
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        match ext.to_ascii_lowercase().as_str() {
+            "json" => return Ok(CreateFileFormat::Json),
+            "toml" => return Ok(CreateFileFormat::Toml),
+            "yaml" | "yml" => return Ok(CreateFileFormat::Yaml),
+            _ => {}
+        }
+    }
+
+    if serde_json::from_str::<CreateFileDocument>(raw).is_ok() {
+        return Ok(CreateFileFormat::Json);
+    }
+    if toml::from_str::<CreateFileDocument>(raw).is_ok() {
+        return Ok(CreateFileFormat::Toml);
+    }
+
+    let mut yaml_docs = serde_yaml::Deserializer::from_str(raw);
+    if yaml_docs
+        .next()
+        .is_some_and(|doc| CreateFileDocument::deserialize(doc).is_ok())
+    {
+        return Ok(CreateFileFormat::Yaml);
+    }
+
+    anyhow::bail!(
+        "could not detect file format for '{}': expected YAML, JSON, or TOML",
+        path.display()
+    );
+}
+
+fn parse_create_file(path: &Path) -> anyhow::Result<Vec<CreateRequest>> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("read create input file {}", path.display()))?;
+    let format = detect_create_file_format(path, &raw)?;
+
+    let requests = match format {
+        CreateFileFormat::Json => serde_json::from_str::<CreateFileDocument>(&raw)
+            .context("parse JSON create input")?
+            .into_requests(),
+        CreateFileFormat::Toml => toml::from_str::<CreateFileDocument>(&raw)
+            .context("parse TOML create input")?
+            .into_requests(),
+        CreateFileFormat::Yaml => {
+            let mut requests = Vec::new();
+            for doc in serde_yaml::Deserializer::from_str(&raw) {
+                requests.extend(
+                    CreateFileDocument::deserialize(doc)
+                        .context("parse YAML create input")?
+                        .into_requests(),
+                );
+            }
+            requests
+        }
+    };
+
+    if requests.is_empty() {
+        anyhow::bail!(
+            "create input file '{}' did not contain any bones",
+            path.display()
+        );
+    }
+
+    Ok(requests)
+}
+
+fn render_create_result(output: OutputMode, result: &CreateOutput) -> anyhow::Result<()> {
+    render(output, result, |r, w| {
+        writeln!(w, "Created item")?;
+        writeln!(w, "{:-<72}", "")?;
+        writeln!(w, "ID:      {}", r.id)?;
+        writeln!(w, "Title:   {}", r.title)?;
+        writeln!(w, "Kind:    {}", r.kind)?;
+        writeln!(w, "Urgency: {}", r.urgency)?;
+        if let Some(ref parent) = r.parent {
+            writeln!(w, "Parent:  {parent}")?;
+        }
+        if !r.labels.is_empty() {
+            writeln!(w, "Labels:  {}", r.labels.join(", "))?;
+        }
+        if let Some(ref size) = r.size {
+            writeln!(w, "Size:    {size}")?;
+        }
+        Ok(())
+    })
+}
+
+fn render_create_batch(output: OutputMode, results: &[CreateOutput]) -> anyhow::Result<()> {
+    let batch = CreateBatchOutput {
+        created: results.to_vec(),
+    };
+    render(output, &batch, |r, w| {
+        for (idx, item) in r.created.iter().enumerate() {
+            if idx > 0 {
+                writeln!(w)?;
+            }
+            writeln!(w, "Created item")?;
+            writeln!(w, "{:-<72}", "")?;
+            writeln!(w, "ID:      {}", item.id)?;
+            writeln!(w, "Title:   {}", item.title)?;
+            writeln!(w, "Kind:    {}", item.kind)?;
+            writeln!(w, "Urgency: {}", item.urgency)?;
+            if let Some(ref parent) = item.parent {
+                writeln!(w, "Parent:  {parent}")?;
+            }
+            if !item.labels.is_empty() {
+                writeln!(w, "Labels:  {}", item.labels.join(", "))?;
+            }
+            if let Some(ref size) = item.size {
+                writeln!(w, "Size:    {size}")?;
+            }
+        }
+        Ok(())
+    })
+}
+
+fn render_and_bail<T>(output: OutputMode, err: CliError) -> anyhow::Result<T> {
+    render_error(output, &err)?;
+    anyhow::bail!(err.message)
+}
+
 #[tracing::instrument(skip_all, name = "cmd.create")]
 pub fn run_create(
     args: &CreateArgs,
@@ -167,58 +429,88 @@ pub fn run_create(
     output: OutputMode,
     project_root: &Path,
 ) -> anyhow::Result<()> {
+    if let Some(path) = &args.from_file {
+        let requests = parse_create_file(path)?;
+        let mut created = Vec::with_capacity(requests.len());
+        for request in &requests {
+            created.push(run_create_single(
+                request,
+                args.force,
+                args.allow_secret,
+                agent_flag,
+                output,
+                project_root,
+            )?);
+        }
+        return render_create_batch(output, &created);
+    }
+
+    let request = args.to_request()?;
+    let result = run_create_single(
+        &request,
+        args.force,
+        args.allow_secret,
+        agent_flag,
+        output,
+        project_root,
+    )?;
+    render_create_result(output, &result)
+}
+
+fn run_create_single(
+    request: &CreateRequest,
+    force: bool,
+    allow_secret: bool,
+    agent_flag: Option<&str>,
+    output: OutputMode,
+    project_root: &Path,
+) -> anyhow::Result<CreateOutput> {
     // 1. Require agent identity for mutating command
     let agent = match agent::require_agent(agent_flag) {
         Ok(a) => a,
         Err(e) => {
-            render_error(
+            return render_and_bail(
                 output,
-                &CliError::with_details(&e.message, "Set --agent, BONES_AGENT, or AGENT", e.code),
-            )?;
-            anyhow::bail!("{}", e.message);
+                CliError::with_details(&e.message, "Set --agent, BONES_AGENT, or AGENT", e.code),
+            );
         }
     };
 
     // 2. Validate simple input fields early
     if let Err(e) = validate::validate_agent(&agent) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
+        return render_and_bail(output, e.to_cli_error());
     }
-    if let Err(e) = validate::validate_title(&args.title) {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
+    if let Err(e) = validate::validate_title(&request.title) {
+        return render_and_bail(output, e.to_cli_error());
     }
-    let all_labels = args.all_labels();
+    let all_labels = request.labels.clone();
     for label in &all_labels {
         if let Err(e) = validate::validate_label(label) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
+            return render_and_bail(output, e.to_cli_error());
         }
     }
 
     // 3. Parse/validate kind
-    let kind: Kind = match validate::validate_kind(&args.kind) {
+    let kind: Kind = match validate::validate_kind(&request.kind) {
         Ok(k) => k,
         Err(e) => {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
+            return render_and_bail(output, e.to_cli_error());
         }
     };
 
     // 4. Parse/validate size (optional)
-    let size: Option<Size> = match &args.size {
+    let size: Option<Size> = match &request.size {
         Some(s) => Some(match validate::validate_size(s) {
             Ok(size) => size,
             Err(e) => {
-                render_error(output, &e.to_cli_error())?;
-                anyhow::bail!("{}", e.reason);
+                return render_and_bail(output, e.to_cli_error());
             }
         }),
         None => None,
     };
 
     // 4. Parse urgency (optional, defaults to "default")
-    let urgency: Urgency = match &args.urgency {
+    let urgency: Urgency = match &request.urgency {
         Some(u) => u.parse().map_err(|_| {
             let msg = format!("invalid urgency '{u}': expected one of urgent, default, punt");
             render_error(
@@ -236,10 +528,10 @@ pub fn run_create(
     };
 
     // 5. Read description
-    let description = read_description(&args.description)?;
+    let description = read_description(&request.description)?;
 
-    if args.allow_secret {
-        if let Some(kind) = validate::detect_secret_kind(&args.title) {
+    if allow_secret {
+        if let Some(kind) = validate::detect_secret_kind(&request.title) {
             tracing::warn!(
                 secret_kind = kind,
                 "allowing secret-like title due to --allow-secret"
@@ -254,15 +546,13 @@ pub fn run_create(
             );
         }
     } else {
-        if let Err(e) = validate::validate_no_secrets("title", &args.title) {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
+        if let Err(e) = validate::validate_no_secrets("title", &request.title) {
+            return render_and_bail(output, e.to_cli_error());
         }
         if let Some(desc) = &description
             && let Err(e) = validate::validate_no_secrets("description", desc)
         {
-            render_error(output, &e.to_cli_error())?;
-            anyhow::bail!("{}", e.reason);
+            return render_and_bail(output, e.to_cli_error());
         }
     }
 
@@ -305,54 +595,34 @@ pub fn run_create(
     };
 
     // 9. Validate parent exists (if specified)
-    if let Some(ref parent_id) = args.parent {
+    if let Some(ref parent_id) = request.parent {
         if let Err(e) = validate::validate_item_id(parent_id) {
-            render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
         if db_path.exists()
             && let Some(conn) = db::query::try_open_projection(&db_path)?
             && !db::query::item_exists(&conn, parent_id)?
         {
-            let msg = format!("parent item '{parent_id}' not found");
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID and ensure it exists",
-                    "parent_not_found",
-                ),
-            )?;
-            anyhow::bail!("{msg}");
+            anyhow::bail!("parent item '{parent_id}' not found");
         }
     }
 
     // 10. Validate --blocks targets exist
-    for block_target in &args.blocks {
+    for block_target in &request.blocks {
         if let Err(e) = validate::validate_item_id(block_target) {
-            render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
         if db_path.exists()
             && let Some(conn) = db::query::try_open_projection(&db_path)?
             && !db::query::item_exists(&conn, block_target)?
         {
-            let msg = format!("blocks target '{block_target}' not found");
-            render_error(
-                output,
-                &CliError::with_details(
-                    &msg,
-                    "Check the item ID and ensure it exists",
-                    "blocks_target_not_found",
-                ),
-            )?;
-            anyhow::bail!("{msg}");
+            anyhow::bail!("blocks target '{block_target}' not found");
         }
     }
 
     // 11. Check for duplicate items (unless --force is set)
     let mut duplicate_matches: Vec<DuplicateMatch> = Vec::new();
-    if !args.force
+    if !force
         && db_path.exists()
         && let Some(conn) = db::query::try_open_projection(&db_path)?
     {
@@ -387,7 +657,7 @@ pub fn run_create(
                 petgraph::graph::DiGraph::new()
             });
 
-        let duplicate_query = build_fts_query(&args.title, description.as_deref());
+        let duplicate_query = build_fts_query(&request.title, description.as_deref());
         if duplicate_query.is_empty() {
             tracing::debug!(
                 "duplicate check skipped: no usable lexical tokens from title/description"
@@ -440,7 +710,7 @@ pub fn run_create(
     }
 
     // 12. Generate item ID
-    let item_id = generate_item_id(&args.title, item_count, |candidate| {
+    let item_id = generate_item_id(&request.title, item_count, |candidate| {
         if !db_path.exists() {
             return false;
         }
@@ -452,12 +722,12 @@ pub fn run_create(
 
     // 13-16. Build event and append to shard (atomic timestamp+hash+write)
     let create_data = CreateData {
-        title: args.title.clone(),
+        title: request.title.clone(),
         kind,
         size,
         urgency,
         labels: all_labels.clone(),
-        parent: args.parent.clone(),
+        parent: request.parent.clone(),
         causation: None,
         description: description.clone(),
         extra: BTreeMap::new(),
@@ -515,12 +785,12 @@ pub fn run_create(
     // 18. Output
     let result = CreateOutput {
         id: item_id.as_str().to_string(),
-        title: args.title.clone(),
+        title: request.title.clone(),
         kind: kind.to_string(),
         state: "open".to_string(),
         urgency: urgency.to_string(),
         size: size.map(|s| s.to_string()),
-        parent: args.parent.clone(),
+        parent: request.parent.clone(),
         labels: all_labels,
         description,
         agent,
@@ -528,26 +798,7 @@ pub fn run_create(
         duplicates: duplicate_matches,
     };
 
-    render(output, &result, |r, w| {
-        writeln!(w, "Created item")?;
-        writeln!(w, "{:-<72}", "")?;
-        writeln!(w, "ID:      {}", r.id)?;
-        writeln!(w, "Title:   {}", r.title)?;
-        writeln!(w, "Kind:    {}", r.kind)?;
-        writeln!(w, "Urgency: {}", r.urgency)?;
-        if let Some(ref parent) = r.parent {
-            writeln!(w, "Parent:  {parent}")?;
-        }
-        if !r.labels.is_empty() {
-            writeln!(w, "Labels:  {}", r.labels.join(", "))?;
-        }
-        if let Some(ref size) = r.size {
-            writeln!(w, "Size:    {size}")?;
-        }
-        Ok(())
-    })?;
-
-    Ok(())
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -565,7 +816,8 @@ mod tests {
     #[test]
     fn create_args_defaults() {
         let w = TestCli::parse_from(["test", "--title", "Hello"]);
-        assert_eq!(w.args.title, "Hello");
+        assert_eq!(w.args.title.as_deref(), Some("Hello"));
+        assert!(w.args.from_file.is_none());
         assert_eq!(w.args.kind, "task");
         assert!(w.args.parent.is_none());
         assert!(w.args.label.is_empty());
@@ -598,7 +850,7 @@ mod tests {
             "--blocks",
             "bn-b8y",
         ]);
-        assert_eq!(w.args.title, "My Bug");
+        assert_eq!(w.args.title.as_deref(), Some("My Bug"));
         assert_eq!(w.args.kind, "bug");
         assert_eq!(w.args.size.as_deref(), Some("m"));
         assert_eq!(w.args.urgency.as_deref(), Some("urgent"));
@@ -606,6 +858,14 @@ mod tests {
         assert_eq!(w.args.label, vec!["backend", "auth"]);
         assert_eq!(w.args.description.as_deref(), Some("Fix the auth timeout"));
         assert_eq!(w.args.blocks, vec!["bn-b8y"]);
+    }
+
+    #[test]
+    fn create_args_from_file() {
+        let w = TestCli::parse_from(["test", "--from-file", "bones.yaml", "--force"]);
+        assert!(w.args.title.is_none());
+        assert_eq!(w.args.from_file.as_deref(), Some(Path::new("bones.yaml")));
+        assert!(w.args.force);
     }
 
     #[test]
@@ -650,6 +910,105 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[test]
+    fn parse_create_file_detects_json_object() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bones.json");
+        std::fs::write(
+            &path,
+            r#"{"title":"JSON bone","description":"from json","labels":["one"]}"#,
+        )
+        .unwrap();
+
+        let requests = parse_create_file(&path).unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].title, "JSON bone");
+        assert_eq!(requests[0].labels, vec!["one"]);
+    }
+
+    #[test]
+    fn parse_create_file_detects_toml_collection() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bones.toml");
+        std::fs::write(
+            &path,
+            r#"[[bones]]
+title = "First"
+description = "one"
+
+[[bones]]
+title = "Second"
+labels = ["two", "three"]
+"#,
+        )
+        .unwrap();
+
+        let requests = parse_create_file(&path).unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].title, "Second");
+        assert_eq!(requests[1].labels, vec!["two", "three"]);
+    }
+
+    #[test]
+    fn create_from_file_supports_multiple_yaml_documents() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        let input_path = root.join("bones.yaml");
+        std::fs::write(
+            &input_path,
+            r#"title: First from file
+description: |
+  Here's the multi-line description.
+  It can have `backticks`.
+---
+title: Second from file
+labels:
+  - one
+  - two
+"#,
+        )
+        .unwrap();
+
+        let args = CreateArgs {
+            title: None,
+            from_file: Some(input_path),
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
+            description: None,
+            blocks: vec![],
+            force: false,
+            allow_secret: false,
+        };
+
+        let result = run_create(&args, Some("agent"), OutputMode::Json, root);
+        assert!(
+            result.is_ok(),
+            "create from file failed: {:?}",
+            result.err()
+        );
+
+        let replay = shard_mgr.replay().unwrap();
+        let lines: Vec<&str> = replay
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert!(replay.contains("First from file"));
+        assert!(replay.contains("Second from file"));
+    }
+
     /// Integration test: full create flow in a temp directory.
     #[test]
     fn create_item_end_to_end() {
@@ -666,7 +1025,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Test item".to_string(),
+            title: Some("Test item".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: Some("m".to_string()),
             urgency: None,
@@ -711,7 +1071,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "JSON test".to_string(),
+            title: Some("JSON test".to_string()),
+            from_file: None,
             kind: "bug".to_string(),
             size: None,
             urgency: Some("urgent".to_string()),
@@ -748,7 +1109,8 @@ mod tests {
     fn create_fails_without_bones_dir() {
         let dir = TempDir::new().unwrap();
         let args = CreateArgs {
-            title: "Test".to_string(),
+            title: Some("Test".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -778,7 +1140,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Test".to_string(),
+            title: Some("Test".to_string()),
+            from_file: None,
             kind: "epic".to_string(), // invalid
             size: None,
             urgency: None,
@@ -808,7 +1171,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Test".to_string(),
+            title: Some("Test".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: Some("mega".to_string()), // invalid
             urgency: None,
@@ -838,7 +1202,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Test".to_string(),
+            title: Some("Test".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: Some("hot".to_string()), // invalid
@@ -870,7 +1235,8 @@ mod tests {
         // Create two items with different titles
         for title in ["First item", "Second item"] {
             let args = CreateArgs {
-                title: title.to_string(),
+                title: Some(title.to_string()),
+                from_file: None,
                 kind: "task".to_string(),
                 size: None,
                 urgency: None,
@@ -917,7 +1283,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Item with desc".to_string(),
+            title: Some("Item with desc".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -960,7 +1327,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "Labeled item".to_string(),
+            title: Some("Labeled item".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -992,7 +1360,7 @@ mod tests {
     #[test]
     fn create_force_flag_parsing() {
         let w = TestCli::parse_from(["test", "--title", "Hello", "--force"]);
-        assert_eq!(w.args.title, "Hello");
+        assert_eq!(w.args.title.as_deref(), Some("Hello"));
         assert!(w.args.force);
     }
 
@@ -1013,7 +1381,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            title: Some("ghp_abcdefghijklmnopqrstuvwxyz012345".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -1044,7 +1413,8 @@ mod tests {
         shard_mgr.init().unwrap();
 
         let args = CreateArgs {
-            title: "ghp_abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            title: Some("ghp_abcdefghijklmnopqrstuvwxyz012345".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -1075,7 +1445,8 @@ mod tests {
 
         // Create first item
         let args1 = CreateArgs {
-            title: "Fix authentication timeout bug".to_string(),
+            title: Some("Fix authentication timeout bug".to_string()),
+            from_file: None,
             kind: "bug".to_string(),
             size: None,
             urgency: None,
@@ -1095,7 +1466,8 @@ mod tests {
 
         // Create second item with similar title (should detect first as duplicate)
         let args2 = CreateArgs {
-            title: "Fix auth timeout issue".to_string(),
+            title: Some("Fix auth timeout issue".to_string()),
+            from_file: None,
             kind: "bug".to_string(),
             size: None,
             urgency: None,
@@ -1134,7 +1506,8 @@ mod tests {
 
         // Create first item
         let args1 = CreateArgs {
-            title: "Test item".to_string(),
+            title: Some("Test item".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
@@ -1154,7 +1527,8 @@ mod tests {
 
         // Create second item with --force (should not run duplicate check)
         let args2 = CreateArgs {
-            title: "Test item".to_string(),
+            title: Some("Test item".to_string()),
+            from_file: None,
             kind: "task".to_string(),
             size: None,
             urgency: None,
