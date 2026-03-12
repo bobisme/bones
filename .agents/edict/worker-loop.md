@@ -77,7 +77,7 @@ Before triaging new work, check if you have unfinished work from a previous sess
 
 - `maw exec default -- bn do <bone-id>`
 - `rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<bone-id>" -m "<bone-id>"`
-- `maw ws create --random` — note the workspace name (e.g., `frost-castle`). Store as `$WS`.
+- `maw ws create --random --from main` — note the workspace name (e.g., `frost-castle`). Store as `$WS`. Use `--change <change-id>` instead when continuing change-bound work.
 - **All file operations must use the workspace path** `ws/$WS/`. Use absolute paths for Read, Write, and Edit (e.g., `$PROJECT_ROOT/ws/$WS/src/file.rs`). For commands: `maw exec $WS -- <command>`.
 - **No `jj`**: this workflow is Git + maw. Keep workspace operations in `maw` and run `git` only via `maw exec $WS -- ...`.
 - `rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/$WS" -m "<bone-id>"`
@@ -166,7 +166,7 @@ If a review was conducted:
 Then proceed with teardown:
 - `maw exec default -- bn bone comment add <bone-id> "Completed by $AGENT"`
 - `maw exec default -- bn done <bone-id> --reason "Completed"`
-- `maw ws merge $WS --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; if merge conflict, preserve workspace and announce; maw v0.22.0+ produces linear squashed history and auto-moves main)
+- `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when the workspace is change-bound; if merge conflict, preserve workspace and announce)
 - `maw push` (if pushMain enabled in `.edict.toml`; maw v0.24.0+ handles bookmark and push)
 - `rite claims release --agent $AGENT --all`
 - `rite send --agent $AGENT $EDICT_PROJECT "Completed <bone-id>: <bone-title>" -L task-done`

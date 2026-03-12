@@ -26,7 +26,7 @@ All steps below are required — they clean up resources, prevent workspace leak
    - Run in the workspace: `maw exec $WS -- <checkCommand>` (e.g., `cargo clippy && cargo test`, `npm test`)
    - If checks fail, fix the issues before proceeding. Do NOT merge broken code.
    - If no `checkCommand` is configured, at minimum verify compilation succeeds.
-7. **Merge and destroy the workspace**: `maw ws merge $WS --destroy --message "feat: <bone-title>"` (where `$WS` is the workspace name from the start step — **never `default`**; use a conventional commit prefix matching your change type: `feat:`, `fix:`, `chore:`, etc.)
+7. **Merge and destroy the workspace**: `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"` (where `$WS` is the workspace name from the start step — **never `default`**; use a conventional commit prefix matching your change type: `feat:`, `fix:`, `chore:`, etc.; if the workspace is change-bound, replace `default` with that change id)
    - The `--destroy` flag is required — it cleans up the workspace after merging
    - **Never merge or destroy the default workspace.** Default is where other workspaces merge into.
    - `maw ws merge` now produces linear history: workspace commits are rebased onto main and squashed into a single commit (as of v0.22.0)
@@ -70,7 +70,7 @@ If `maw ws merge` detects conflicts:
 maw exec $WS -- git restore --source refs/heads/main -- .bones/ .agents/ .claude/
 ```
 
-Then retry `maw ws merge $WS --destroy --message "feat: <bone-title>"`.
+Then retry `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"`.
 
 ### Full recovery when conflicts are messy
 
@@ -91,7 +91,7 @@ maw exec $WS -- git status
 maw exec $WS -- git add <resolved-file>
 
 # 5. Retry merge
-maw ws merge $WS --destroy --message "feat: <bone-title>"
+maw ws merge $WS --into default --destroy --message "feat: <bone-title>"
 ```
 
 ### When to escalate
@@ -103,9 +103,9 @@ maw exec default -- bn bone comment add <bone-id> "Merge conflict unresolved. Wo
 rite send --agent $AGENT $EDICT_PROJECT "Merge conflict in $WS for <bone-id>. Manual help needed." -L tool-issue
 ```
 
-If the workspace was accidentally removed, recreate it with `maw ws restore $WS`.
+If the workspace was accidentally removed, recreate it with `maw ws recover $WS --to <new-name>`.
 
 ## Assumptions
 
 - `EDICT_PROJECT` env var contains the project channel name.
-- The workspace was created with `maw ws create --random` during [start](start.md). `$WS` is the workspace name from that step.
+- The workspace was created with `maw ws create --random --from main` during [start](start.md). `$WS` is the workspace name from that step (or `--change <change-id>` for change-bound work).

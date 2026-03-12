@@ -79,7 +79,7 @@ For each unblocked child, dispatch a worker agent. The dev-loop handles this aut
 ```bash
 # Generate worker name and create workspace
 WORKER=$(rite generate-name)
-maw ws create --random  # → e.g., frost-castle
+maw ws create --random --from main  # → e.g., frost-castle
 
 # Stake claims
 rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<child-id>" -m "<child-id>"
