@@ -45,13 +45,37 @@ rand = { workspace = true }
 ureq = { version = "2.10", features = ["json"] }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+dhat = { version = "0.3", optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
 default = ["otel"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-appender-tracing", "dep:tracing-opentelemetry"]
+## Heap profiling: `cargo build --features dhat-heap` then run normally.
+## Writes dhat-heap.json on exit; view at https://nnethercote.github.io/dh_view/dh_view.html
+dhat-heap = ["dep:dhat"]
+## Use jemalloc as the global allocator for better RSS behaviour and optional
+## profiling via MALLOC_CONF. Build with `cargo build --features jemalloc`.
+jemalloc = ["dep:tikv-jemallocator"]
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+rusqlite = { workspace = true }
+pulldown-cmark = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+[[bench]]
+name = "tui_memory"
+harness = false
+
+[[bench]]
+name = "tui_render_memory"
+harness = false
+
+[[bench]]
+name = "tui_ort_memory"
+harness = false

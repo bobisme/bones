@@ -1,4 +1,6 @@
-#![forbid(unsafe_code)]
+// Allow unsafe for optional allocator overrides (jemalloc, dhat).
+#![cfg_attr(not(any(feature = "dhat-heap", feature = "jemalloc")), forbid(unsafe_code))]
+#![cfg_attr(any(feature = "dhat-heap", feature = "jemalloc"), deny(unsafe_code))]
 #![allow(
     clippy::manual_let_else,
     clippy::too_many_lines,
@@ -28,6 +30,14 @@
     clippy::used_underscore_binding,
     clippy::unwrap_used
 )]
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod agent;
 mod cmd;
@@ -1131,6 +1141,11 @@ PATTERNS
 }
 
 fn main() -> anyhow::Result<()> {
+    // When built with --features dhat-heap, writes dhat-heap.json on exit.
+    // View at https://nnethercote.github.io/dh_view/dh_view.html
+    #[cfg(feature = "dhat-heap")]
+    let _dhat_profiler = dhat::Profiler::new_heap();
+
     let cli = Cli::parse();
     let is_tui = matches!(cli.command, Commands::Ui | Commands::Tui);
     let _telemetry_guard = if is_tui {

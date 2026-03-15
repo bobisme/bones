@@ -1886,6 +1886,8 @@ pub struct ListView {
     detail_item: Option<DetailItem>,
     /// Item ID currently loaded into `detail_item`.
     detail_item_id: Option<String>,
+    /// Cached rendered lines for the detail pane (invalidated when detail_item changes).
+    detail_lines_cache: Vec<Line<'static>>,
     /// Create-bone modal state when open.
     create_modal: Option<CreateModalState>,
     /// Item being edited in create modal; None means create mode.
@@ -1970,6 +1972,7 @@ impl ListView {
             split_resize_active: false,
             detail_item: None,
             detail_item_id: None,
+            detail_lines_cache: Vec::new(),
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
@@ -1998,6 +2001,7 @@ impl ListView {
             self.blocker_map.clear();
             self.detail_item = None;
             self.detail_item_id = None;
+            self.detail_lines_cache.clear();
             self.detail_scroll = 0;
             self.last_refresh = Instant::now();
             return Ok(());
@@ -2206,18 +2210,16 @@ impl ListView {
     }
 
     fn max_detail_scroll(&self) -> u16 {
-        if !self.show_detail {
+        if !self.show_detail || self.detail_lines_cache.is_empty() {
             return 0;
         }
-        let Some(detail) = self.detail_item.as_ref() else {
-            return 0;
-        };
         let viewport_h = self.detail_visible_height();
         if viewport_h == 0 {
             return 0;
         }
         let wrap_w = self.detail_area.width.saturating_sub(2).max(1) as usize;
-        let total_lines = detail_lines(detail)
+        let total_lines = self
+            .detail_lines_cache
             .iter()
             .map(|line| {
                 let width: usize = line
@@ -3389,6 +3391,16 @@ impl ListView {
         self.detail_scroll = 0;
         self.detail_item = None;
         self.detail_item_id = None;
+        self.detail_lines_cache.clear();
+    }
+
+    /// Rebuild the cached detail lines from the current `detail_item`.
+    fn rebuild_detail_lines_cache(&mut self) {
+        if let Some(ref detail) = self.detail_item {
+            self.detail_lines_cache = detail_lines(detail);
+        } else {
+            self.detail_lines_cache.clear();
+        }
     }
 
     fn refresh_selected_detail(&mut self) {
@@ -3399,12 +3411,26 @@ impl ListView {
         let Some(selected_id) = self.selected_item().map(|item| item.item_id.clone()) else {
             self.detail_item = None;
             self.detail_item_id = None;
+            self.detail_lines_cache.clear();
             return;
         };
 
         if self.detail_item_id.as_deref() == Some(selected_id.as_str()) {
+            // Same bone selected — check if its updated_at changed before reloading.
+            let cached_updated = self.detail_item.as_ref().map(|d| d.updated_at_us);
+            let db_updated = query::try_open_projection(&self.db_path)
+                .ok()
+                .flatten()
+                .and_then(|conn| query::get_item(&conn, &selected_id, false).ok().flatten())
+                .map(|item| item.updated_at_us);
+            if cached_updated == db_updated && cached_updated.is_some() {
+                // Nothing changed — skip reload entirely.
+                self.clamp_detail_scroll();
+                return;
+            }
             if let Ok(detail) = self.load_detail_item(&selected_id) {
                 self.detail_item = Some(detail);
+                self.rebuild_detail_lines_cache();
             }
             self.clamp_detail_scroll();
             return;
@@ -3415,10 +3441,12 @@ impl ListView {
                 self.detail_item = Some(detail);
                 self.detail_item_id = Some(selected_id);
                 self.detail_scroll = 0;
+                self.rebuild_detail_lines_cache();
             }
             Err(err) => {
                 self.detail_item = None;
                 self.detail_item_id = None;
+                self.detail_lines_cache.clear();
                 self.set_status(format!("detail load error: {err}"));
             }
         }
@@ -3466,14 +3494,16 @@ impl ListView {
         let blocked = load_detail_refs(&conn, blocked_ids)?;
         let relationships = load_detail_refs(&conn, relationship_ids)?;
 
-        let mut comments: Vec<DetailComment> = query::get_comments(&conn, item_id, None, None)?
-            .into_iter()
-            .map(|comment| DetailComment {
-                author: comment.author,
-                body: comment.body,
-                created_at_us: comment.created_at_us,
-            })
-            .collect();
+        // Cap at 200 most recent comments to bound memory in the detail pane.
+        let mut comments: Vec<DetailComment> =
+            query::get_comments(&conn, item_id, Some(200), None)?
+                .into_iter()
+                .map(|comment| DetailComment {
+                    author: comment.author,
+                    body: comment.body,
+                    created_at_us: comment.created_at_us,
+                })
+                .collect();
         comments.sort_by(|a, b| a.created_at_us.cmp(&b.created_at_us));
 
         Ok(DetailItem {
@@ -3990,9 +4020,9 @@ fn render_detail_panel(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if let Some(detail) = &app.detail_item {
+    if app.detail_item.is_some() && !app.detail_lines_cache.is_empty() {
         frame.render_widget(
-            Paragraph::new(detail_lines(detail))
+            Paragraph::new(app.detail_lines_cache.clone())
                 .scroll((app.detail_scroll, 0))
                 .wrap(Wrap { trim: false }),
             inner,
@@ -5964,6 +5994,7 @@ mod tests {
             split_resize_active: false,
             detail_item: None,
             detail_item_id: None,
+            detail_lines_cache: Vec::new(),
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
@@ -6073,6 +6104,7 @@ mod tests {
             split_resize_active: false,
             detail_item: None,
             detail_item_id: None,
+            detail_lines_cache: Vec::new(),
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
