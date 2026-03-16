@@ -393,9 +393,18 @@ fn validate_cursor_hash(content: &str, offset: usize, hash: &str) -> bool {
         return false;
     }
 
-    let before = &content[..offset];
-    let search_start = offset.saturating_sub(512);
-    let search_region = &before[search_start..];
+    // Snap to valid UTF-8 char boundaries to avoid panics on multi-byte content.
+    fn snap_forward(s: &str, offset: usize) -> usize {
+        let mut p = offset.min(s.len());
+        while p < s.len() && !s.is_char_boundary(p) {
+            p += 1;
+        }
+        p
+    }
+    let end = snap_forward(content, offset);
+    let before = &content[..end];
+    let search_start = snap_forward(content, offset.saturating_sub(512));
+    let search_region = &before[search_start.min(end)..];
     search_region.contains(hash)
 }
 

@@ -711,6 +711,8 @@ impl ShardManager {
                 let within = offset.saturating_sub(cumulative);
                 // Guard: within must not exceed shard content length.
                 let within = within.min(shard_content.len());
+                // Snap to a valid UTF-8 char boundary (scan forward).
+                let within = snap_to_char_boundary(&shard_content, within);
                 result.push_str(&shard_content[within..]);
                 found_start = true;
             }
@@ -775,7 +777,12 @@ impl ShardManager {
                 shard_content.len()
             };
 
-            result.push_str(&shard_content[within_start..within_end]);
+            // Snap both offsets to valid UTF-8 char boundaries.
+            let within_start = snap_to_char_boundary(&shard_content, within_start);
+            let within_end = snap_to_char_boundary(&shard_content, within_end);
+            if within_start < within_end {
+                result.push_str(&shard_content[within_start..within_end]);
+            }
             cumulative = shard_end;
         }
 
@@ -986,6 +993,23 @@ impl Iterator for ShardLineIterator {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Snap a byte offset to a valid UTF-8 char boundary within `s`.
+///
+/// If `offset` is already a char boundary (or equals `s.len()`), returns it
+/// unchanged.  Otherwise scans forward to the next boundary.  Returns
+/// `s.len()` if no valid boundary exists after `offset`.
+fn snap_to_char_boundary(s: &str, offset: usize) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    // str::is_char_boundary is O(1) — just checks the byte's top bits.
+    let mut pos = offset;
+    while pos < s.len() && !s.is_char_boundary(pos) {
+        pos += 1;
+    }
+    pos
+}
+
 /// Get the current year and month from system time.
 #[must_use]
 fn current_year_month() -> (i32, u32) {
@@ -1127,6 +1151,29 @@ fn recover_shard_torn_write(path: &Path) -> Result<Option<u64>, ShardError> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn snap_to_char_boundary_ascii() {
+        let s = "hello world";
+        assert_eq!(snap_to_char_boundary(s, 0), 0);
+        assert_eq!(snap_to_char_boundary(s, 5), 5);
+        assert_eq!(snap_to_char_boundary(s, 11), 11); // len
+        assert_eq!(snap_to_char_boundary(s, 100), 11); // beyond len
+    }
+
+    #[test]
+    fn snap_to_char_boundary_emoji() {
+        // ✅ is 3 bytes (E2 9C 85), 🎉 is 4 bytes (F0 9F 8E 89)
+        let s = "ab✅cd🎉ef";
+        // a=0, b=1, ✅=2..5, c=5, d=6, 🎉=7..11, e=11, f=12
+        assert_eq!(snap_to_char_boundary(s, 2), 2); // start of ✅
+        assert_eq!(snap_to_char_boundary(s, 3), 5); // inside ✅ → snaps to 'c'
+        assert_eq!(snap_to_char_boundary(s, 4), 5); // inside ✅ → snaps to 'c'
+        assert_eq!(snap_to_char_boundary(s, 5), 5); // 'c'
+        assert_eq!(snap_to_char_boundary(s, 8), 11); // inside 🎉 → snaps to 'e'
+        assert_eq!(snap_to_char_boundary(s, 9), 11);
+        assert_eq!(snap_to_char_boundary(s, 10), 11);
+    }
 
     fn setup() -> (TempDir, ShardManager) {
         let tmp = TempDir::new().expect("tempdir");
