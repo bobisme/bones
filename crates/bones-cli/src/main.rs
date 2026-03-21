@@ -1,5 +1,8 @@
 // Allow unsafe for optional allocator overrides (jemalloc, dhat).
-#![cfg_attr(not(any(feature = "dhat-heap", feature = "jemalloc")), forbid(unsafe_code))]
+#![cfg_attr(
+    not(any(feature = "dhat-heap", feature = "jemalloc")),
+    forbid(unsafe_code)
+)]
 #![cfg_attr(any(feature = "dhat-heap", feature = "jemalloc"), deny(unsafe_code))]
 #![allow(
     clippy::manual_let_else,
@@ -49,7 +52,7 @@ mod tui;
 mod validate;
 
 use bones_core::timing;
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use output::{CliError, OutputMode, render_error, resolve_output_mode};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -62,24 +65,6 @@ use tracing::info;
     version,
     about = "bones: pile-first tracker for humans and agents",
     long_about = None,
-    after_help = "QUICK REFERENCE:\n\n  \
-    Create a bone\n\n      \
-    bn create --title \"Fix login bug\"\n\n  \
-    Start work on a bone\n\n      \
-    bn do <id>\n\n  \
-    Mark a bone as done\n\n      \
-    bn done <id>\n\n  \
-    Update a bone field\n\n      \
-    bn update <id> --title \"New title\"\n\n  \
-    Add a comment\n\n      \
-    bn bone comment add <id> \"progress note\"\n\n  \
-    Get next recommended bone\n\n      \
-    bn next\n\n  \
-    Get next N bones for dispatch\n\n      \
-    bn next N\n\n  \
-    Run triage report\n\n      \
-    bn triage\n\n  \
-    See all commands: bn tldr"
 )]
 struct Cli {
     /// Enable verbose logging.
@@ -1058,9 +1043,7 @@ fn setup_merge_tool() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_tldr() {
-    println!(
-        "\
+const TLDR_TEXT: &str = "\
 QUICK REFERENCE
 
   Create a bone
@@ -1068,6 +1051,7 @@ QUICK REFERENCE
       bn create --title \"Fix login bug\"
       bn create --title \"Launch v2\" --kind goal
       bn create --title \"Sub-task\" --parent <goal-id>
+      bn create --title \"Add tests\" --size m --label backend
 
   Start work on a bone
 
@@ -1081,6 +1065,8 @@ QUICK REFERENCE
 
       bn update <id> --title \"New title\"
       bn update <id> --urgency urgent
+      bn update <id> --size l
+      bn update <id> --label backend --label needs-review
 
   Add a comment
 
@@ -1123,6 +1109,13 @@ QUICK REFERENCE
       bn dep add <blocker> --blocks <blocked>
       bn dep rm <blocker> <blocked>
 
+FIELD VALUES
+
+  --kind      task | goal | bug             (default: task)
+  --urgency   punt | default | urgent       (default: default)
+  --size      xs | s | m | l | xl           (t-shirt estimate)
+  --label     any string; repeatable        (-l foo -l bar)
+
 PATTERNS
 
   Plan a goal with child tasks
@@ -1136,8 +1129,10 @@ PATTERNS
       bn create --title \"Phase 1: Core\" --kind goal    # → bn-aaa
       bn create --title \"Phase 2: Polish\" --kind goal  # → bn-bbb
       bn dep add bn-aaa --blocks bn-bbb
-"
-    );
+";
+
+fn print_tldr() {
+    println!("{}", TLDR_TEXT);
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1146,7 +1141,11 @@ fn main() -> anyhow::Result<()> {
     #[cfg(feature = "dhat-heap")]
     let _dhat_profiler = dhat::Profiler::new_heap();
 
-    let cli = Cli::parse();
+    let matches = Cli::command().after_help(TLDR_TEXT).get_matches();
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(e) => e.exit(),
+    };
     let is_tui = matches!(cli.command, Commands::Ui | Commands::Tui);
     let _telemetry_guard = if is_tui {
         telemetry::init_for_tui()

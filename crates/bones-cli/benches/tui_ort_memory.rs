@@ -39,8 +39,10 @@ fn main() -> Result<()> {
     };
 
     let rss_after_load = rss_mb();
-    eprintln!("RSS after model load:  {rss_after_load:.1} MB (+{:.1} MB)",
-        rss_after_load - rss_baseline);
+    eprintln!(
+        "RSS after model load:  {rss_after_load:.1} MB (+{:.1} MB)",
+        rss_after_load - rss_baseline
+    );
 
     // Simulate the TUI's semantic search being triggered periodically.
     // In ward, users might type in the search box which triggers embed() calls.
@@ -62,8 +64,10 @@ fn main() -> Result<()> {
 
         if i % 1000 == 0 {
             let rss_now = rss_mb();
-            eprintln!("  inference {i:>5}: RSS = {rss_now:.1} MB (+{:.1} from load)",
-                rss_now - rss_after_load);
+            eprintln!(
+                "  inference {i:>5}: RSS = {rss_now:.1} MB (+{:.1} from load)",
+                rss_now - rss_after_load
+            );
         }
     }
 
@@ -76,8 +80,14 @@ fn main() -> Result<()> {
     eprintln!("Time per inference: {:.2?}", elapsed / n_inferences as u32);
     eprintln!("RSS after load:  {rss_after_load:.1} MB");
     eprintln!("RSS final:       {rss_final:.1} MB");
-    eprintln!("RSS growth from inference: {:.1} MB", rss_final - rss_after_load);
-    eprintln!("RSS total (model + inference): {:.1} MB", rss_final - rss_baseline);
+    eprintln!(
+        "RSS growth from inference: {:.1} MB",
+        rss_final - rss_after_load
+    );
+    eprintln!(
+        "RSS total (model + inference): {:.1} MB",
+        rss_final - rss_baseline
+    );
 
     Ok(())
 }

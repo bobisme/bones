@@ -52,7 +52,11 @@ fn simulate_detail_lines(comments: &[(String, String, i64)]) -> Vec<String> {
 }
 
 /// Create a synthetic bones.db with `n_items` bones, each having `comments_per_item` comments.
-fn create_synthetic_db(path: &std::path::Path, n_items: usize, comments_per_item: usize) -> Result<()> {
+fn create_synthetic_db(
+    path: &std::path::Path,
+    n_items: usize,
+    comments_per_item: usize,
+) -> Result<()> {
     let conn = Connection::open(path)?;
 
     conn.execute_batch(
@@ -151,9 +155,24 @@ fn create_synthetic_db(path: &std::path::Path, n_items: usize, comments_per_item
              ### Requirements\n\n- First with **bold**\n- Second with `code`\n\
              - Third\n\n```rust\nfn example() {{\n    println!(\"hello\");\n}}\n```"
         );
-        let state = if i % 5 == 0 { "done" } else if i % 3 == 0 { "doing" } else { "open" };
+        let state = if i % 5 == 0 {
+            "done"
+        } else if i % 3 == 0 {
+            "doing"
+        } else {
+            "open"
+        };
         let ts = base_ts + (i as i64) * 1_000_000;
-        stmt.execute(rusqlite::params![id, title, desc, "task", state, "default", ts, ts + 60_000_000])?;
+        stmt.execute(rusqlite::params![
+            id,
+            title,
+            desc,
+            "task",
+            state,
+            "default",
+            ts,
+            ts + 60_000_000
+        ])?;
     }
 
     let comment_templates = [
@@ -176,19 +195,26 @@ fn create_synthetic_db(path: &std::path::Path, n_items: usize, comments_per_item
             let ts = base_ts + (i as i64) * 1_000_000 + (j as i64) * 100_000;
             let hash = format!("hash-{hash_counter:012x}");
             hash_counter += 1;
-            let author = if j % 2 == 0 { "ward-dev" } else { "ward-worker-1" };
+            let author = if j % 2 == 0 {
+                "ward-dev"
+            } else {
+                "ward-worker-1"
+            };
             comment_stmt.execute(rusqlite::params![id, hash, author, body, ts])?;
         }
     }
 
-    let mut label_stmt = conn.prepare(
-        "INSERT INTO item_labels (item_id, label, created_at_us) VALUES (?1, ?2, ?3)",
-    )?;
+    let mut label_stmt = conn
+        .prepare("INSERT INTO item_labels (item_id, label, created_at_us) VALUES (?1, ?2, ?3)")?;
     for i in 0..n_items {
         let id = format!("bn-bench{i:04}");
         let ts = base_ts + (i as i64) * 1_000_000;
-        if i % 3 == 0 { label_stmt.execute(rusqlite::params![id, "backend", ts])?; }
-        if i % 4 == 0 { label_stmt.execute(rusqlite::params![id, "perf", ts])?; }
+        if i % 3 == 0 {
+            label_stmt.execute(rusqlite::params![id, "backend", ts])?;
+        }
+        if i % 4 == 0 {
+            label_stmt.execute(rusqlite::params![id, "perf", ts])?;
+        }
     }
 
     drop(stmt);
@@ -259,9 +285,14 @@ fn main() -> Result<()> {
 
     let reload_time = start.elapsed();
     let rss_after_reload = rss_mb();
-    eprintln!("Time: {reload_time:.2?} ({:.2?}/iter)", reload_time / n_reloads);
-    eprintln!("RSS: {rss_before:.1} -> {rss_after_reload:.1} MB (+{:.1} MB)",
-        rss_after_reload - rss_before);
+    eprintln!(
+        "Time: {reload_time:.2?} ({:.2?}/iter)",
+        reload_time / n_reloads
+    );
+    eprintln!(
+        "RSS: {rss_before:.1} -> {rss_after_reload:.1} MB (+{:.1} MB)",
+        rss_after_reload - rss_before
+    );
     eprintln!();
 
     // =========================================================================
@@ -288,15 +319,24 @@ fn main() -> Result<()> {
             .collect();
 
         if i % 100 == 0 {
-            eprintln!("  detail {i:>4}: RSS = {:.1} MB, comments = {}", rss_mb(), comments.len());
+            eprintln!(
+                "  detail {i:>4}: RSS = {:.1} MB, comments = {}",
+                rss_mb(),
+                comments.len()
+            );
         }
     }
 
     let detail_time = start.elapsed();
     let rss_after_detail = rss_mb();
-    eprintln!("Time: {detail_time:.2?} ({:.2?}/iter)", detail_time / n_detail_loads);
-    eprintln!("RSS: {rss_before:.1} -> {rss_after_detail:.1} MB (+{:.1} MB)",
-        rss_after_detail - rss_before);
+    eprintln!(
+        "Time: {detail_time:.2?} ({:.2?}/iter)",
+        detail_time / n_detail_loads
+    );
+    eprintln!(
+        "RSS: {rss_before:.1} -> {rss_after_detail:.1} MB (+{:.1} MB)",
+        rss_after_detail - rss_before
+    );
     eprintln!();
 
     // =========================================================================
@@ -319,18 +359,30 @@ fn main() -> Result<()> {
     for i in 0..n_renders {
         let lines = simulate_detail_lines(&comments);
         // Simulate what max_detail_scroll does: measure line widths
-        let _total: usize = lines.iter().map(|l| l.chars().count().max(1).div_ceil(80)).sum();
+        let _total: usize = lines
+            .iter()
+            .map(|l| l.chars().count().max(1).div_ceil(80))
+            .sum();
 
         if i % 1000 == 0 {
-            eprintln!("  render {i:>5}: RSS = {:.1} MB, lines = {}", rss_mb(), lines.len());
+            eprintln!(
+                "  render {i:>5}: RSS = {:.1} MB, lines = {}",
+                rss_mb(),
+                lines.len()
+            );
         }
     }
 
     let render_time = start.elapsed();
     let rss_after_render = rss_mb();
-    eprintln!("Time: {render_time:.2?} ({:.2?}/iter)", render_time / n_renders);
-    eprintln!("RSS: {rss_before:.1} -> {rss_after_render:.1} MB (+{:.1} MB)",
-        rss_after_render - rss_before);
+    eprintln!(
+        "Time: {render_time:.2?} ({:.2?}/iter)",
+        render_time / n_renders
+    );
+    eprintln!(
+        "RSS: {rss_before:.1} -> {rss_after_render:.1} MB (+{:.1} MB)",
+        rss_after_render - rss_before
+    );
     eprintln!();
 
     // =========================================================================
@@ -372,7 +424,10 @@ fn main() -> Result<()> {
 
         // Step 3: clamp_detail_scroll -> detail_lines (call 1)
         let lines = simulate_detail_lines(&comments);
-        let _total: usize = lines.iter().map(|l| l.chars().count().max(1).div_ceil(80)).sum();
+        let _total: usize = lines
+            .iter()
+            .map(|l| l.chars().count().max(1).div_ceil(80))
+            .sum();
         drop(lines);
 
         // Step 4: render -> detail_lines (call 2)
@@ -386,9 +441,14 @@ fn main() -> Result<()> {
 
     let cycle_time = start.elapsed();
     let rss_after_cycle = rss_mb();
-    eprintln!("Time: {cycle_time:.2?} ({:.2?}/iter)", cycle_time / n_cycles);
-    eprintln!("RSS: {rss_before:.1} -> {rss_after_cycle:.1} MB (+{:.1} MB)",
-        rss_after_cycle - rss_before);
+    eprintln!(
+        "Time: {cycle_time:.2?} ({:.2?}/iter)",
+        cycle_time / n_cycles
+    );
+    eprintln!(
+        "RSS: {rss_before:.1} -> {rss_after_cycle:.1} MB (+{:.1} MB)",
+        rss_after_cycle - rss_before
+    );
     eprintln!();
 
     // =========================================================================

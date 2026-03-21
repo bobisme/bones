@@ -6,12 +6,12 @@
 
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 use ratatui::{
+    Terminal,
     backend::TestBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Terminal,
 };
 use std::time::Instant;
 
@@ -221,16 +221,13 @@ fn main() {
                 let list_width = area.width * 60 / 100;
                 let detail_width = area.width - list_width;
 
-                let detail_area =
-                    Rect::new(list_width, area.y, detail_width, area.height);
+                let detail_area = Rect::new(list_width, area.y, detail_width, area.height);
 
                 // Build detail_lines fresh (same as real TUI - no caching)
                 let lines = build_detail_lines(&comments);
 
                 // Render with wrap (same as render_detail_panel)
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Detail ");
+                let block = Block::default().borders(Borders::ALL).title(" Detail ");
                 let inner = block.inner(detail_area);
                 frame.render_widget(block, detail_area);
                 frame.render_widget(
@@ -245,10 +242,7 @@ fn main() {
                 let mut list_lines = Vec::new();
                 for j in 0..40_u16 {
                     list_lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("bn-bench{j:04} "),
-                            Style::default().fg(Color::Cyan),
-                        ),
+                        Span::styled(format!("bn-bench{j:04} "), Style::default().fg(Color::Cyan)),
                         Span::raw(format!("Benchmark bone {j}: feature implementation")),
                     ]));
                 }
@@ -291,5 +285,8 @@ fn main() {
             0.0
         }
     );
-    eprintln!("Frames per second: {:.0}", n_frames as f64 / elapsed.as_secs_f64());
+    eprintln!(
+        "Frames per second: {:.0}",
+        n_frames as f64 / elapsed.as_secs_f64()
+    );
 }
