@@ -125,7 +125,7 @@ impl SemanticModel {
         }
 
         // Hash embedder is always available as a zero-dependency fallback.
-        tracing::info!("using hash embedder (no ML backend available)");
+        tracing::debug!("using hash embedder (no ML backend available)");
         Ok(Self {
             inner: BackendInner::Hash(HashEmbedBackend::new()),
         })
