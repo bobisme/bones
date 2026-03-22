@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.23.2 - 2026-03-22
+
+- `cargo install bones-cli` now just works on Windows — semantic backend is auto-selected per platform via target-specific dependencies. No special flags needed.
+
 ## v0.23.1 - 2026-03-22
 
 ### Two-tier progressive search in TUI
