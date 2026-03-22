@@ -8,9 +8,6 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tracing::debug;
 
-/// Expected embedding dimensionality (MiniLM-L6-v2).
-const EMBEDDING_DIM: usize = 384;
-
 /// A single semantic search result with item ID and similarity score.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SemanticSearchResult {
@@ -24,21 +21,19 @@ pub struct SemanticSearchResult {
 ///
 /// The function computes cosine similarity between the query embedding and each
 /// stored item embedding, then returns the top `limit` items by score.
+/// Stored embeddings whose dimension doesn't match the query are silently
+/// skipped (this handles backend switches gracefully).
 ///
 /// # Errors
 ///
-/// Returns an error if the query embedding dimension mismatches or the database
-/// query fails.
+/// Returns an error if the query embedding is empty or the database query fails.
 pub fn knn_search(
     db: &Connection,
     query_embedding: &[f32],
     limit: usize,
 ) -> Result<Vec<SemanticSearchResult>> {
-    if query_embedding.len() != EMBEDDING_DIM {
-        bail!(
-            "query embedding dimension mismatch: expected {EMBEDDING_DIM}, got {}",
-            query_embedding.len()
-        );
+    if query_embedding.is_empty() {
+        bail!("query embedding must not be empty");
     }
 
     if limit == 0 {
@@ -72,15 +67,6 @@ pub fn knn_search(
                 continue;
             }
         };
-
-        if embedding.len() != EMBEDDING_DIM {
-            debug!(
-                "skipping semantic embedding row for {} due to dimension {}",
-                item_id,
-                embedding.len()
-            );
-            continue;
-        }
 
         let Some(cosine) = cosine_similarity(query_embedding, &embedding) else {
             continue;
@@ -218,8 +204,10 @@ mod tests {
         db
     }
 
+    const TEST_DIM: usize = 256;
+
     fn sample_embedding(fill: f32) -> Vec<f32> {
-        vec![fill; EMBEDDING_DIM]
+        vec![fill; TEST_DIM]
     }
 
     fn insert_embedding(db: &Connection, item_id: &str, embedding: &[f32]) {
@@ -252,21 +240,13 @@ mod tests {
     }
 
     #[test]
-    fn knn_search_rejects_wrong_dimension() {
-        let db = setup_mock_db();
-        let bad_embedding = vec![0.1_f32; 100];
-        let err = knn_search(&db, &bad_embedding, 10).unwrap_err();
-        assert!(
-            err.to_string().contains("dimension mismatch"),
-            "expected dimension error, got: {err}"
-        );
-    }
-
-    #[test]
     fn knn_search_rejects_empty_embedding() {
         let db = setup_mock_db();
         let err = knn_search(&db, &[], 10).unwrap_err();
-        assert!(err.to_string().contains("dimension mismatch"));
+        assert!(
+            err.to_string().contains("must not be empty"),
+            "expected empty error, got: {err}"
+        );
     }
 
     #[test]
@@ -294,9 +274,9 @@ mod tests {
     #[test]
     fn knn_search_returns_ranked_results() {
         let db = setup_mock_db();
-        let mut near = vec![0.0_f32; EMBEDDING_DIM];
+        let mut near = vec![0.0_f32; TEST_DIM];
         near[0] = 1.0;
-        let mut far = vec![0.0_f32; EMBEDDING_DIM];
+        let mut far = vec![0.0_f32; TEST_DIM];
         far[0] = -1.0;
 
         insert_embedding(&db, "bn-near", &near);

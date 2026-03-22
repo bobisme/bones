@@ -219,18 +219,34 @@ fn knn_search_errors_gracefully_when_vec_table_missing() {
     );
 }
 
-/// Wrong-dimension embedding always causes a clear error regardless of table state.
+/// Any non-empty embedding dimension is accepted.  When stored embeddings
+/// have a different dimension the cosine function returns `None` and those
+/// rows are silently skipped, so the result set is empty rather than an error.
 #[test]
-fn knn_search_rejects_wrong_dimension_embedding() {
+fn knn_search_accepts_any_dimension() {
     let conn = build_db_with_items();
+    // Ensure the embeddings table exists.
+    bones_search::semantic::ensure_semantic_index_schema(&conn)
+        .expect("create semantic schema");
 
-    let bad_embedding = vec![0.1_f32; 128]; // wrong dimension (not 384)
-    let result = knn_search(&conn, &bad_embedding, 10);
+    let embedding = vec![0.1_f32; 128];
+    let result = knn_search(&conn, &embedding, 10);
+    // No stored embeddings match 128-dim, so result is empty (not an error).
+    assert!(result.is_ok(), "non-empty embedding must not error: {}", result.unwrap_err());
+    assert!(result.unwrap().is_empty());
+}
 
-    assert!(result.is_err(), "wrong-dimension embedding must return Err");
+/// Empty embedding must still be rejected.
+#[test]
+fn knn_search_rejects_empty_embedding() {
+    let conn = build_db_with_items();
+    bones_search::semantic::ensure_semantic_index_schema(&conn)
+        .expect("create semantic schema");
+    let result = knn_search(&conn, &[], 10);
+    assert!(result.is_err(), "empty embedding must return Err");
     assert!(
-        result.unwrap_err().to_string().contains("dimension"),
-        "error should mention dimension mismatch"
+        result.unwrap_err().to_string().contains("must not be empty"),
+        "error should mention empty embedding"
     );
 }
 
