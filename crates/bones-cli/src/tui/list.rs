@@ -1886,7 +1886,7 @@ pub struct ListView {
     detail_item: Option<DetailItem>,
     /// Item ID currently loaded into `detail_item`.
     detail_item_id: Option<String>,
-    /// Cached rendered lines for the detail pane (invalidated when detail_item changes).
+    /// Cached rendered lines for the detail pane (invalidated when `detail_item` changes).
     detail_lines_cache: Vec<Line<'static>>,
     /// Create-bone modal state when open.
     create_modal: Option<CreateModalState>,

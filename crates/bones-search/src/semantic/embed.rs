@@ -56,7 +56,13 @@ impl<'a> EmbeddingPipeline<'a> {
             .embed(&content)
             .with_context(|| format!("embedding inference failed for item {}", item.id))?;
 
-        upsert_embedding(self.db, &item.id, &content_hash, &embedding, self.embedding_dim)
+        upsert_embedding(
+            self.db,
+            &item.id,
+            &content_hash,
+            &embedding,
+            self.embedding_dim,
+        )
     }
 
     /// Batch-embed multiple items.

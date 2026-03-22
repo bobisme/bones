@@ -1132,7 +1132,7 @@ PATTERNS
 ";
 
 fn print_tldr() {
-    println!("{}", TLDR_TEXT);
+    println!("{TLDR_TEXT}");
 }
 
 fn main() -> anyhow::Result<()> {

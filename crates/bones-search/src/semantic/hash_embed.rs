@@ -27,14 +27,14 @@ pub struct HashEmbedBackend {
 
 impl HashEmbedBackend {
     /// Create a new hash embedder with the default dimension.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             dimensions: HASH_DIM,
         }
     }
 
     /// The dimensionality of embedding vectors this backend produces.
-    pub fn dimensions(&self) -> usize {
+    pub const fn dimensions(&self) -> usize {
         self.dimensions
     }
 
@@ -94,7 +94,12 @@ fn fnv1a(bytes: &[u8]) -> usize {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    hash as usize
+    // Truncation to usize is intentional — we only need a well-distributed
+    // index into the embedding dimension, not the full 64-bit value.
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        hash as usize
+    }
 }
 
 fn normalize_l2(values: &mut [f32]) {
@@ -123,10 +128,7 @@ mod tests {
         let backend = HashEmbedBackend::new();
         let embedding = backend.embed("some text to embed").unwrap();
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!(
-            (norm - 1.0).abs() < 1e-5,
-            "expected unit norm, got {norm}"
-        );
+        assert!((norm - 1.0).abs() < 1e-5, "expected unit norm, got {norm}");
     }
 
     #[test]
@@ -157,10 +159,7 @@ mod tests {
         let backend = HashEmbedBackend::new();
         let texts = &["hello", "world"];
         let batch = backend.embed_batch(texts).unwrap();
-        let individual: Vec<Vec<f32>> = texts
-            .iter()
-            .map(|t| backend.embed(t).unwrap())
-            .collect();
+        let individual: Vec<Vec<f32>> = texts.iter().map(|t| backend.embed(t).unwrap()).collect();
         assert_eq!(batch, individual);
     }
 

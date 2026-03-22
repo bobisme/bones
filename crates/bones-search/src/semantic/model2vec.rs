@@ -1,12 +1,12 @@
-//! Model2Vec embedding backend.
+//! `Model2Vec` embedding backend.
 //!
-//! Model2Vec converts transformer models into static token embedding lookup
+//! `Model2Vec` converts transformer models into static token embedding lookup
 //! tables at distillation time.  At inference time, embedding a text is just:
 //!
 //!   tokenize → table lookup → mean pool → L2 normalize
 //!
 //! No neural-network forward pass, no ONNX runtime.  Dependencies are
-//! `safetensors` (to read the weight matrix) and `tokenizers` (HuggingFace
+//! `safetensors` (to read the weight matrix) and `tokenizers` (`HuggingFace`
 //! BPE/WordPiece tokenizer).
 
 #[cfg(feature = "semantic-model2vec")]
@@ -30,13 +30,7 @@ const TOKENIZER_DOWNLOAD_URL_DEFAULT: &str =
 /// Known tensor names that model2vec safetensors files use for the embedding
 /// matrix.
 #[cfg(feature = "semantic-model2vec")]
-const TENSOR_NAMES: &[&str] = &[
-    "embeddings",
-    "embedding",
-    "word_embeddings",
-    "embed",
-    "emb",
-];
+const TENSOR_NAMES: &[&str] = &["embeddings", "embedding", "word_embeddings", "embed", "emb"];
 
 /// Static token-embedding model loaded from safetensors.
 #[cfg(feature = "semantic-model2vec")]
@@ -125,7 +119,7 @@ impl Model2VecBackend {
     }
 
     /// The dimensionality of the embedding vectors this model produces.
-    pub fn dimensions(&self) -> usize {
+    pub const fn dimensions(&self) -> usize {
         self.dimensions
     }
 
@@ -156,6 +150,7 @@ impl Model2VecBackend {
             return Ok(vec![0.0; self.dimensions]);
         }
 
+        #[allow(clippy::cast_precision_loss)]
         let inv = 1.0 / count as f32;
         for s in &mut sum {
             *s *= inv;
@@ -195,15 +190,13 @@ fn find_embedding_tensor<'a>(
     let names: Vec<_> = tensors.names().into_iter().collect();
     if names.len() == 1 {
         return tensors
-            .tensor(&names[0])
+            .tensor(names[0].as_str())
             .context("failed to load single tensor from model2vec safetensors");
     }
 
     bail!(
         "could not find embedding tensor in model2vec safetensors; \
-         tried {:?}, found tensors: {:?}",
-        TENSOR_NAMES,
-        names
+         tried {TENSOR_NAMES:?}, found tensors: {names:?}",
     );
 }
 
@@ -242,10 +235,16 @@ fn download_to_path(url: &str, path: &Path, label: &str) -> Result<()> {
     use std::time::Duration;
 
     let parent = path.parent().with_context(|| {
-        format!("{label} cache path '{}' has no parent directory", path.display())
+        format!(
+            "{label} cache path '{}' has no parent directory",
+            path.display()
+        )
     })?;
     std::fs::create_dir_all(parent).with_context(|| {
-        format!("failed to create {label} cache directory {}", parent.display())
+        format!(
+            "failed to create {label} cache directory {}",
+            parent.display()
+        )
     })?;
 
     let temp_path = parent.join(format!(
@@ -283,9 +282,8 @@ fn download_to_path(url: &str, path: &Path, label: &str) -> Result<()> {
     }
 
     if path.exists() {
-        std::fs::remove_file(path).with_context(|| {
-            format!("failed to replace existing {label} at {}", path.display())
-        })?;
+        std::fs::remove_file(path)
+            .with_context(|| format!("failed to replace existing {label} at {}", path.display()))?;
     }
 
     std::fs::rename(&temp_path, path).with_context(|| {

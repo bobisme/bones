@@ -998,7 +998,7 @@ impl Iterator for ShardLineIterator {
 /// If `offset` is already a char boundary (or equals `s.len()`), returns it
 /// unchanged.  Otherwise scans forward to the next boundary.  Returns
 /// `s.len()` if no valid boundary exists after `offset`.
-fn snap_to_char_boundary(s: &str, offset: usize) -> usize {
+const fn snap_to_char_boundary(s: &str, offset: usize) -> usize {
     if offset >= s.len() {
         return s.len();
     }

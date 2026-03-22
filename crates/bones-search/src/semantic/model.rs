@@ -49,9 +49,9 @@ const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
     "/models/minilm-l6-v2-int8.onnx"
 ));
 
+use super::hash_embed::HashEmbedBackend;
 #[cfg(feature = "semantic-model2vec")]
 use super::model2vec::Model2VecBackend;
-use super::hash_embed::HashEmbedBackend;
 
 /// Wrapper around an embedding model backend.
 ///
@@ -62,6 +62,7 @@ pub struct SemanticModel {
     inner: BackendInner,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum BackendInner {
     #[cfg(feature = "semantic-ort")]
     Ort {
@@ -149,9 +150,7 @@ impl SemanticModel {
         let session = Session::builder()
             .context("failed to create ONNX Runtime session builder")?
             .commit_from_file(&path)
-            .with_context(|| {
-                format!("failed to load semantic model from {}", path.display())
-            })?;
+            .with_context(|| format!("failed to load semantic model from {}", path.display()))?;
 
         Ok(Self {
             inner: BackendInner::Ort {
@@ -183,6 +182,10 @@ impl SemanticModel {
     }
 
     /// Return the OS-appropriate cache root for model files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the OS cache directory cannot be determined.
     pub fn model_cache_root() -> Result<PathBuf> {
         let mut path = dirs::cache_dir().context("unable to determine OS cache directory")?;
         path.push("bones");
@@ -339,6 +342,7 @@ impl SemanticModel {
 
     /// The dimensionality of embedding vectors this model produces.
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn dimensions(&self) -> usize {
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
@@ -352,6 +356,7 @@ impl SemanticModel {
     /// A stable identifier for the active backend, used to detect backend
     /// switches that require re-embedding stored vectors.
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn backend_id(&self) -> &'static str {
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
@@ -407,7 +412,12 @@ impl SemanticModel {
     fn ort_tokenizer(&self) -> &Tokenizer {
         match &self.inner {
             BackendInner::Ort { tokenizer, .. } => tokenizer,
-            _ => unreachable!("encode_text called on non-ORT backend"),
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(_) | BackendInner::Hash(_) => {
+                unreachable!("encode_text called on non-ORT backend")
+            }
+            #[cfg(not(feature = "semantic-model2vec"))]
+            BackendInner::Hash(_) => unreachable!("encode_text called on non-ORT backend"),
         }
     }
 
@@ -415,7 +425,12 @@ impl SemanticModel {
     fn ort_session(&self) -> &Mutex<Session> {
         match &self.inner {
             BackendInner::Ort { session, .. } => session,
-            _ => unreachable!("run_model_batch called on non-ORT backend"),
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(_) | BackendInner::Hash(_) => {
+                unreachable!("run_model_batch called on non-ORT backend")
+            }
+            #[cfg(not(feature = "semantic-model2vec"))]
+            BackendInner::Hash(_) => unreachable!("run_model_batch called on non-ORT backend"),
         }
     }
 
