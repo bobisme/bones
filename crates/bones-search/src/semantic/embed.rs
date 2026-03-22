@@ -5,7 +5,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
-const EMBEDDING_DIM: usize = 384;
 const SEMANTIC_META_ID: i64 = 1;
 
 /// Summary of semantic index synchronization work.
@@ -19,6 +18,8 @@ pub struct SyncStats {
 pub struct EmbeddingPipeline<'a> {
     model: &'a SemanticModel,
     db: &'a Connection,
+    embedding_dim: usize,
+    backend_id: &'static str,
 }
 
 impl<'a> EmbeddingPipeline<'a> {
@@ -29,7 +30,12 @@ impl<'a> EmbeddingPipeline<'a> {
     /// Returns an error if the database schema creation fails.
     pub fn new(model: &'a SemanticModel, db: &'a Connection) -> Result<Self> {
         ensure_embedding_schema(db)?;
-        Ok(Self { model, db })
+        Ok(Self {
+            model,
+            db,
+            embedding_dim: model.dimensions(),
+            backend_id: model.backend_id(),
+        })
     }
 
     /// Embed a single item and upsert its vector if content changed.
@@ -39,7 +45,7 @@ impl<'a> EmbeddingPipeline<'a> {
     /// Returns an error if inference or the database upsert fails.
     pub fn embed_item(&self, item: &WorkItemFields) -> Result<bool> {
         let content = item_content(item);
-        let content_hash = content_hash_hex(&content);
+        let content_hash = content_hash_hex(&content, self.backend_id);
 
         if has_same_hash(self.db, &item.id, &content_hash)? {
             return Ok(false);
@@ -50,7 +56,7 @@ impl<'a> EmbeddingPipeline<'a> {
             .embed(&content)
             .with_context(|| format!("embedding inference failed for item {}", item.id))?;
 
-        upsert_embedding(self.db, &item.id, &content_hash, &embedding)
+        upsert_embedding(self.db, &item.id, &content_hash, &embedding, self.embedding_dim)
     }
 
     /// Batch-embed multiple items.
@@ -63,7 +69,7 @@ impl<'a> EmbeddingPipeline<'a> {
 
         for item in items {
             let content = item_content(item);
-            let content_hash = content_hash_hex(&content);
+            let content_hash = content_hash_hex(&content, self.backend_id);
             if has_same_hash(self.db, &item.id, &content_hash)? {
                 continue;
             }
@@ -89,7 +95,7 @@ impl<'a> EmbeddingPipeline<'a> {
         }
 
         for ((item_id, hash, _), embedding) in pending.iter().zip(embeddings) {
-            upsert_embedding(self.db, item_id, hash, &embedding)?;
+            upsert_embedding(self.db, item_id, hash, &embedding, self.embedding_dim)?;
         }
 
         Ok(pending.len())
@@ -120,7 +126,10 @@ pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Res
         return Ok(SyncStats::default());
     }
 
-    let items = load_items_for_embedding(db)?;
+    let backend_id = model.backend_id();
+    let embedding_dim = model.dimensions();
+
+    let items = load_items_for_embedding(db, backend_id)?;
     let live_ids: HashSet<String> = items.iter().map(|(id, _, _)| id.clone()).collect();
     let existing_hashes = load_existing_hashes(db)?;
 
@@ -152,7 +161,7 @@ pub fn sync_projection_embeddings(db: &Connection, model: &SemanticModel) -> Res
         }
 
         for ((item_id, content_hash, _), embedding) in pending.iter().zip(embeddings.iter()) {
-            upsert_embedding(db, item_id, content_hash, embedding)?;
+            upsert_embedding(db, item_id, content_hash, embedding, embedding_dim)?;
         }
         pending.len()
     };
@@ -257,7 +266,10 @@ fn set_semantic_cursor(db: &Connection, offset: i64, hash: Option<&str>) -> Resu
     Ok(())
 }
 
-fn load_items_for_embedding(db: &Connection) -> Result<Vec<(String, String, String)>> {
+fn load_items_for_embedding(
+    db: &Connection,
+    backend_id: &str,
+) -> Result<Vec<(String, String, String)>> {
     let mut stmt = db
         .prepare(
             "SELECT item_id, title, description
@@ -280,7 +292,7 @@ fn load_items_for_embedding(db: &Connection) -> Result<Vec<(String, String, Stri
         let (item_id, title, description) =
             row.context("failed to read item row for semantic sync")?;
         let content = content_from_title_description(&title, description.as_deref());
-        let content_hash = content_hash_hex(&content);
+        let content_hash = content_hash_hex(&content, backend_id);
         items.push((item_id, content_hash, content));
     }
 
@@ -350,10 +362,11 @@ fn upsert_embedding(
     item_id: &str,
     content_hash: &str,
     embedding: &[f32],
+    expected_dim: usize,
 ) -> Result<bool> {
-    if embedding.len() != EMBEDDING_DIM {
+    if embedding.len() != expected_dim {
         bail!(
-            "invalid embedding dimension for item {item_id}: expected {EMBEDDING_DIM}, got {}",
+            "invalid embedding dimension for item {item_id}: expected {expected_dim}, got {}",
             embedding.len()
         );
     }
@@ -398,8 +411,10 @@ fn content_from_title_description(title: &str, description: Option<&str>) -> Str
     }
 }
 
-fn content_hash_hex(content: &str) -> String {
+fn content_hash_hex(content: &str, backend_id: &str) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(backend_id.as_bytes());
+    hasher.update(b":");
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())
 }
@@ -446,14 +461,23 @@ mod tests {
         Ok(())
     }
 
+    const TEST_DIM: usize = 384;
+
     fn sample_embedding() -> Vec<f32> {
-        vec![0.25_f32; EMBEDDING_DIM]
+        vec![0.25_f32; TEST_DIM]
     }
 
     #[test]
     fn content_hash_changes_with_content() {
-        let left = content_hash_hex("alpha");
-        let right = content_hash_hex("beta");
+        let left = content_hash_hex("alpha", "test");
+        let right = content_hash_hex("beta", "test");
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn content_hash_changes_with_backend() {
+        let left = content_hash_hex("same", "ort");
+        let right = content_hash_hex("same", "model2vec");
         assert_ne!(left, right);
     }
 
@@ -474,11 +498,11 @@ mod tests {
         seed_schema_for_unit_tests(&db)?;
 
         let item_id = "bn-abc";
-        let hash = content_hash_hex("same-content");
+        let hash = content_hash_hex("same-content", "test");
         let embedding = sample_embedding();
 
-        let inserted = upsert_embedding(&db, item_id, &hash, &embedding)?;
-        let skipped = upsert_embedding(&db, item_id, &hash, &embedding)?;
+        let inserted = upsert_embedding(&db, item_id, &hash, &embedding, TEST_DIM)?;
+        let skipped = upsert_embedding(&db, item_id, &hash, &embedding, TEST_DIM)?;
 
         assert!(inserted);
         assert!(!skipped);
@@ -496,11 +520,11 @@ mod tests {
         seed_schema_for_unit_tests(&db)?;
 
         let item_id = "bn-def";
-        let first_hash = content_hash_hex("old");
-        let second_hash = content_hash_hex("new");
+        let first_hash = content_hash_hex("old", "test");
+        let second_hash = content_hash_hex("new", "test");
 
-        upsert_embedding(&db, item_id, &first_hash, &sample_embedding())?;
-        let written = upsert_embedding(&db, item_id, &second_hash, &sample_embedding())?;
+        upsert_embedding(&db, item_id, &first_hash, &sample_embedding(), TEST_DIM)?;
+        let written = upsert_embedding(&db, item_id, &second_hash, &sample_embedding(), TEST_DIM)?;
 
         assert!(written);
 

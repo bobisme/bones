@@ -49,12 +49,31 @@ const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
     "/models/minilm-l6-v2-int8.onnx"
 ));
 
-/// Wrapper around an ONNX Runtime session for the embedding model.
+#[cfg(feature = "semantic-model2vec")]
+use super::model2vec::Model2VecBackend;
+
+/// Wrapper around an embedding model backend.
+///
+/// Supports multiple backends selected at compile time via feature flags.
+/// When multiple backends are available, ORT is preferred (higher quality);
+/// model2vec is used as a fallback.
 pub struct SemanticModel {
+    inner: BackendInner,
+}
+
+enum BackendInner {
     #[cfg(feature = "semantic-ort")]
-    session: Mutex<Session>,
-    #[cfg(feature = "semantic-ort")]
-    tokenizer: Tokenizer,
+    Ort {
+        session: Mutex<Session>,
+        tokenizer: Tokenizer,
+    },
+    #[cfg(feature = "semantic-model2vec")]
+    Model2Vec(Model2VecBackend),
+    /// Uninhabited placeholder so the enum is never empty regardless of
+    /// feature flags.  `load()` bails before reaching construction when no
+    /// backend is compiled in, so this variant is never created at runtime.
+    #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
+    _Unavailable(std::convert::Infallible),
 }
 
 #[cfg(feature = "semantic-ort")]
@@ -73,51 +92,75 @@ enum InputSource {
 impl SemanticModel {
     /// Load the model from the OS cache directory.
     ///
-    /// If the cache file is missing or has a mismatched SHA256, this extracts
-    /// bundled model bytes into the cache directory before creating an ORT
-    /// session. When no bundled bytes are available, this attempts a one-time
-    /// download of model/tokenizer assets from stable URLs.
+    /// Tries backends in priority order: ORT (highest quality), then model2vec
+    /// (no ONNX dependency, Windows-friendly).
     ///
     /// # Errors
     ///
-    /// Returns an error if the model cannot be loaded or the cache is invalid.
+    /// Returns an error if no backend is available or loading fails.
     pub fn load() -> Result<Self> {
-        let path = Self::model_cache_path()?;
-        Self::ensure_model_cached(&path)?;
-
+        // Try ORT first (higher quality embeddings).
         #[cfg(feature = "semantic-ort")]
         {
-            let tokenizer_path = Self::tokenizer_cache_path()?;
-            Self::ensure_tokenizer_cached(&tokenizer_path)?;
-
-            let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
-                anyhow!(
-                    "failed to load semantic tokenizer from {}: {e}",
-                    tokenizer_path.display()
-                )
-            })?;
-
-            let session = Session::builder()
-                .context("failed to create ONNX Runtime session builder")?
-                .commit_from_file(&path)
-                .with_context(|| {
-                    format!("failed to load semantic model from {}", path.display())
-                })?;
-
-            Ok(Self {
-                session: Mutex::new(session),
-                tokenizer,
-            })
+            match Self::load_ort() {
+                Ok(model) => return Ok(model),
+                Err(err) => {
+                    tracing::debug!("ORT backend unavailable, trying next: {err:#}");
+                }
+            }
         }
 
-        #[cfg(not(feature = "semantic-ort"))]
+        // Try model2vec (no ONNX runtime needed).
+        #[cfg(feature = "semantic-model2vec")]
         {
-            let _ = path;
-            bail!("semantic runtime unavailable: compile bones-search with `semantic-ort`");
+            match Model2VecBackend::load() {
+                Ok(backend) => {
+                    return Ok(Self {
+                        inner: BackendInner::Model2Vec(backend),
+                    });
+                }
+                Err(err) => {
+                    tracing::debug!("model2vec backend unavailable: {err:#}");
+                }
+            }
         }
+
+        bail!(
+            "no semantic backend available: compile with `semantic-ort` or `semantic-model2vec`"
+        );
     }
 
-    /// Return the OS-appropriate cache path for the model file.
+    #[cfg(feature = "semantic-ort")]
+    fn load_ort() -> Result<Self> {
+        let path = Self::ort_model_cache_path()?;
+        Self::ensure_model_cached(&path)?;
+
+        let tokenizer_path = Self::tokenizer_cache_path()?;
+        Self::ensure_tokenizer_cached(&tokenizer_path)?;
+
+        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|e| {
+            anyhow!(
+                "failed to load semantic tokenizer from {}: {e}",
+                tokenizer_path.display()
+            )
+        })?;
+
+        let session = Session::builder()
+            .context("failed to create ONNX Runtime session builder")?
+            .commit_from_file(&path)
+            .with_context(|| {
+                format!("failed to load semantic model from {}", path.display())
+            })?;
+
+        Ok(Self {
+            inner: BackendInner::Ort {
+                session: Mutex::new(session),
+                tokenizer,
+            },
+        })
+    }
+
+    /// Return the OS-appropriate cache path for the ORT model file.
     ///
     /// Uses `dirs::cache_dir() / bones / models / minilm-l6-v2-int8.onnx`.
     ///
@@ -129,11 +172,17 @@ impl SemanticModel {
     }
 
     #[cfg(feature = "semantic-ort")]
+    fn ort_model_cache_path() -> Result<PathBuf> {
+        Ok(Self::model_cache_root()?.join(MODEL_FILENAME))
+    }
+
+    #[cfg(feature = "semantic-ort")]
     fn tokenizer_cache_path() -> Result<PathBuf> {
         Ok(Self::model_cache_root()?.join(TOKENIZER_FILENAME))
     }
 
-    fn model_cache_root() -> Result<PathBuf> {
+    /// Return the OS-appropriate cache root for model files.
+    pub fn model_cache_root() -> Result<PathBuf> {
         let mut path = dirs::cache_dir().context("unable to determine OS cache directory")?;
         path.push("bones");
         path.push("models");
@@ -208,6 +257,7 @@ impl SemanticModel {
         Ok(())
     }
 
+    #[cfg(any(feature = "semantic-ort", feature = "bundled-model"))]
     fn ensure_model_cached(path: &Path) -> Result<()> {
         if Self::is_cached_valid(path) {
             return Ok(());
@@ -286,25 +336,60 @@ impl SemanticModel {
         Ok(())
     }
 
+    /// The dimensionality of embedding vectors this model produces.
+    #[must_use]
+    pub fn dimensions(&self) -> usize {
+        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
+        match &self.inner {
+            #[cfg(feature = "semantic-ort")]
+            BackendInner::Ort { .. } => 384, // MiniLM-L6-v2
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(m) => m.dimensions(),
+        }
+
+        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
+        { let _ = &self.inner; 384 }
+    }
+
+    /// A stable identifier for the active backend, used to detect backend
+    /// switches that require re-embedding stored vectors.
+    #[must_use]
+    pub fn backend_id(&self) -> &'static str {
+        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
+        match &self.inner {
+            #[cfg(feature = "semantic-ort")]
+            BackendInner::Ort { .. } => "ort-minilm-384",
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(_) => "model2vec-potion-8m",
+        }
+
+        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
+        { let _ = &self.inner; "none" }
+    }
+
     /// Run inference for a single text input.
     ///
     /// # Errors
     ///
     /// Returns an error if the runtime is unavailable or inference fails.
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        #[cfg(feature = "semantic-ort")]
-        {
-            let encoded = self.encode_text(text)?;
-            let mut out = self.run_model_batch(&[encoded])?;
-            out.pop()
-                .ok_or_else(|| anyhow!("semantic model returned no embedding"))
+        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
+        match &self.inner {
+            #[cfg(feature = "semantic-ort")]
+            BackendInner::Ort { .. } => {
+                let encoded = self.encode_text(text)?;
+                let mut out = self.run_model_batch(&[encoded])?;
+                out.pop()
+                    .ok_or_else(|| anyhow!("semantic model returned no embedding"))
+            }
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(m) => m.embed(text),
         }
 
-        #[cfg(not(feature = "semantic-ort"))]
+        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
         {
-            let _ = self;
-            let _ = text;
-            bail!("semantic runtime unavailable: compile bones-search with `semantic-ort`");
+            let _ = (self, text);
+            bail!("semantic runtime unavailable: compile with `semantic-ort` or `semantic-model2vec`");
         }
     }
 
@@ -314,27 +399,49 @@ impl SemanticModel {
     ///
     /// Returns an error if the runtime is unavailable or batch inference fails.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        #[cfg(feature = "semantic-ort")]
-        {
-            let encoded: Vec<EncodedText> = texts
-                .iter()
-                .map(|text| self.encode_text(text))
-                .collect::<Result<Vec<_>>>()?;
-            self.run_model_batch(&encoded)
+        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
+        match &self.inner {
+            #[cfg(feature = "semantic-ort")]
+            BackendInner::Ort { .. } => {
+                let encoded: Vec<EncodedText> = texts
+                    .iter()
+                    .map(|text| self.encode_text(text))
+                    .collect::<Result<Vec<_>>>()?;
+                self.run_model_batch(&encoded)
+            }
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(m) => m.embed_batch(texts),
         }
 
-        #[cfg(not(feature = "semantic-ort"))]
+        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
         {
-            let _ = self;
-            let _ = texts;
-            bail!("semantic runtime unavailable: compile bones-search with `semantic-ort`");
+            let _ = (self, texts);
+            bail!("semantic runtime unavailable: compile with `semantic-ort` or `semantic-model2vec`");
+        }
+    }
+
+    #[cfg(feature = "semantic-ort")]
+    fn ort_tokenizer(&self) -> &Tokenizer {
+        match &self.inner {
+            BackendInner::Ort { tokenizer, .. } => tokenizer,
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(_) => unreachable!("encode_text called on non-ORT backend"),
+        }
+    }
+
+    #[cfg(feature = "semantic-ort")]
+    fn ort_session(&self) -> &Mutex<Session> {
+        match &self.inner {
+            BackendInner::Ort { session, .. } => session,
+            #[cfg(feature = "semantic-model2vec")]
+            BackendInner::Model2Vec(_) => unreachable!("run_model_batch called on non-ORT backend"),
         }
     }
 
     #[cfg(feature = "semantic-ort")]
     fn encode_text(&self, text: &str) -> Result<EncodedText> {
         let encoding = self
-            .tokenizer
+            .ort_tokenizer()
             .encode(text, true)
             .map_err(|e| anyhow!("failed to tokenize semantic query: {e}"))?;
 
@@ -386,7 +493,7 @@ impl SemanticModel {
         let flat_token_types = vec![0_i64; batch * seq_len];
 
         let mut session = self
-            .session
+            .ort_session()
             .lock()
             .map_err(|_| anyhow!("semantic model session mutex poisoned"))?;
 
@@ -733,7 +840,7 @@ mod tests {
         assert!(err.to_string().contains("not bundled"));
     }
 
-    #[cfg(not(feature = "semantic-ort"))]
+    #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
     #[test]
     fn semantic_is_reported_unavailable_without_runtime_feature() {
         assert!(!is_semantic_available());

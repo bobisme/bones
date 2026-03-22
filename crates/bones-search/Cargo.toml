@@ -14,6 +14,7 @@ workspace = true
 [features]
 default = []
 semantic-ort = ["dep:ort", "dep:tokenizers", "dep:ureq"]
+semantic-model2vec = ["dep:safetensors", "dep:tokenizers", "dep:ureq"]
 bundled-model = ["semantic-ort"]
 
 [dependencies]
@@ -21,6 +22,7 @@ bones-core = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 ort = { version = "2.0.0-rc.10", optional = true }
+safetensors = { version = "0.4", optional = true }
 tokenizers = { version = "0.19", optional = true }
 ureq = { version = "2.10", optional = true }
 petgraph = { workspace = true }

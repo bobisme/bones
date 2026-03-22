@@ -177,15 +177,14 @@ fn rank_fields_correct_in_fts5_only_mode() {
 // Scenario 2: Semantic unavailability detection
 // ---------------------------------------------------------------------------
 
-/// Without the `semantic-ort` feature, `is_semantic_available()` must report
-/// the semantic layer as unavailable.  This is the expected state during tests
-/// (no ONNX runtime compiled in, no bundled model bytes).
-#[cfg(not(feature = "semantic-ort"))]
+/// Without any semantic backend feature, `is_semantic_available()` must report
+/// the semantic layer as unavailable.
+#[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
 #[test]
 fn semantic_unavailable_without_ort_feature() {
     assert!(
         !is_semantic_available(),
-        "is_semantic_available() must return false when semantic-ort feature is absent"
+        "is_semantic_available() must return false when no semantic backend is compiled in"
     );
 }
 

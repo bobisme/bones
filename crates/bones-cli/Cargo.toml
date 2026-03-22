@@ -50,9 +50,11 @@ tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
 default = ["otel", "semantic"]
-## ONNX-based semantic embeddings. Disable for Windows builds to avoid CRT linking conflicts.
-## Without this, search falls back to lexical (FTS5/BM25) + structural similarity.
+## ONNX-based semantic embeddings (highest quality, requires ONNX Runtime).
+## On Windows, use `semantic-model2vec` instead to avoid CRT linking conflicts.
 semantic = ["bones-search/semantic-ort"]
+## Model2Vec static embeddings (no ONNX, Windows-friendly, slightly lower quality).
+semantic-model2vec = ["bones-search/semantic-model2vec"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-appender-tracing", "dep:tracing-opentelemetry"]
 ## Heap profiling: `cargo build --features dhat-heap` then run normally.
 ## Writes dhat-heap.json on exit; view at https://nnethercote.github.io/dh_view/dh_view.html

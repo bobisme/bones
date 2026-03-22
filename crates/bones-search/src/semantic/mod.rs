@@ -2,6 +2,7 @@
 
 mod embed;
 mod model;
+pub(crate) mod model2vec;
 pub mod search;
 
 pub use embed::{
