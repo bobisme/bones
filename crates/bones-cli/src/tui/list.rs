@@ -2164,11 +2164,16 @@ impl ListView {
             }
         }
 
-        let (mut ordered, mut depths) = if !query_active && self.sort == SortField::Execution {
-            build_dependency_order(active_items, &self.blocker_map, &self.parent_map)
-        } else {
-            build_hierarchy_order(active_items, &self.parent_map)
-        };
+        let (mut ordered, mut depths) =
+            if query_active && self.semantic_search_active {
+                // Search results are already ranked; preserve flat order.
+                let len = active_items.len();
+                (active_items, vec![0; len])
+            } else if !query_active && self.sort == SortField::Execution {
+                build_dependency_order(active_items, &self.blocker_map, &self.parent_map)
+            } else {
+                build_hierarchy_order(active_items, &self.parent_map)
+            };
         self.done_start_idx = None;
         if self.show_done && !done_items.is_empty() {
             // Show completed bones newest-first (reverse close order approximation).
