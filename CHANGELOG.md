@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.23.1 - 2026-03-22
+
+### Two-tier progressive search in TUI
+
+- TUI search now returns instant results from FTS5/BM25 + structural similarity, then refines with semantic search in a background thread. No more UI blocking during search.
+- Search results stay visible while typing — no flash on keystroke.
+- Spinning indicator shows when background semantic refinement is in progress.
+- Search results display in flat rank order (best match first) instead of being reshuffled by hierarchy.
+
+### Semantic search improvements
+
+- Lowered semantic score thresholds (0.60 → 0.15) so semantic search actually bridges vocabulary gaps (e.g. "authentication" now finds "auth" items).
+- Added `--semantic-threshold` flag to `bn search` for experimenting with threshold values.
+- Added `hybrid_search_fast()` and `hybrid_search_with_threshold()` to the public API.
+
+### Fixes
+
+- Fixed TUI auto-refresh re-triggering search every 1-2s when a query was active, causing result flashing.
+
 ## v0.23.0 - 2026-03-22
 
 ### Windows support

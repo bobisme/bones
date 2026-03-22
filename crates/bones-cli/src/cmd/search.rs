@@ -221,7 +221,9 @@ fn execute_search_mode(
 ) -> anyhow::Result<Vec<(String, f64)>> {
     match mode {
         SearchMode::LexicalOnly => lexical_only_search(conn, query_text, limit),
-        SearchMode::SemanticOnly => semantic_only_search(conn, query_text, limit, semantic_threshold),
+        SearchMode::SemanticOnly => {
+            semantic_only_search(conn, query_text, limit, semantic_threshold)
+        }
         SearchMode::Hybrid => {
             let semantic_model = if semantic_enabled {
                 match SemanticModel::load() {

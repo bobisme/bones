@@ -10,7 +10,7 @@ check:
     rtk cargo test --workspace
 
 install:
-    rtk cargo install --path crates/bones-cli
+    rtk cargo install --locked --path crates/bones-cli
 
 completions:
     mkdir -p ~/.local/share/bash-completion/completions
