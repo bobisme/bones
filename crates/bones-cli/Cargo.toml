@@ -19,7 +19,7 @@ workspace = true
 anyhow = { workspace = true }
 blake3 = { workspace = true }
 bones-core = { workspace = true }
-bones-search = { workspace = true, features = ["semantic-ort"] }
+bones-search = { workspace = true }
 bones-sim = { workspace = true }
 bones-triage = { workspace = true }
 chrono = { workspace = true }
@@ -49,7 +49,10 @@ dhat = { version = "0.3", optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
-default = ["otel"]
+default = ["otel", "semantic"]
+## ONNX-based semantic embeddings. Disable for Windows builds to avoid CRT linking conflicts.
+## Without this, search falls back to lexical (FTS5/BM25) + structural similarity.
+semantic = ["bones-search/semantic-ort"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-appender-tracing", "dep:tracing-opentelemetry"]
 ## Heap profiling: `cargo build --features dhat-heap` then run normally.
 ## Writes dhat-heap.json on exit; view at https://nnethercote.github.io/dh_view/dh_view.html
