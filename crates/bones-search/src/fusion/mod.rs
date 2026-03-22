@@ -7,7 +7,10 @@
 pub mod hybrid;
 pub mod scoring;
 
-pub use hybrid::{HybridSearchResult, hybrid_search, hybrid_search_fast, hybrid_search_with_graph};
+pub use hybrid::{
+    HybridSearchResult, hybrid_search, hybrid_search_fast, hybrid_search_with_graph,
+    hybrid_search_with_threshold,
+};
 pub use scoring::{
     DupCandidate, DuplicateRisk, SearchConfig, build_dup_candidates, classify_risk, rrf_fuse,
 };

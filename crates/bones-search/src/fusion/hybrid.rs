@@ -22,8 +22,8 @@ use tracing::warn;
 
 const MAX_STRUCTURAL_SEEDS: usize = 16;
 const MAX_STRUCTURAL_CANDIDATES: usize = 128;
-const MIN_SEMANTIC_SCORE: f32 = 0.60;
-const MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL: f32 = 0.62;
+const MIN_SEMANTIC_SCORE: f32 = 0.15;
+const MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL: f32 = 0.20;
 static SEMANTIC_DEGRADED_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Unified fused result with per-layer explanation fields.
@@ -51,7 +51,26 @@ pub fn hybrid_search(
     limit: usize,
     rrf_k: usize,
 ) -> Result<Vec<HybridSearchResult>> {
-    hybrid_search_inner(query, db, model, None, limit, rrf_k)
+    hybrid_search_inner(query, db, model, None, limit, rrf_k, None)
+}
+
+/// Like [`hybrid_search`] but with an explicit minimum semantic score threshold.
+///
+/// When `min_score` is `Some(t)`, semantic results below `t` are discarded.
+/// When `None`, the built-in default thresholds are used.
+///
+/// # Errors
+///
+/// Returns an error if the lexical search or database query fails.
+pub fn hybrid_search_with_threshold(
+    query: &str,
+    db: &Connection,
+    model: Option<&SemanticModel>,
+    limit: usize,
+    rrf_k: usize,
+    min_score: Option<f32>,
+) -> Result<Vec<HybridSearchResult>> {
+    hybrid_search_inner(query, db, model, None, limit, rrf_k, min_score)
 }
 
 /// Fast-path hybrid search: lexical + structural only, no semantic layer.
@@ -69,7 +88,7 @@ pub fn hybrid_search_fast(
     limit: usize,
     rrf_k: usize,
 ) -> Result<Vec<HybridSearchResult>> {
-    hybrid_search_inner(query, db, None, None, limit, rrf_k)
+    hybrid_search_inner(query, db, None, None, limit, rrf_k, None)
 }
 
 /// Run hybrid search using a caller-provided dependency graph for structural scoring.
@@ -85,7 +104,7 @@ pub fn hybrid_search_with_graph(
     limit: usize,
     rrf_k: usize,
 ) -> Result<Vec<HybridSearchResult>> {
-    hybrid_search_inner(query, db, model, Some(graph), limit, rrf_k)
+    hybrid_search_inner(query, db, model, Some(graph), limit, rrf_k, None)
 }
 
 fn hybrid_search_inner(
@@ -95,6 +114,7 @@ fn hybrid_search_inner(
     structural_graph: Option<&DiGraph<String, ()>>,
     limit: usize,
     rrf_k: usize,
+    min_semantic_score_override: Option<f32>,
 ) -> Result<Vec<HybridSearchResult>> {
     let limit = limit.min(1000);
     if limit == 0 {
@@ -111,7 +131,11 @@ fn hybrid_search_inner(
             .and_then(|_| model.embed(query))
             .and_then(|embedding| knn_search(db, &embedding, limit))
         {
-            Ok(hits) => semantic_ranked_items(hits, lexical_ranked_owned.is_empty()),
+            Ok(hits) => semantic_ranked_items(
+                hits,
+                lexical_ranked_owned.is_empty(),
+                min_semantic_score_override,
+            ),
             Err(e) => {
                 if !SEMANTIC_DEGRADED_WARNED.swap(true, Ordering::SeqCst) {
                     warn!("semantic layer unavailable; using lexical+structural ranking: {e}");
@@ -208,17 +232,24 @@ fn rank_to_score(rank: usize, k: usize) -> f32 {
     }
 }
 
-fn semantic_ranked_items(hits: Vec<SemanticSearchResult>, lexical_is_empty: bool) -> Vec<String> {
+fn semantic_ranked_items(
+    hits: Vec<SemanticSearchResult>,
+    lexical_is_empty: bool,
+    min_score_override: Option<f32>,
+) -> Vec<String> {
     if hits.is_empty() {
         return Vec::new();
     }
 
-    if lexical_is_empty && hits[0].score < MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL {
+    let min_score = min_score_override.unwrap_or(MIN_SEMANTIC_SCORE);
+    let min_top = min_score_override.unwrap_or(MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL);
+
+    if lexical_is_empty && hits[0].score < min_top {
         return Vec::new();
     }
 
     hits.into_iter()
-        .filter(|hit| hit.score >= MIN_SEMANTIC_SCORE)
+        .filter(|hit| hit.score >= min_score)
         .map(|hit| hit.item_id)
         .collect()
 }
@@ -587,15 +618,16 @@ mod tests {
         let hits = vec![
             SemanticSearchResult {
                 item_id: "bn-001".to_string(),
-                score: 0.55,
+                score: 0.15,
             },
             SemanticSearchResult {
                 item_id: "bn-002".to_string(),
-                score: 0.53,
+                score: 0.10,
             },
         ];
 
-        let ranked = semantic_ranked_items(hits, true);
+        // Top score (0.15) is below MIN_SEMANTIC_TOP_SCORE_NO_LEXICAL (0.20).
+        let ranked = semantic_ranked_items(hits, true, None);
         assert!(ranked.is_empty());
     }
 
@@ -608,16 +640,35 @@ mod tests {
             },
             SemanticSearchResult {
                 item_id: "bn-002".to_string(),
-                score: 0.61,
+                score: 0.25,
             },
             SemanticSearchResult {
                 item_id: "bn-003".to_string(),
-                score: 0.59,
+                score: 0.10,
             },
         ];
 
-        let ranked = semantic_ranked_items(hits, true);
+        // bn-003 at 0.10 is below MIN_SEMANTIC_SCORE (0.15), filtered out.
+        let ranked = semantic_ranked_items(hits, true, None);
         assert_eq!(ranked, vec!["bn-001".to_string(), "bn-002".to_string()]);
+    }
+
+    #[test]
+    fn semantic_ranked_items_respects_threshold_override() {
+        let hits = vec![
+            SemanticSearchResult {
+                item_id: "bn-001".to_string(),
+                score: 0.50,
+            },
+            SemanticSearchResult {
+                item_id: "bn-002".to_string(),
+                score: 0.30,
+            },
+        ];
+
+        // With threshold 0.40, only bn-001 passes.
+        let ranked = semantic_ranked_items(hits, false, Some(0.40));
+        assert_eq!(ranked, vec!["bn-001".to_string()]);
     }
 
     #[test]

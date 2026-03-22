@@ -9,14 +9,14 @@ use crate::output::{CliError, OutputMode, render_error, render_mode};
 use bones_core::config::load_project_config;
 use bones_core::db::fts;
 use bones_core::db::query;
-use bones_search::fusion::hybrid_search;
+use bones_search::fusion::hybrid_search_with_threshold;
 use bones_search::semantic::{SemanticModel, knn_search, sync_projection_embeddings};
 use clap::Args;
 use serde::Serialize;
 use std::io::Write;
 
-const MIN_SEMANTIC_SCORE: f32 = 0.60;
-const MIN_SEMANTIC_TOP_SCORE: f32 = 0.62;
+const MIN_SEMANTIC_SCORE: f32 = 0.15;
+const MIN_SEMANTIC_TOP_SCORE: f32 = 0.20;
 
 #[derive(Args, Debug)]
 #[command(
@@ -44,6 +44,11 @@ pub struct SearchArgs {
     /// Force semantic-only search (embedding KNN).
     #[arg(long)]
     pub semantic: bool,
+
+    /// Minimum semantic score threshold (0.0–1.0). Results below this are discarded.
+    /// Lower values increase recall at the cost of precision. Default: 0.35.
+    #[arg(long, value_name = "SCORE")]
+    pub semantic_threshold: Option<f32>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -129,14 +134,28 @@ pub fn run_search(
     let limit = args.limit.min(1000);
     let cfg = load_project_config(project_root).unwrap_or_default();
 
-    let mut results = execute_search_mode(mode, &conn, &args.query, limit, cfg.search.semantic)?;
+    let mut results = execute_search_mode(
+        mode,
+        &conn,
+        &args.query,
+        limit,
+        cfg.search.semantic,
+        args.semantic_threshold,
+    )?;
     let mut fallback_query = None;
 
     if results.is_empty()
         && mode != SearchMode::SemanticOnly
         && let Some(or_query) = or_fallback_query(&args.query)
     {
-        results = execute_search_mode(mode, &conn, &or_query, limit, cfg.search.semantic)?;
+        results = execute_search_mode(
+            mode,
+            &conn,
+            &or_query,
+            limit,
+            cfg.search.semantic,
+            args.semantic_threshold,
+        )?;
         if !results.is_empty() {
             fallback_query = Some(or_query);
         }
@@ -198,10 +217,11 @@ fn execute_search_mode(
     query_text: &str,
     limit: usize,
     semantic_enabled: bool,
+    semantic_threshold: Option<f32>,
 ) -> anyhow::Result<Vec<(String, f64)>> {
     match mode {
         SearchMode::LexicalOnly => lexical_only_search(conn, query_text, limit),
-        SearchMode::SemanticOnly => semantic_only_search(conn, query_text, limit),
+        SearchMode::SemanticOnly => semantic_only_search(conn, query_text, limit, semantic_threshold),
         SearchMode::Hybrid => {
             let semantic_model = if semantic_enabled {
                 match SemanticModel::load() {
@@ -217,13 +237,20 @@ fn execute_search_mode(
                 None
             };
 
-            hybrid_search(query_text, conn, semantic_model.as_ref(), limit, 60)
-                .map_err(|e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."))
-                .map(|hits| {
-                    hits.into_iter()
-                        .map(|hit| (hit.item_id, f64::from(hit.score)))
-                        .collect()
-                })
+            hybrid_search_with_threshold(
+                query_text,
+                conn,
+                semantic_model.as_ref(),
+                limit,
+                60,
+                semantic_threshold,
+            )
+            .map_err(|e| anyhow::anyhow!("search error: {e}. Check query syntax (use 'auth*' for prefix, AND/OR/NOT for boolean)."))
+            .map(|hits| {
+                hits.into_iter()
+                    .map(|hit| (hit.item_id, f64::from(hit.score)))
+                    .collect()
+            })
         }
     }
 }
@@ -288,6 +315,7 @@ fn semantic_only_search(
     conn: &rusqlite::Connection,
     query_text: &str,
     limit: usize,
+    threshold: Option<f32>,
 ) -> anyhow::Result<Vec<(String, f64)>> {
     let model = SemanticModel::load()
         .map_err(|e| anyhow::anyhow!("semantic model unavailable for --semantic mode: {e}"))?;
@@ -298,17 +326,20 @@ fn semantic_only_search(
         .map_err(|e| anyhow::anyhow!("semantic embedding failed: {e}"))?;
     let hits = knn_search(conn, &embedding, limit)
         .map_err(|e| anyhow::anyhow!("semantic KNN search failed: {e}"))?;
-    Ok(filter_semantic_hits(hits))
+    Ok(filter_semantic_hits(hits, threshold))
 }
 
 fn filter_semantic_hits(
     hits: Vec<bones_search::semantic::SemanticSearchResult>,
+    threshold: Option<f32>,
 ) -> Vec<(String, f64)> {
-    if hits.is_empty() || hits[0].score < MIN_SEMANTIC_TOP_SCORE {
+    let min_score = threshold.unwrap_or(MIN_SEMANTIC_SCORE);
+    let min_top = threshold.unwrap_or(MIN_SEMANTIC_TOP_SCORE);
+    if hits.is_empty() || hits[0].score < min_top {
         return Vec::new();
     }
     hits.into_iter()
-        .filter(|hit| hit.score >= MIN_SEMANTIC_SCORE)
+        .filter(|hit| hit.score >= min_score)
         .map(|hit| (hit.item_id, f64::from(hit.score)))
         .collect()
 }
@@ -491,6 +522,7 @@ mod tests {
             limit: 10,
             lexical: true,
             semantic: true,
+            semantic_threshold: None,
         };
 
         assert!(resolve_mode(&args).is_err());
@@ -503,6 +535,7 @@ mod tests {
             limit: 10,
             lexical: true,
             semantic: false,
+            semantic_threshold: None,
         };
         assert!(matches!(
             resolve_mode(&lexical).expect("mode"),
@@ -514,6 +547,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: true,
+            semantic_threshold: None,
         };
         assert!(matches!(
             resolve_mode(&semantic).expect("mode"),
@@ -525,6 +559,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         assert!(matches!(
             resolve_mode(&hybrid).expect("mode"),
@@ -703,6 +738,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         run_search(&args, OutputMode::Pretty, &root).unwrap();
     }
@@ -715,6 +751,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         run_search(&args, OutputMode::Json, &root).unwrap();
     }
@@ -727,6 +764,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         // Should succeed (not error) even with no results
         run_search(&args, OutputMode::Pretty, &root).unwrap();
@@ -740,6 +778,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         run_search(&args, OutputMode::Pretty, &root).unwrap();
     }
@@ -752,6 +791,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         assert!(run_search(&args, OutputMode::Pretty, dir.path()).is_err());
     }
@@ -764,6 +804,7 @@ mod tests {
             limit: 10,
             lexical: false,
             semantic: false,
+            semantic_threshold: None,
         };
         assert!(run_search(&args, OutputMode::Pretty, &root).is_err());
     }
@@ -797,14 +838,15 @@ mod tests {
         let hits = vec![
             bones_search::semantic::SemanticSearchResult {
                 item_id: "bn-001".into(),
-                score: 0.40,
+                score: 0.12,
             },
             bones_search::semantic::SemanticSearchResult {
                 item_id: "bn-002".into(),
-                score: 0.39,
+                score: 0.10,
             },
         ];
-        assert!(filter_semantic_hits(hits).is_empty());
+        // Top score (0.12) is below MIN_SEMANTIC_TOP_SCORE (0.20).
+        assert!(filter_semantic_hits(hits, None).is_empty());
     }
 
     #[test]
@@ -816,14 +858,15 @@ mod tests {
             },
             bones_search::semantic::SemanticSearchResult {
                 item_id: "bn-002".into(),
-                score: 0.61,
+                score: 0.25,
             },
             bones_search::semantic::SemanticSearchResult {
                 item_id: "bn-003".into(),
-                score: 0.59,
+                score: 0.10,
             },
         ];
-        let filtered = filter_semantic_hits(hits);
+        // bn-003 at 0.10 is below MIN_SEMANTIC_SCORE (0.15).
+        let filtered = filter_semantic_hits(hits, None);
         assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].0, "bn-001");
         assert_eq!(filtered[1].0, "bn-002");
