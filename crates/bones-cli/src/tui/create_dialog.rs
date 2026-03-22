@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use bones_core::config::load_project_config;
 use bones_core::db::query;
-use bones_search::fusion::hybrid_search;
+use bones_search::fusion::{hybrid_search, hybrid_search_fast};
 use bones_search::semantic::SemanticModel;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -45,7 +45,7 @@ pub enum DialogAction {
 /// Overlay dialog for creating a new item with live duplicate detection.
 pub struct CreateDialog {
     db_path: PathBuf,
-    semantic_model: Option<SemanticModel>,
+    semantic_model: Option<std::sync::Arc<SemanticModel>>,
     /// Title the user is typing.
     title: String,
     /// Debounced search results.
@@ -56,6 +56,8 @@ pub struct CreateDialog {
     last_change: Instant,
     /// The query that was last searched (avoids redundant lookups).
     last_searched: String,
+    /// Receiver for background semantic refinement results.
+    refinement_rx: Option<std::sync::mpsc::Receiver<Vec<SimilarCandidate>>>,
 }
 
 impl CreateDialog {
@@ -69,7 +71,7 @@ impl CreateDialog {
             .unwrap_or(true);
         let semantic_model = if semantic_enabled {
             match SemanticModel::load() {
-                Ok(model) => Some(model),
+                Ok(model) => Some(std::sync::Arc::new(model)),
                 Err(err) => {
                     tracing::warn!(
                         "semantic model unavailable in create dialog; using lexical+structural only: {err}"
@@ -89,6 +91,7 @@ impl CreateDialog {
             similar_state: ListState::default(),
             last_change: Instant::now(),
             last_searched: String::new(),
+            refinement_rx: None,
         }
     }
 
@@ -162,17 +165,28 @@ impl CreateDialog {
         }
     }
 
-    /// Tick — called periodically to trigger debounced search.
+    /// Tick — called periodically to trigger debounced search and poll refinement.
     pub fn tick(&mut self) -> Result<()> {
         let debounce = Duration::from_millis(300);
         if self.title != self.last_searched && self.last_change.elapsed() >= debounce {
             self.refresh_similar()?;
         }
+
+        // Poll for background semantic refinement results.
+        if let Some(rx) = &self.refinement_rx {
+            if let Ok(refined) = rx.try_recv() {
+                tracing::debug!(count = refined.len(), "create dialog: tier-2 refinement applied");
+                self.similar = refined;
+                self.refinement_rx = None;
+            }
+        }
+
         Ok(())
     }
 
     fn refresh_similar(&mut self) -> Result<()> {
         self.last_searched = self.title.clone();
+        self.refinement_rx = None;
 
         if self.title.trim().is_empty() {
             self.similar.clear();
@@ -194,8 +208,8 @@ impl CreateDialog {
             self.title.clone()
         };
 
-        let raw = hybrid_search(&q, &conn, self.semantic_model.as_ref(), 5, 60)
-            .context("hybrid search")?;
+        // Tier 1: fast search (lexical + structural only).
+        let raw = hybrid_search_fast(&q, &conn, 5, 60).context("fast hybrid search")?;
 
         self.similar = raw
             .into_iter()
@@ -208,6 +222,40 @@ impl CreateDialog {
                 })
             })
             .collect();
+
+        // Tier 2: spawn background semantic refinement.
+        if let Some(model) = self.semantic_model.clone() {
+            let db_path = self.db_path.clone();
+            let query_owned = q;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.refinement_rx = Some(rx);
+
+            std::thread::spawn(move || {
+                let conn = match query::try_open_projection(&db_path) {
+                    Ok(Some(c)) => c,
+                    _ => return,
+                };
+                let hits = match hybrid_search(&query_owned, &conn, Some(&model), 5, 60) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!("create dialog tier-2 failed: {e:#}");
+                        return;
+                    }
+                };
+                let candidates: Vec<SimilarCandidate> = hits
+                    .into_iter()
+                    .filter_map(|r| {
+                        let title = query::get_item(&conn, &r.item_id, false).ok()??.title;
+                        Some(SimilarCandidate {
+                            item_id: r.item_id,
+                            title,
+                            score: r.score,
+                        })
+                    })
+                    .collect();
+                let _ = tx.send(candidates);
+            });
+        }
 
         Ok(())
     }

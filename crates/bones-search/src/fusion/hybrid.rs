@@ -54,6 +54,24 @@ pub fn hybrid_search(
     hybrid_search_inner(query, db, model, None, limit, rrf_k)
 }
 
+/// Fast-path hybrid search: lexical + structural only, no semantic layer.
+///
+/// Returns results instantly without embedding the query or scanning stored
+/// vectors.  Use this as the first tier in progressive delivery, then refine
+/// with [`hybrid_search`] in a background thread.
+///
+/// # Errors
+///
+/// Returns an error if the lexical search or database query fails.
+pub fn hybrid_search_fast(
+    query: &str,
+    db: &Connection,
+    limit: usize,
+    rrf_k: usize,
+) -> Result<Vec<HybridSearchResult>> {
+    hybrid_search_inner(query, db, None, None, limit, rrf_k)
+}
+
 /// Run hybrid search using a caller-provided dependency graph for structural scoring.
 ///
 /// # Errors

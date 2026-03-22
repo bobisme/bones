@@ -27,7 +27,7 @@ use anyhow::{Context, Result};
 use bones_core::config::load_project_config;
 use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};
 use bones_core::model::item::{Kind, Size, State, Urgency};
-use bones_search::fusion::hybrid_search;
+use bones_search::fusion::{hybrid_search, hybrid_search_fast};
 use bones_search::semantic::SemanticModel;
 use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -1833,11 +1833,15 @@ pub struct ListView {
     /// Blocking dependency map from `blocked_item_id -> [blocker_item_id...]`.
     blocker_map: HashMap<String, Vec<String>>,
     /// Semantic model used for slash search.
-    semantic_model: Option<SemanticModel>,
+    semantic_model: Option<std::sync::Arc<SemanticModel>>,
     /// Ranked IDs returned by semantic/hybrid slash search.
     semantic_search_ids: Vec<String>,
     /// Whether semantic search executed successfully for the active query.
     semantic_search_active: bool,
+    /// Receiver for background semantic refinement results.
+    semantic_refinement_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    /// Generation counter to discard stale background results.
+    semantic_search_gen: u64,
     /// Current filter criteria.
     pub filter: FilterState,
     /// Current sort order.
@@ -1923,7 +1927,7 @@ impl ListView {
             .is_none_or(|cfg| cfg.search.semantic);
         let semantic_model = if semantic_enabled {
             match SemanticModel::load() {
-                Ok(model) => Some(model),
+                Ok(model) => Some(std::sync::Arc::new(model)),
                 Err(err) => {
                     tracing::warn!(
                         "semantic model unavailable in bones TUI slash search; using lexical+structural only: {err}"
@@ -1948,6 +1952,8 @@ impl ListView {
             semantic_model,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
+            semantic_refinement_rx: None,
+            semantic_search_gen: 0,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -2039,6 +2045,10 @@ impl ListView {
     fn refresh_semantic_search_ids(&mut self) -> Result<()> {
         self.semantic_search_ids.clear();
         self.semantic_search_active = false;
+        // Bump generation to invalidate any in-flight background search.
+        self.semantic_search_gen = self.semantic_search_gen.wrapping_add(1);
+        self.semantic_refinement_rx = None;
+
         let query = self.filter.search_query.trim();
         if query.is_empty() {
             return Ok(());
@@ -2056,16 +2066,50 @@ impl ListView {
                 query.to_string()
             };
 
-        let hits = hybrid_search(
-            &effective_query,
-            &conn,
-            self.semantic_model.as_ref(),
-            200,
-            60,
-        )
-        .context("bones slash search failed")?;
-        self.semantic_search_ids = hits.into_iter().map(|hit| hit.item_id).collect();
+        // Tier 1: fast search (lexical + structural only) — runs synchronously.
+        let fast_start = Instant::now();
+        let fast_hits = hybrid_search_fast(&effective_query, &conn, 200, 60)
+            .context("bones fast slash search failed")?;
+        let fast_elapsed = fast_start.elapsed();
+        self.semantic_search_ids = fast_hits.into_iter().map(|hit| hit.item_id).collect();
         self.semantic_search_active = true;
+        tracing::debug!(
+            query = %effective_query,
+            count = self.semantic_search_ids.len(),
+            elapsed_us = fast_elapsed.as_micros(),
+            "tier-1 fast search complete"
+        );
+
+        // Tier 2: spawn background thread for full semantic refinement.
+        if let Some(model) = self.semantic_model.clone() {
+            let db_path = self.db_path.clone();
+            let query_owned = effective_query;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.semantic_refinement_rx = Some(rx);
+
+            std::thread::spawn(move || {
+                let refine_start = Instant::now();
+                let conn = match query::try_open_projection(&db_path) {
+                    Ok(Some(c)) => c,
+                    _ => return,
+                };
+                let hits = match hybrid_search(&query_owned, &conn, Some(&model), 200, 60) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!("tier-2 semantic refinement failed: {e:#}");
+                        return;
+                    }
+                };
+                let ids: Vec<String> = hits.into_iter().map(|h| h.item_id).collect();
+                tracing::debug!(
+                    count = ids.len(),
+                    elapsed_ms = refine_start.elapsed().as_millis() as u64,
+                    "tier-2 semantic refinement complete"
+                );
+                let _ = tx.send(ids);
+            });
+        }
+
         Ok(())
     }
 
@@ -3546,6 +3590,20 @@ impl ListView {
         {
             self.set_status(format!("DB refresh failed: {e:#}"));
         }
+
+        // Poll for background semantic refinement results.
+        if let Some(rx) = &self.semantic_refinement_rx
+            && let Ok(refined_ids) = rx.try_recv()
+        {
+            tracing::debug!(
+                count = refined_ids.len(),
+                "tier-2 refinement applied"
+            );
+            self.semantic_search_ids = refined_ids;
+            self.semantic_refinement_rx = None;
+            self.apply_filter_and_sort();
+        }
+
         self.clamp_detail_scroll();
         // Pick up any ERROR events captured by the TUI log layer.
         if let Some(msg) = crate::telemetry::tui_drain_errors().into_iter().last() {
@@ -5970,6 +6028,8 @@ mod tests {
             semantic_model: None,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
+            semantic_refinement_rx: None,
+            semantic_search_gen: 0,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -6080,6 +6140,8 @@ mod tests {
             semantic_model: None,
             semantic_search_ids: Vec::new(),
             semantic_search_active: false,
+            semantic_refinement_rx: None,
+            semantic_search_gen: 0,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),

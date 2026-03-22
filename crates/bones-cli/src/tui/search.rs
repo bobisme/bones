@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use bones_core::config::load_project_config;
 use bones_core::db::query;
-use bones_search::fusion::{HybridSearchResult, hybrid_search};
+use bones_search::fusion::{HybridSearchResult, hybrid_search, hybrid_search_fast};
 use bones_search::semantic::SemanticModel;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -27,12 +27,14 @@ struct EnrichedResult {
 
 pub struct SearchView {
     db_path: PathBuf,
-    semantic_model: Option<SemanticModel>,
+    semantic_model: Option<std::sync::Arc<SemanticModel>>,
     query: String,
     results: Vec<EnrichedResult>,
     state: ListState,
     last_keystroke: Instant,
     debounced_query: String,
+    /// Receiver for background semantic refinement results.
+    refinement_rx: Option<std::sync::mpsc::Receiver<Vec<EnrichedResult>>>,
 }
 
 impl SearchView {
@@ -45,7 +47,7 @@ impl SearchView {
             .unwrap_or(true);
         let semantic_model = if semantic_enabled {
             match SemanticModel::load() {
-                Ok(model) => Some(model),
+                Ok(model) => Some(std::sync::Arc::new(model)),
                 Err(err) => {
                     tracing::warn!(
                         "semantic model unavailable in TUI search; using lexical+structural only: {err}"
@@ -65,6 +67,7 @@ impl SearchView {
             state: ListState::default(),
             last_keystroke: Instant::now(),
             debounced_query: String::new(),
+            refinement_rx: None,
         };
         Ok(view)
     }
@@ -126,10 +129,25 @@ impl SearchView {
             self.perform_search()?;
             self.debounced_query = self.query.clone();
         }
+
+        // Poll for background semantic refinement results.
+        if let Some(rx) = &self.refinement_rx {
+            if let Ok(refined) = rx.try_recv() {
+                tracing::debug!(count = refined.len(), "search view: tier-2 refinement applied");
+                self.results = refined;
+                self.refinement_rx = None;
+                if !self.results.is_empty() && self.state.selected().is_none() {
+                    self.state.select(Some(0));
+                }
+            }
+        }
+
         Ok(())
     }
 
     fn perform_search(&mut self) -> Result<()> {
+        self.refinement_rx = None;
+
         if self.query.trim().is_empty() {
             self.results.clear();
             return Ok(());
@@ -150,14 +168,9 @@ impl SearchView {
             self.query.clone()
         };
 
-        let raw_results = hybrid_search(
-            &effective_query,
-            &conn,
-            self.semantic_model.as_ref(),
-            20,
-            60,
-        )
-        .context("search failed")?;
+        // Tier 1: fast search (lexical + structural only).
+        let raw_results = hybrid_search_fast(&effective_query, &conn, 20, 60)
+            .context("fast search failed")?;
 
         let mut enriched = Vec::with_capacity(raw_results.len());
         for res in raw_results {
@@ -172,6 +185,40 @@ impl SearchView {
             self.state.select(Some(0));
         } else {
             self.state.select(None);
+        }
+
+        // Tier 2: spawn background semantic refinement.
+        if let Some(model) = self.semantic_model.clone() {
+            let db_path = self.db_path.clone();
+            let query_owned = effective_query;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.refinement_rx = Some(rx);
+
+            std::thread::spawn(move || {
+                let conn = match query::try_open_projection(&db_path) {
+                    Ok(Some(c)) => c,
+                    _ => return,
+                };
+                let hits = match hybrid_search(&query_owned, &conn, Some(&model), 20, 60) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!("search view tier-2 failed: {e:#}");
+                        return;
+                    }
+                };
+                let enriched: Vec<EnrichedResult> = hits
+                    .into_iter()
+                    .filter_map(|res| {
+                        let title = query::get_item(&conn, &res.item_id, false)
+                            .ok()
+                            .flatten()
+                            .map(|item| item.title)
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        Some(EnrichedResult { item: res, title })
+                    })
+                    .collect();
+                let _ = tx.send(enriched);
+            });
         }
 
         Ok(())
