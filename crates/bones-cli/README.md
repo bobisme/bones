@@ -129,6 +129,14 @@ bn data migrate-from-beads --beads-jsonl export.jsonl
 cargo install bones-cli
 ```
 
+### Windows
+
+```bash
+cargo install bones-cli --no-default-features --features windows
+```
+
+This bundles model2vec for semantic search instead of ONNX Runtime, avoiding CRT linking conflicts on MSVC. All core features work identically.
+
 ## Shell completions
 
 Generate shell completions with:
