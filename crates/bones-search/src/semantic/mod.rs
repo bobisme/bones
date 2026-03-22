@@ -1,6 +1,7 @@
 //! Semantic search model integration.
 
 mod embed;
+pub(crate) mod hash_embed;
 mod model;
 pub(crate) mod model2vec;
 pub mod search;

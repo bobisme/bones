@@ -51,6 +51,7 @@ const BUNDLED_MODEL_BYTES: &[u8] = include_bytes!(concat!(
 
 #[cfg(feature = "semantic-model2vec")]
 use super::model2vec::Model2VecBackend;
+use super::hash_embed::HashEmbedBackend;
 
 /// Wrapper around an embedding model backend.
 ///
@@ -69,11 +70,9 @@ enum BackendInner {
     },
     #[cfg(feature = "semantic-model2vec")]
     Model2Vec(Model2VecBackend),
-    /// Uninhabited placeholder so the enum is never empty regardless of
-    /// feature flags.  `load()` bails before reaching construction when no
-    /// backend is compiled in, so this variant is never created at runtime.
-    #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
-    _Unavailable(std::convert::Infallible),
+    /// Zero-dependency hash-based embeddings.  Always available as an
+    /// ultimate fallback when no ML backend is compiled in.
+    Hash(HashEmbedBackend),
 }
 
 #[cfg(feature = "semantic-ort")]
@@ -125,9 +124,11 @@ impl SemanticModel {
             }
         }
 
-        bail!(
-            "no semantic backend available: compile with `semantic-ort` or `semantic-model2vec`"
-        );
+        // Hash embedder is always available as a zero-dependency fallback.
+        tracing::info!("using hash embedder (no ML backend available)");
+        Ok(Self {
+            inner: BackendInner::Hash(HashEmbedBackend::new()),
+        })
     }
 
     #[cfg(feature = "semantic-ort")]
@@ -339,32 +340,26 @@ impl SemanticModel {
     /// The dimensionality of embedding vectors this model produces.
     #[must_use]
     pub fn dimensions(&self) -> usize {
-        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
             BackendInner::Ort { .. } => 384, // MiniLM-L6-v2
             #[cfg(feature = "semantic-model2vec")]
             BackendInner::Model2Vec(m) => m.dimensions(),
+            BackendInner::Hash(h) => h.dimensions(),
         }
-
-        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
-        { let _ = &self.inner; 384 }
     }
 
     /// A stable identifier for the active backend, used to detect backend
     /// switches that require re-embedding stored vectors.
     #[must_use]
     pub fn backend_id(&self) -> &'static str {
-        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
             BackendInner::Ort { .. } => "ort-minilm-384",
             #[cfg(feature = "semantic-model2vec")]
             BackendInner::Model2Vec(_) => "model2vec-potion-8m",
+            BackendInner::Hash(_) => "hash-ngram-256",
         }
-
-        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
-        { let _ = &self.inner; "none" }
     }
 
     /// Run inference for a single text input.
@@ -373,7 +368,6 @@ impl SemanticModel {
     ///
     /// Returns an error if the runtime is unavailable or inference fails.
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
             BackendInner::Ort { .. } => {
@@ -384,12 +378,7 @@ impl SemanticModel {
             }
             #[cfg(feature = "semantic-model2vec")]
             BackendInner::Model2Vec(m) => m.embed(text),
-        }
-
-        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
-        {
-            let _ = (self, text);
-            bail!("semantic runtime unavailable: compile with `semantic-ort` or `semantic-model2vec`");
+            BackendInner::Hash(h) => h.embed(text),
         }
     }
 
@@ -399,7 +388,6 @@ impl SemanticModel {
     ///
     /// Returns an error if the runtime is unavailable or batch inference fails.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        #[cfg(any(feature = "semantic-ort", feature = "semantic-model2vec"))]
         match &self.inner {
             #[cfg(feature = "semantic-ort")]
             BackendInner::Ort { .. } => {
@@ -411,12 +399,7 @@ impl SemanticModel {
             }
             #[cfg(feature = "semantic-model2vec")]
             BackendInner::Model2Vec(m) => m.embed_batch(texts),
-        }
-
-        #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
-        {
-            let _ = (self, texts);
-            bail!("semantic runtime unavailable: compile with `semantic-ort` or `semantic-model2vec`");
+            BackendInner::Hash(h) => h.embed_batch(texts),
         }
     }
 
@@ -424,8 +407,7 @@ impl SemanticModel {
     fn ort_tokenizer(&self) -> &Tokenizer {
         match &self.inner {
             BackendInner::Ort { tokenizer, .. } => tokenizer,
-            #[cfg(feature = "semantic-model2vec")]
-            BackendInner::Model2Vec(_) => unreachable!("encode_text called on non-ORT backend"),
+            _ => unreachable!("encode_text called on non-ORT backend"),
         }
     }
 
@@ -433,8 +415,7 @@ impl SemanticModel {
     fn ort_session(&self) -> &Mutex<Session> {
         match &self.inner {
             BackendInner::Ort { session, .. } => session,
-            #[cfg(feature = "semantic-model2vec")]
-            BackendInner::Model2Vec(_) => unreachable!("run_model_batch called on non-ORT backend"),
+            _ => unreachable!("run_model_batch called on non-ORT backend"),
         }
     }
 
@@ -842,8 +823,8 @@ mod tests {
 
     #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
     #[test]
-    fn semantic_is_reported_unavailable_without_runtime_feature() {
-        assert!(!is_semantic_available());
+    fn hash_embed_always_available_as_fallback() {
+        assert!(is_semantic_available());
     }
 
     #[cfg(feature = "semantic-ort")]

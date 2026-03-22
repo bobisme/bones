@@ -177,14 +177,14 @@ fn rank_fields_correct_in_fts5_only_mode() {
 // Scenario 2: Semantic unavailability detection
 // ---------------------------------------------------------------------------
 
-/// Without any semantic backend feature, `is_semantic_available()` must report
-/// the semantic layer as unavailable.
+/// The hash embedder is always available as a zero-dependency fallback,
+/// so `is_semantic_available()` always returns true.
 #[cfg(not(any(feature = "semantic-ort", feature = "semantic-model2vec")))]
 #[test]
-fn semantic_unavailable_without_ort_feature() {
+fn hash_embed_provides_baseline_semantic_availability() {
     assert!(
-        !is_semantic_available(),
-        "is_semantic_available() must return false when no semantic backend is compiled in"
+        is_semantic_available(),
+        "is_semantic_available() must return true (hash embedder is the baseline fallback)"
     );
 }
 
