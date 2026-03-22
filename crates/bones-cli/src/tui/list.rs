@@ -1844,6 +1844,8 @@ pub struct ListView {
     semantic_search_gen: u64,
     /// Query that was last searched (to avoid re-triggering on auto-refresh).
     last_searched_query: String,
+    /// Whether a background semantic refinement is in progress.
+    search_refining: bool,
     /// Current filter criteria.
     pub filter: FilterState,
     /// Current sort order.
@@ -1957,6 +1959,7 @@ impl ListView {
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
             last_searched_query: String::new(),
+            search_refining: false,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -2052,8 +2055,6 @@ impl ListView {
     }
 
     fn refresh_semantic_search_ids(&mut self) -> Result<()> {
-        self.semantic_search_ids.clear();
-        self.semantic_search_active = false;
         // Bump generation to invalidate any in-flight background search.
         self.semantic_search_gen = self.semantic_search_gen.wrapping_add(1);
         self.semantic_refinement_rx = None;
@@ -2061,6 +2062,9 @@ impl ListView {
         let query = self.filter.search_query.trim();
         self.last_searched_query = query.to_string();
         if query.is_empty() {
+            self.semantic_search_ids.clear();
+            self.semantic_search_active = false;
+            self.search_refining = false;
             return Ok(());
         }
 
@@ -2077,6 +2081,7 @@ impl ListView {
             };
 
         // Tier 1: fast search (lexical + structural only) — runs synchronously.
+        // Replace results atomically instead of clearing first to avoid flash.
         let fast_start = Instant::now();
         let fast_hits = hybrid_search_fast(&effective_query, &conn, 200, 60)
             .context("bones fast slash search failed")?;
@@ -2091,6 +2096,7 @@ impl ListView {
         );
 
         // Tier 2: spawn background thread for full semantic refinement.
+        self.search_refining = true;
         if let Some(model) = self.semantic_model.clone() {
             let db_path = self.db_path.clone();
             let query_owned = effective_query;
@@ -3616,6 +3622,7 @@ impl ListView {
             );
             self.semantic_search_ids = refined_ids;
             self.semantic_refinement_rx = None;
+            self.search_refining = false;
             self.apply_filter_and_sort();
         }
 
@@ -4850,10 +4857,24 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
         rows.push(build_row(item, depth, body_width, is_selected));
     }
 
+    let refining_indicator = if app.search_refining {
+        const SPINNER: &[char] = &['|', '/', '-', '\\'];
+        let tick = (app.last_refresh.elapsed().as_millis() / 150) as usize;
+        let ch = SPINNER[tick % SPINNER.len()];
+        format!(" [{ch}]")
+    } else {
+        String::new()
+    };
+
     let block_title = match app.input_mode {
         InputMode::Search => format!(
-            " bones — search: {} ",
+            " bones — search: {}{refining_indicator} ",
             with_cursor_marker(&app.search_buf, app.search_cursor)
+        ),
+        _ if !app.filter.search_query.is_empty() => format!(
+            " bones — {} results for \"{}\"{refining_indicator} ",
+            app.visible_items.len(),
+            app.filter.search_query,
         ),
         _ => format!(
             " bones — {} of {} bones  [sort: {}] ",
@@ -6046,6 +6067,7 @@ mod tests {
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
             last_searched_query: String::new(),
+            search_refining: false,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -6159,6 +6181,7 @@ mod tests {
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
             last_searched_query: String::new(),
+            search_refining: false,
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
