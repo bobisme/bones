@@ -1842,6 +1842,8 @@ pub struct ListView {
     semantic_refinement_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     /// Generation counter to discard stale background results.
     semantic_search_gen: u64,
+    /// Query that was last searched (to avoid re-triggering on auto-refresh).
+    last_searched_query: String,
     /// Current filter criteria.
     pub filter: FilterState,
     /// Current sort order.
@@ -1954,6 +1956,7 @@ impl ListView {
             semantic_search_active: false,
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
+            last_searched_query: String::new(),
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -2036,7 +2039,13 @@ impl ListView {
             })
             .collect();
 
-        let _ = self.refresh_semantic_search_ids();
+        // Only re-run search if the query changed since the last search.
+        // Auto-refresh reloads the item list but shouldn't re-trigger search
+        // (it causes a visible flash as results clear and re-populate).
+        let query_changed = self.filter.search_query.trim() != self.last_searched_query;
+        if query_changed {
+            let _ = self.refresh_semantic_search_ids();
+        }
         self.apply_filter_and_sort();
         self.last_refresh = Instant::now();
         Ok(())
@@ -2050,6 +2059,7 @@ impl ListView {
         self.semantic_refinement_rx = None;
 
         let query = self.filter.search_query.trim();
+        self.last_searched_query = query.to_string();
         if query.is_empty() {
             return Ok(());
         }
@@ -6035,6 +6045,7 @@ mod tests {
             semantic_search_active: false,
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
+            last_searched_query: String::new(),
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
@@ -6147,6 +6158,7 @@ mod tests {
             semantic_search_active: false,
             semantic_refinement_rx: None,
             semantic_search_gen: 0,
+            last_searched_query: String::new(),
             filter: FilterState::default(),
             sort: SortField::default(),
             table_state: TableState::default(),
