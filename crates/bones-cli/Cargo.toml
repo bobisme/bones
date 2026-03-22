@@ -48,16 +48,21 @@ crossterm = { workspace = true }
 dhat = { version = "0.3", optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
 
+## Auto-select the best semantic backend per platform.
+## On non-Windows: ORT (ONNX Runtime) for highest quality embeddings.
+## On Windows: model2vec (safetensors) to avoid CRT linking conflicts.
+[target.'cfg(not(windows))'.dependencies]
+bones-search = { workspace = true, features = ["semantic-ort"] }
+
+[target.'cfg(windows)'.dependencies]
+bones-search = { workspace = true, features = ["semantic-model2vec"] }
+
 [features]
-default = ["otel", "semantic"]
+default = ["otel"]
 ## ONNX-based semantic embeddings (highest quality, requires ONNX Runtime).
-## On Windows, use `semantic-model2vec` instead to avoid CRT linking conflicts.
 semantic = ["bones-search/semantic-ort"]
 ## Model2Vec static embeddings (no ONNX, Windows-friendly, slightly lower quality).
 semantic-model2vec = ["bones-search/semantic-model2vec"]
-## Convenience: builds everything that works on Windows.
-## Usage: cargo install bones-cli --no-default-features --features windows
-windows = ["otel", "semantic-model2vec"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-appender-tracing", "dep:tracing-opentelemetry"]
 ## Heap profiling: `cargo build --features dhat-heap` then run normally.
 ## Writes dhat-heap.json on exit; view at https://nnethercote.github.io/dh_view/dh_view.html
