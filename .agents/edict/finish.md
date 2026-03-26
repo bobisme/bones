@@ -108,4 +108,4 @@ If the workspace was accidentally removed, recreate it with `maw ws recover $WS 
 ## Assumptions
 
 - `EDICT_PROJECT` env var contains the project channel name.
-- The workspace was created with `maw ws create --random --from main` during [start](start.md). `$WS` is the workspace name from that step (or `--change <change-id>` for change-bound work).
+- The workspace was created with `maw ws create <bone-id> --from main --description "..."` during [start](start.md). `$WS` is the bone-id used as workspace name.

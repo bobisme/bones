@@ -77,7 +77,7 @@ Before triaging new work, check if you have unfinished work from a previous sess
 
 - `maw exec default -- bn do <bone-id>`
 - `rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<bone-id>" -m "<bone-id>"`
-- `maw ws create --random --from main` — note the workspace name (e.g., `frost-castle`). Store as `$WS`. Use `--change <change-id>` instead when continuing change-bound work.
+- `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as the workspace name. Store as `$WS`. Use `--change <change-id>` instead of `--from main` when continuing change-bound work.
 - **All file operations must use the workspace path** `ws/$WS/`. Use absolute paths for Read, Write, and Edit (e.g., `$PROJECT_ROOT/ws/$WS/src/file.rs`). For commands: `maw exec $WS -- <command>`.
 - **No `jj`**: this workflow is Git + maw. Keep workspace operations in `maw` and run `git` only via `maw exec $WS -- ...`.
 - `rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/$WS" -m "<bone-id>"`

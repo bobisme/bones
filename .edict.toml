@@ -26,8 +26,8 @@ release_instructions = """
 [tools]
 beads = true
 maw = true
-crit = true
-botbus = true
+seal = true
+rite = true
 vessel = true
 
 # Code review configuration

@@ -83,7 +83,7 @@ See `docs/contributor-guide.md` for:
 ### How to Make Changes
 
 1. **Create a bone** to track your work: `maw exec default -- bn create --title "..." --description "..."`
-2. **Create a workspace** for your changes: `maw ws create <name> --from main` — or use `--change <change-id>` for change-bound work; this gives you `ws/<name>/`
+2. **Create a workspace** for your changes: `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as workspace name; this gives you `ws/<bone-id>/`
 3. **Edit files in your workspace** (`ws/<name>/`), never in `ws/default/`
 4. **Merge when done**: `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` (use conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when merging back into a tracked change)
 5. **Close the bone**: `maw exec default -- bn done <id>`
@@ -100,8 +100,8 @@ This project uses a **bare repo** layout. Source files live in workspaces under 
 project-root/          ← bare repo (no source files here)
 ├── ws/
 │   ├── default/       ← main working copy (AGENTS.md, .bones/, src/, etc.)
-│   ├── frost-castle/  ← agent workspace (isolated Git worktree)
-│   └── amber-reef/    ← another agent workspace
+│   ├── bn-1abc/       ← agent workspace (named after bone ID)
+│   └── bn-2def/       ← another agent workspace
 ├── .manifold/         ← maw metadata/artifacts
 ├── .git/              ← git data (core.bare=true)
 └── AGENTS.md          ← stub redirecting to ws/default/AGENTS.md
@@ -138,7 +138,7 @@ Identity resolved from `$AGENT` env. No flags needed in agent loops.
 
 | Operation | Command |
 |-----------|---------|
-| Create workspace | `maw ws create <name> --from main` |
+| Create workspace | `maw ws create <bone-id> --from main --description "<title>"` |
 | List workspaces | `maw ws list` |
 | Check merge readiness | `maw ws merge <name> --into default --check` |
 | Merge to main | `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` |

@@ -79,21 +79,21 @@ For each unblocked child, dispatch a worker agent. The dev-loop handles this aut
 ```bash
 # Generate worker name and create workspace
 WORKER=$(rite generate-name)
-maw ws create --random --from main  # → e.g., frost-castle
+maw ws create <child-id> --from main --description "<child-title>"
 
 # Stake claims
 rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<child-id>" -m "<child-id>"
-rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/frost-castle" -m "<child-id>"
+rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/<child-id>" -m "<child-id>"
 
 # Add mission context comment to child bone
 maw exec default -- bn bone comment add <child-id> \
-  "Mission context: <mission-id> — <outcome>. Siblings: <sibling-ids>. Workspace: frost-castle"
+  "Mission context: <mission-id> — <outcome>. Siblings: <sibling-ids>. Workspace: <child-id>"
 
 # Spawn worker with mission env vars
 vessel spawn --pass-env --timeout 600 $WORKER \
   edict run worker-loop \
   --env "EDICT_BONE=<child-id>" \
-  --env "EDICT_WORKSPACE=frost-castle" \
+  --env "EDICT_WORKSPACE=<child-id>" \
   --env "EDICT_MISSION=<mission-id>" \
   --env "EDICT_MISSION_OUTCOME=Users can log in via OAuth providers" \
   --env "EDICT_SIBLINGS=bd-001 (Add OAuth config) [owner:none, state:open]\nbd-002 (Add callback handler) [owner:storm-raven, state:doing]" \
