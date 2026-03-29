@@ -33,7 +33,7 @@ use petgraph::{
     Direction,
     visit::{EdgeRef, IntoNodeIdentifiers, NodeIndexable},
 };
-use tracing::{instrument, warn};
+use tracing::{info, instrument, warn};
 
 use crate::graph::normalize::NormalizedGraph;
 
@@ -479,7 +479,7 @@ fn incremental_fallback(
     config: &PageRankConfig,
     message: &str,
 ) -> PageRankResult {
-    warn!("{message}");
+    info!("{message}");
     let mut result = pagerank(ng, config);
     result.method = PageRankMethod::IncrementalFallback;
     result
