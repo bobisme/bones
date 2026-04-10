@@ -25,6 +25,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 bumpalo = "3.20.2"
+fixedbitset = "0.4"
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -369,6 +369,7 @@ dependencies = [
  "bumpalo",
  "chrono",
  "criterion",
+ "fixedbitset",
  "nalgebra",
  "petgraph",
  "proptest",
