@@ -3,6 +3,31 @@
 //! Since bones-cli is a binary crate, we exercise the exact same code paths
 //! the TUI uses: query::list_items, query::get_comments, query::get_labels,
 //! and pulldown_cmark markdown rendering (same as tui::markdown).
+//!
+//! Allocator A/B testing:
+//! ```bash
+//! cargo bench --bench tui_memory                          # system allocator
+//! cargo bench --bench tui_memory --features jemalloc      # tikv-jemallocator
+//! cargo bench --bench tui_memory --features mimalloc      # mimalloc
+//! ```
+//! Feature-gated `#[global_allocator]` must live in the bench binary too —
+//! benches are separate compilation units and do not inherit the allocator
+//! selected by `crates/bones-cli/src/main.rs`.
+
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(feature = "jemalloc")]
+const ALLOCATOR_NAME: &str = "jemalloc";
+#[cfg(feature = "mimalloc")]
+const ALLOCATOR_NAME: &str = "mimalloc";
+#[cfg(not(any(feature = "jemalloc", feature = "mimalloc")))]
+const ALLOCATOR_NAME: &str = "system";
 
 use anyhow::Result;
 use bones_core::db::query::{self, ItemFilter, SortOrder};
@@ -236,6 +261,7 @@ fn main() -> Result<()> {
     let db_path = bones_dir.join("bones.db");
 
     eprintln!("=== TUI Memory Benchmark ===");
+    eprintln!("Allocator: {ALLOCATOR_NAME}");
     eprintln!("Items: {n_items}, Comments/item: {comments_per_item}");
     eprintln!("Total comments: {}", n_items * comments_per_item);
     eprintln!();
