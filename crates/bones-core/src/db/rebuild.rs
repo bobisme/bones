@@ -30,6 +30,82 @@ fn configure_rebuild_pragmas(conn: &rusqlite::Connection) -> Result<()> {
         .context("PRAGMA cache_size")?;
     conn.pragma_update(None, "mmap_size", 268_435_456_i64)
         .context("PRAGMA mmap_size")?;
+
+    // Bulk-load tuning: this DB was just created and is about to be
+    // populated from the canonical event log. If anything goes wrong the
+    // whole file is discarded and the rebuild is re-run, so crash durability
+    // during the rebuild window has no value. Turning fsync + journaling off
+    // saves the bulk-load from paying for either.
+    //
+    // `configure_pragmas` in db/mod.rs restores the safe defaults
+    // (journal_mode=WAL, synchronous=NORMAL) the next time this DB is
+    // opened for normal use.
+    conn.pragma_update(None, "synchronous", "OFF")
+        .context("PRAGMA synchronous = OFF")?;
+    let _: String = conn
+        .query_row("PRAGMA journal_mode = OFF", [], |row| row.get(0))
+        .context("PRAGMA journal_mode = OFF")?;
+    let _: String = conn
+        .query_row("PRAGMA locking_mode = EXCLUSIVE", [], |row| row.get(0))
+        .context("PRAGMA locking_mode = EXCLUSIVE")?;
+    Ok(())
+}
+
+/// Names of the FTS5 maintenance triggers on `items`. Kept in one place so
+/// the rebuild path can drop them before bulk-loading and recreate them
+/// after, matching the definitions in `db/schema.rs`.
+const FTS_TRIGGERS: &[&str] = &["items_ai", "items_au", "items_ad"];
+
+/// Drop the three FTS5 maintenance triggers so bulk inserts during rebuild
+/// don't pay per-row FTS5 maintenance cost. The triggers are recreated by
+/// [`restore_fts_triggers`] after the rebuild's FTS index has been
+/// repopulated in bulk via [`crate::db::fts::rebuild_fts_index`].
+fn drop_fts_triggers(conn: &rusqlite::Connection) -> Result<()> {
+    for name in FTS_TRIGGERS {
+        conn.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))
+            .with_context(|| format!("drop trigger {name}"))?;
+    }
+    Ok(())
+}
+
+/// Recreate the FTS5 maintenance triggers dropped by [`drop_fts_triggers`].
+/// Kept byte-for-byte in sync with `db/schema.rs`.
+fn restore_fts_triggers(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS items_ai
+         AFTER INSERT ON items
+         BEGIN
+             INSERT INTO items_fts(rowid, title, description, labels, item_id)
+             VALUES (
+                 new.rowid,
+                 new.title,
+                 COALESCE(new.description, ''),
+                 COALESCE(new.search_labels, ''),
+                 new.item_id
+             );
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS items_au
+         AFTER UPDATE ON items
+         BEGIN
+             DELETE FROM items_fts WHERE rowid = old.rowid;
+             INSERT INTO items_fts(rowid, title, description, labels, item_id)
+             VALUES (
+                 new.rowid,
+                 new.title,
+                 COALESCE(new.description, ''),
+                 COALESCE(new.search_labels, ''),
+                 new.item_id
+             );
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS items_ad
+         AFTER DELETE ON items
+         BEGIN
+             DELETE FROM items_fts WHERE rowid = old.rowid;
+         END;",
+    )
+    .context("recreate FTS5 maintenance triggers after rebuild")?;
     Ok(())
 }
 
@@ -112,6 +188,12 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     configure_rebuild_pragmas(&conn).context("configure rebuild sqlite pragmas")?;
     project::ensure_tracking_table(&conn).context("create tracking table")?;
 
+    // 2b. Disable FTS5 maintenance triggers for the bulk-load. Every
+    // row projection would otherwise incur an insert into items_fts; we
+    // repopulate the whole FTS5 index once at the end in a single
+    // query, which is ~5x cheaper on the bench corpus.
+    drop_fts_triggers(&conn).context("drop FTS5 triggers for bulk rebuild")?;
+
     // 3. Read and replay all events in streaming batches
     let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
@@ -188,6 +270,12 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
         total_projected += stats.projected;
         total_duplicates += stats.duplicates;
     }
+
+    // 4b. Rebuild the FTS5 index in bulk now that all items are in place,
+    // then recreate the maintenance triggers so subsequent incremental
+    // projections keep the FTS5 index in sync row-by-row.
+    crate::db::fts::rebuild_fts_index(&conn).context("rebuild FTS5 index after bulk load")?;
+    restore_fts_triggers(&conn).context("restore FTS5 triggers after bulk rebuild")?;
 
     // 5. Update projection cursor
     let byte_offset_i64 = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
