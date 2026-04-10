@@ -62,3 +62,22 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Benchmark profile: optimize for speed so criterion measurements reflect
+# what users *could* get, not what the size-optimized `release` profile
+# happens to produce. Without this override, benches inherit `release`,
+# which bones ships at opt-level = "z" (size), skewing every number.
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = "line-tables-only"
+
+# Speed-focused variant of release for local installs and perf comparisons.
+# Build with: cargo build --profile release-fast
+[profile.release-fast]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+strip = true
