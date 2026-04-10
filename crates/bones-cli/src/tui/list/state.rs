@@ -244,8 +244,12 @@ fn load_detail_refs(conn: &rusqlite::Connection, mut ids: Vec<String>) -> Result
 }
 
 /// Sort a mutable slice of `WorkItem` by the given `SortField`.
+///
+/// Uses `sort_unstable_by` because every comparator below breaks ties on
+/// `item_id`, which makes the ordering total and deterministic — `item_id`
+/// is unique per row, so stability adds no visible guarantee.
 pub fn sort_items(items: &mut [WorkItem], sort: SortField) {
-    items.sort_by(|a, b| match sort {
+    items.sort_unstable_by(|a, b| match sort {
         SortField::Execution => urgency_rank(&a.urgency)
             .cmp(&urgency_rank(&b.urgency))
             .then_with(|| b.updated_at_us.cmp(&a.updated_at_us))

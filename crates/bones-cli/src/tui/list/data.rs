@@ -152,7 +152,7 @@ impl ListView {
                     .map(|(idx, item_id)| (item_id.as_str(), idx))
                     .collect();
                 filtered.retain(|bone| rank_index.contains_key(bone.item_id.as_str()));
-                filtered.sort_by(|a, b| {
+                filtered.sort_unstable_by(|a, b| {
                     rank_index
                         .get(a.item_id.as_str())
                         .cmp(&rank_index.get(b.item_id.as_str()))
@@ -199,7 +199,7 @@ impl ListView {
         self.done_start_idx = None;
         if self.show_done && !done_items.is_empty() {
             // Show completed bones newest-first (reverse close order approximation).
-            done_items.sort_by(|a, b| {
+            done_items.sort_unstable_by(|a, b| {
                 b.updated_at_us
                     .cmp(&a.updated_at_us)
                     .then_with(|| a.item_id.cmp(&b.item_id))
