@@ -122,7 +122,7 @@ const INCREMENTAL_MAX_CHANGE_PCT: usize = 5;
 /// A [`PageRankResult`] with scores for every item ID.
 #[must_use]
 #[instrument(skip(ng, config))]
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 pub fn pagerank(ng: &NormalizedGraph, config: &PageRankConfig) -> PageRankResult {
     let g = &ng.condensed;
     let n = g.node_count();

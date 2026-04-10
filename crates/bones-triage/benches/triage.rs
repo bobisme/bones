@@ -162,5 +162,64 @@ fn bench_composite(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_normalize, bench_pagerank, bench_composite);
+fn bench_end_to_end(c: &mut Criterion) {
+    // Measures the composed pipeline a real `bn triage` invocation drives:
+    //   RawGraph (already built)
+    //   -> NormalizedGraph::from_raw         (bn-3f00 territory)
+    //   -> pagerank::full                    (bn-pu4y territory)
+    //   -> composite_score over every item   (cheap, always runs)
+    //
+    // The goal is to confirm the isolated wins compose and to surface the
+    // next bottleneck once the three headline targets have been cut. Each
+    // iteration rebuilds the RawGraph so the HashMap<String, NodeIndex> +
+    // petgraph construction cost is also included — that matches what a
+    // real `bn triage` pays on every invocation.
+    let mut group = c.benchmark_group("triage.end_to_end");
+    group.sample_size(10);
+    let cfg = PageRankConfig::default();
+    let weights = CompositeWeights::<f64>::default();
+
+    for &n in &tier_sizes() {
+        group.bench_with_input(
+            BenchmarkId::new("from_raw_pagerank_composite", n),
+            &n,
+            |b, &n| {
+                b.iter_with_large_drop(|| {
+                    let raw = synthetic_raw_graph(n, 2, 42);
+                    let ng = NormalizedGraph::from_raw(raw);
+                    let pr = pagerank(&ng, &cfg);
+                    // Build MetricInputs straight from the pagerank output,
+                    // using a cheap deterministic stand-in for the other
+                    // scalar metrics. The point is the total wall clock,
+                    // not the composite math itself.
+                    let mut acc = 0.0_f64;
+                    for (i, (_id, score)) in pr.scores.iter().enumerate() {
+                        let inputs = MetricInputs {
+                            critical_path: (i as f64) / (n as f64),
+                            pagerank: *score,
+                            betweenness: ((i * 13) % n) as f64 / (n as f64),
+                            urgency: if i % 100 == 0 {
+                                Urgency::Urgent
+                            } else {
+                                Urgency::Default
+                            },
+                            decay_days: (i % 30) as f64,
+                        };
+                        acc += composite_score(&inputs, &weights);
+                    }
+                    black_box((pr.iterations, acc))
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_normalize,
+    bench_pagerank,
+    bench_composite,
+    bench_end_to_end
+);
 criterion_main!(benches);
