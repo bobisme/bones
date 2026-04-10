@@ -136,6 +136,34 @@ pub fn pagerank(ng: &NormalizedGraph, config: &PageRankConfig) -> PageRankResult
         };
     }
 
+    // Build a flat CSR view once. Inner loops then iterate slices with no
+    // petgraph dispatch and no per-node `.count()` calls. For the condensed
+    // DAG with n ≈ 10k and ~2n edges this is a one-time O(V+E) cost that
+    // pays back on every power-iteration step.
+    let mut out_offset: Vec<u32> = Vec::with_capacity(n + 1);
+    out_offset.push(0);
+    // Upper bound: the condensed edge count. petgraph doesn't expose
+    // `edge_count` as const, but Vec grows as needed — we only allocate the
+    // exact amount here.
+    let mut out_neighbors: Vec<u32> = Vec::with_capacity(g.edge_count());
+    let mut dangling: Vec<u32> = Vec::new();
+
+    for node in g.node_identifiers() {
+        let idx = g.to_index(node);
+        debug_assert_eq!(idx, out_offset.len() - 1);
+        let start = out_neighbors.len();
+        for neighbor in g.neighbors_directed(node, Direction::Outgoing) {
+            let nidx = g.to_index(neighbor);
+            // Condensed graph never exceeds u32::MAX nodes in practice.
+            out_neighbors.push(nidx as u32);
+        }
+        let out_degree = out_neighbors.len() - start;
+        if out_degree == 0 {
+            dangling.push(idx as u32);
+        }
+        out_offset.push(out_neighbors.len() as u32);
+    }
+
     let n_f64 = n as f64;
     let base = (1.0 - config.damping) / n_f64;
 
@@ -149,26 +177,24 @@ pub fn pagerank(ng: &NormalizedGraph, config: &PageRankConfig) -> PageRankResult
     for _ in 0..config.max_iter {
         iterations += 1;
 
-        // Reset new_ranks to base teleportation value.
-        new_ranks.fill(base);
+        // Fold the dangling-node mass into the teleport term once per
+        // iteration as a single scalar. Matches the pattern already used by
+        // `global_residual_max` below and replaces the old O(n) per-dangling
+        // inner loop.
+        let dangling_sum: f64 = dangling.iter().map(|&idx| ranks[idx as usize]).sum();
+        let dangling_share = config.damping * dangling_sum / n_f64;
+        new_ranks.fill(base + dangling_share);
 
-        // Distribute rank from each node to its outgoing neighbors.
-        for node in g.node_identifiers() {
-            let idx = g.to_index(node);
-            let out_degree = g.neighbors_directed(node, Direction::Outgoing).count();
-
-            if out_degree == 0 {
-                // Dangling node: distribute its rank equally to all nodes.
-                let share = config.damping * ranks[idx] / n_f64;
-                for r in &mut new_ranks {
-                    *r += share;
-                }
-            } else {
-                let share = config.damping * ranks[idx] / out_degree as f64;
-                for neighbor in g.neighbors_directed(node, Direction::Outgoing) {
-                    let nidx = g.to_index(neighbor);
-                    new_ranks[nidx] += share;
-                }
+        // Distribute rank over real out-edges via the CSR slice.
+        for i in 0..n {
+            let start = out_offset[i] as usize;
+            let end = out_offset[i + 1] as usize;
+            if start == end {
+                continue;
+            }
+            let share = config.damping * ranks[i] / (end - start) as f64;
+            for &nidx in &out_neighbors[start..end] {
+                new_ranks[nidx as usize] += share;
             }
         }
 
