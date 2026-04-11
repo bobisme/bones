@@ -57,27 +57,17 @@ crossterm = "0.28"
 sqlite-vec = "0.1.7-alpha.10"
 
 [profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
+opt-level = 3
+lto = "thin"
+codegen-units = 16
 panic = "abort"
 strip = true
 
-# Benchmark profile: optimize for speed so criterion measurements reflect
-# what users *could* get, not what the size-optimized `release` profile
-# happens to produce. Without this override, benches inherit `release`,
-# which bones ships at opt-level = "z" (size), skewing every number.
+# Benchmark profile: stay at opt-level=3 + thin-LTO to match what the
+# shipped `release` binary is now built with. Keeps criterion numbers
+# representative of what real users see.
 [profile.bench]
 opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = "line-tables-only"
-
-# Speed-focused variant of release for local installs and perf comparisons.
-# Build with: cargo build --profile release-fast
-[profile.release-fast]
-inherits = "release"
-opt-level = 3
-lto = "thin"
-codegen-units = 16
-strip = true

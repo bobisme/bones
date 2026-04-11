@@ -23,8 +23,9 @@ if ! command -v samply >/dev/null 2>&1; then
 fi
 
 # Build speed-optimized binary with debug info for symbolization.
-cargo build --profile release-fast --bin bn
-bin="target/release-fast/bn"
+# As of bn-2qbr, [profile.release] is already opt-level=3 + thin-LTO.
+cargo build --release --bin bn
+bin="target/release/bn"
 
 outdir="target/flamegraphs"
 mkdir -p "$outdir"

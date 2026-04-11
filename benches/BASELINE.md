@@ -5,35 +5,40 @@ optimizations land. Every follow-up perf task (bn-1ylg / bn-17xg / bn-pu4y /
 etc.) re-runs the same benches and has to justify its change against these
 numbers.
 
-## Profile correction — read this first
+## Profile history — read this first
 
 Before bn-2ury, this workspace shipped a `[profile.release]` of
 `opt-level = "z"` (size-optimized) and had **no `[profile.bench]` override**.
 Criterion's `bench` profile silently inherits from `release`, so every
 historical criterion number in this repo measured a **size-optimized build**.
 
-bn-2ury adds two profile entries in the root `Cargo.toml`:
+bn-2ury added an explicit `[profile.bench]` and a transitional
+`[profile.release-fast]` so measurements and installs could opt into
+speed-optimized builds without changing the shipped default.
+
+bn-2qbr then flipped `[profile.release]` itself to speed-optimized after
+measuring the trade-off (see `RELEASE_PROFILE.md`). The current profile
+stack is:
 
 ```toml
-[profile.bench]          # speed-optimized for measurement accuracy
+[profile.release]        # shipped + installed
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
+
+[profile.bench]          # criterion benchmarks
 opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = "line-tables-only"
-
-[profile.release-fast]   # speed-optimized installable; use for `bn` perf runs
-inherits = "release"
-opt-level = 3
-lto = "thin"
-codegen-units = 16
-strip = true
 ```
 
-The `release` profile is left at `opt-level = "z"` so end-user binary size
-doesn't change without a separate decision. A follow-up bone should evaluate
-flipping `release` itself — back-of-envelope, users probably want an 80 KB
-larger binary in exchange for ~30–60 % faster dependency graph / replay /
-rebuild operations.
+`[profile.release-fast]` is gone — it's redundant now that `release`
+itself is speed-optimized. Binary size went from 28.92 MB → 34.62 MB
+(+19.7 %) in exchange for matching the criterion numbers on real
+end-user invocations.
 
 ## Environment
 
@@ -123,8 +128,8 @@ Interpretation:
 
 ## Code-review hot spots (pre-flamegraph, from reading the code while writing the harness)
 
-1. **`[profile.release] opt-level = "z"`** — noted above. Speed vs size
-   trade-off that should be revisited as a follow-up.
+1. **`[profile.release] opt-level = "z"`** — fixed in bn-2qbr. `release`
+   is now opt-level=3 + thin-LTO, matching `[profile.bench]`.
 2. **`pagerank` inner loop** (`crates/bones-triage/src/metrics/pagerank.rs`
    around lines 149–173):
    - `g.neighbors_directed(node, Outgoing).count()` called once per node per
@@ -160,7 +165,7 @@ re-measured in this pass — bn-17xg will own a before/after on those.
 ## Flamegraph capture
 
 `scripts/flamegraph.sh <scenario> [args...]` wraps `samply record` against
-`target/release-fast/bn`. Requires `cargo install --locked samply` (user
+`target/release/bn`. Requires `cargo install --locked samply` (user
 install, no sudo).
 
 ```bash
