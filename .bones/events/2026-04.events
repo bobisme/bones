@@ -64,3 +64,4 @@
 1777078138702034	chief-dev	itc:v3:AWKf_JJnySfNAAAAAAAAQb_6rfVfYAAAAAErAg		item.move	bn-3un0	{"state":"doing"}	blake3:ehbE4z_YoodGsqStB8vx5V_UX_L2Re6hTpeitZ_JsS8
 1777078138708849	chief-dev	itc:v3:AWKf_JJnySfNAAAAAAAAQb_6rfVfYAAAAAErAw		item.assign	bn-3un0	{"action":"assign","agent":"chief-dev"}	blake3:rNPSvn3TXgLfG_ROgv9D6kQNTf4JgoU0fd1VwttlM2Q
 1777079126921990	chief-dev	itc:v3:AWKf_JJnySfNAAAAAAAAQb_6rfVfYAAAAAErBA		item.comment	bn-3un0	{"body":"Implemented chief-facing JSON provider contract in workspace bn-3un0; just check passes. Commit: 069eb923."}	blake3:DZYina-_bE6ztTYQp-14KWGa36yA47ey2zNZRaqMKBA
+1777079332902511	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3rQw		item.move	bn-3un0	{"state":"done"}	blake3:sZc2CmklN6CLkxmv49Yp_6l-InPGM7KkmuxnvKEFFRs
