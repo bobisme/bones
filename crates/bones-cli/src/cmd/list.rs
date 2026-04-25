@@ -18,10 +18,13 @@ use std::str::FromStr;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct ListArgs {
-    /// Filter by state: open, doing, done, archived.
+    /// Filter by state/status: open, doing, done, archived, blocked.
     /// Default: open (when no other filters are set).
-    #[arg(long, alias = "status")]
-    pub state: Option<String>,
+    ///
+    /// May be repeated or comma-separated. `blocked` is a virtual status for
+    /// items with unresolved dependencies; item state remains open/doing/etc.
+    #[arg(long, alias = "status", value_delimiter = ',')]
+    pub state: Vec<String>,
 
     /// Include all states when no explicit state filter is provided.
     #[arg(long, conflicts_with = "state")]
@@ -240,11 +243,15 @@ pub fn run_list(
         }
     };
 
-    if let Some(ref state) = args.state
-        && let Err(e) = validate::validate_state(state)
-    {
-        render_error(output, &e.to_cli_error())?;
-        anyhow::bail!("{}", e.reason);
+    let statuses = normalized_statuses(args);
+    for state in &statuses {
+        if state == "blocked" {
+            continue;
+        }
+        if let Err(e) = validate::validate_state(state) {
+            render_error(output, &e.to_cli_error())?;
+            anyhow::bail!("{}", e.reason);
+        }
     }
     if let Some(ref kind) = args.kind
         && let Err(e) = validate::validate_kind(kind)
@@ -362,7 +369,8 @@ fn build_list_response(
 
     // Default to showing open items unless any filter is explicitly set.
     // Pagination/sort alone should not disable this default behavior.
-    let has_any_filter = args.state.is_some()
+    let statuses = normalized_statuses(args);
+    let has_any_filter = !statuses.is_empty()
         || args.all_states
         || args.all
         || args.kind.is_some()
@@ -373,16 +381,18 @@ fn build_list_response(
         || since_us.is_some()
         || until_us.is_some();
 
-    let state_filter = if has_any_filter {
-        args.state.clone()
-    } else {
+    let state_filter = if !has_any_filter {
         Some("open".to_string())
+    } else if statuses.len() == 1 && statuses[0] != "blocked" {
+        Some(statuses[0].clone())
+    } else {
+        None
     };
 
     // Fetch an unpaginated set first, then apply deterministic sort + pagination
     // in Rust so metadata remains consistent even with composite label filters.
     let filter = ItemFilter {
-        state: state_filter,
+        state: state_filter.clone(),
         kind: args.kind.clone(),
         urgency: args.urgency.clone(),
         label: all_labels.first().cloned(),
@@ -395,6 +405,22 @@ fn build_list_response(
     };
 
     let mut raw = query::list_items(conn, &filter)?;
+
+    if !statuses.is_empty() && state_filter.is_none() {
+        let state_statuses: HashSet<&str> = statuses
+            .iter()
+            .filter_map(|status| (status != "blocked").then_some(status.as_str()))
+            .collect();
+        let blocked_ids = if statuses.iter().any(|status| status == "blocked") {
+            blocked_item_ids(conn)?
+        } else {
+            HashSet::new()
+        };
+
+        raw.retain(|item| {
+            state_statuses.contains(item.state.as_str()) || blocked_ids.contains(&item.item_id)
+        });
+    }
 
     // AND-filter labels when multiple --label values are supplied.
     if !all_labels.is_empty() {
@@ -528,6 +554,42 @@ fn state_rank(value: &str) -> u8 {
     }
 }
 
+fn normalized_statuses(args: &ListArgs) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+
+    for raw in &args.state {
+        let status = raw.trim().to_ascii_lowercase();
+        if status.is_empty() || !seen.insert(status.clone()) {
+            continue;
+        }
+        out.push(status);
+    }
+
+    out
+}
+
+fn blocked_item_ids(conn: &rusqlite::Connection) -> anyhow::Result<HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT d.item_id
+         FROM item_dependencies d
+         JOIN items blocker ON blocker.item_id = d.depends_on_item_id
+         JOIN items blocked ON blocked.item_id = d.item_id
+         WHERE d.link_type IN ('blocks', 'blocked_by')
+           AND blocker.state NOT IN ('done', 'archived')
+           AND blocker.is_deleted = 0
+           AND blocked.state NOT IN ('done', 'archived')
+           AND blocked.is_deleted = 0",
+    )?;
+
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut ids = HashSet::new();
+    for row in rows {
+        ids.insert(row?);
+    }
+    Ok(ids)
+}
+
 fn parse_datetime_to_micros(raw: &str) -> Option<i64> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -657,7 +719,7 @@ mod tests {
 
     fn default_args() -> ListArgs {
         ListArgs {
-            state: None,
+            state: vec![],
             all_states: false,
             all: false,
             kind: None,
@@ -688,7 +750,7 @@ mod tests {
             args: ListArgs,
         }
         let w = Wrapper::parse_from(["test"]);
-        assert!(w.args.state.is_none());
+        assert!(w.args.state.is_empty());
         assert!(!w.args.all_states);
         assert!(!w.args.all);
         assert!(w.args.kind.is_none());
@@ -737,7 +799,7 @@ mod tests {
             "--sort",
             "priority",
         ]);
-        assert_eq!(w.args.state.as_deref(), Some("doing"));
+        assert_eq!(w.args.state, vec!["doing"]);
         assert!(!w.args.all_states);
         assert!(!w.args.all);
         assert_eq!(w.args.kind.as_deref(), Some("bug"));
@@ -763,13 +825,24 @@ mod tests {
         let w = Wrapper::parse_from(["test", "--all-states"]);
         assert!(w.args.all_states);
         assert!(!w.args.all);
-        assert!(w.args.state.is_none());
+        assert!(w.args.state.is_empty());
 
         // --all (hidden alias) sets all, not all_states
         let w2 = Wrapper::parse_from(["test", "--all"]);
         assert!(w2.args.all);
         assert!(!w2.args.all_states);
-        assert!(w2.args.state.is_none());
+        assert!(w2.args.state.is_empty());
+    }
+
+    #[test]
+    fn list_args_accepts_repeated_status_alias() {
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            args: ListArgs,
+        }
+        let w = Wrapper::parse_from(["test", "--status", "open", "--status", "doing,blocked"]);
+        assert_eq!(w.args.state, vec!["open", "doing", "blocked"]);
     }
 
     // -----------------------------------------------------------------------
@@ -1069,7 +1142,7 @@ mod tests {
         let conn = Connection::open(db_path).unwrap();
 
         let mut args = default_args();
-        args.state = Some("doing".into());
+        args.state = vec!["doing".into()];
 
         // bn-002 has updated_at_us=2001
         let response =
@@ -1117,7 +1190,7 @@ mod tests {
     fn run_list_with_state_filter() {
         let (_dir, root) = setup_test_db();
         let mut args = default_args();
-        args.state = Some("doing".into());
+        args.state = vec!["doing".into()];
         run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
 
@@ -1125,7 +1198,7 @@ mod tests {
     fn run_list_empty_returns_no_items_message() {
         let (_dir, root) = setup_test_db();
         let mut args = default_args();
-        args.state = Some("archived".into());
+        args.state = vec!["archived".into()];
         // No archived items → should succeed with empty result
         run_list(&args, OutputMode::Pretty, &root).unwrap();
     }
@@ -1150,7 +1223,7 @@ mod tests {
     fn run_list_filter_by_kind() {
         let (_dir, root) = setup_test_db();
         let mut args = default_args();
-        args.state = Some("doing".into());
+        args.state = vec!["doing".into()];
         args.kind = Some("bug".into());
         run_list(&args, OutputMode::Pretty, &root).unwrap();
     }

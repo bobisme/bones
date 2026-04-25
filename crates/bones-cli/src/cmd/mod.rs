@@ -8,6 +8,7 @@ pub mod comment;
 pub mod compact;
 pub mod completions;
 pub mod config;
+pub mod context;
 pub mod create;
 pub mod cycles;
 pub mod dedup;

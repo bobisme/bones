@@ -142,6 +142,14 @@ enum Commands {
 
     #[command(
         next_help_heading = "Read",
+        about = "Emit a bundled task context snapshot",
+        long_about = "Emit a chief-facing JSON context snapshot with project counts, recommended next work, blocked work, active goals, and projection freshness metadata.",
+        after_help = "EXAMPLES:\n    # Machine-readable task context\n    bn context --format json"
+    )]
+    Context(cmd::context::ContextArgs),
+
+    #[command(
+        next_help_heading = "Read",
         about = "Show one bone",
         long_about = "Show full details for a single bone by ID.",
         after_help = "EXAMPLES:\n    # Show a bone\n    bn show bn-abc\n\n    # Use a short prefix when unique\n    bn show abc\n\n    # Machine-readable output\n    bn show bn-abc --format json"
@@ -1202,6 +1210,9 @@ fn main() -> anyhow::Result<()> {
         }),
         Commands::List(ref args) => timing::timed("cmd.list", || {
             cmd::list::run_list(args, output, &project_root)
+        }),
+        Commands::Context(ref args) => timing::timed("cmd.context", || {
+            cmd::context::run_context(args, output, &project_root)
         }),
         Commands::Agents(ref args) => timing::timed("cmd.agents", || {
             cmd::agents::run_agents(args, output, &project_root)

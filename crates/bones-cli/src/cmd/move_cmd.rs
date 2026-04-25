@@ -12,6 +12,7 @@ use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
 use clap::Args;
 use rusqlite::Connection;
+use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -24,6 +25,16 @@ pub struct MoveArgs {
     /// New parent bone ID. Use "--parent none" to make top-level.
     #[arg(long)]
     pub parent: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MoveOutput {
+    schema_version: u32,
+    ok: bool,
+    id: String,
+    item_id: String,
+    previous_parent_id: Option<String>,
+    parent_id: Option<String>,
 }
 
 /// Open the projection DB, returning a helpful error if it doesn't exist.
@@ -148,23 +159,25 @@ pub fn run_move(
         Some(parent_id)
     };
 
-    // If reparenting to a specific parent, validate it is a goal
-    if let Some(ref parent_id) = new_parent {
-        let conn = match open_db(project_root) {
-            Ok(c) => c,
-            Err(e) => {
-                render_error(output, &CliError::new(e.to_string()))?;
-                return Err(e);
-            }
-        };
-
-        // Check that the item itself exists
-        if !bones_core::db::query::item_exists(&conn, item_id.as_str())? {
-            let err = anyhow::anyhow!("item not found: {}", item_id.as_str());
-            render_error(output, &CliError::new(err.to_string()))?;
-            return Err(err);
+    let conn = match open_db(project_root) {
+        Ok(c) => c,
+        Err(e) => {
+            render_error(output, &CliError::new(e.to_string()))?;
+            return Err(e);
         }
+    };
 
+    let item = if let Some(item) = get_item(&conn, item_id.as_str(), false)? {
+        item
+    } else {
+        let err = anyhow::anyhow!("item not found: {}", item_id.as_str());
+        render_error(output, &CliError::new(err.to_string()))?;
+        return Err(err);
+    };
+    let previous_parent_id = item.parent_id;
+
+    // If reparenting to a specific parent, validate it is a goal.
+    if let Some(ref parent_id) = new_parent {
         // Validate parent exists and is a goal
         let parent_item = if let Some(item) = get_item(&conn, parent_id.as_str(), false)? {
             item
@@ -185,16 +198,6 @@ pub fn run_move(
             render_error(output, &CliError::new(err.to_string()))?;
             return Err(err);
         }
-    } else {
-        // Moving to top-level: still validate the item itself exists if DB is available
-        let db_path = project_root.join(".bones").join("bones.db");
-        if let Some(conn) = try_open_projection(&db_path)?
-            && !bones_core::db::query::item_exists(&conn, item_id.as_str())?
-        {
-            let err = anyhow::anyhow!("item not found: {}", item_id.as_str());
-            render_error(output, &CliError::new(err.to_string()))?;
-            return Err(err);
-        }
     }
 
     // Emit the parent update event
@@ -207,22 +210,20 @@ pub fn run_move(
     }
 
     // Output result
-    let val = match &new_parent {
-        Some(parent_id) => json!({
-            "ok": true,
-            "item_id": item_id.as_str(),
-            "parent_id": parent_id.as_str(),
-        }),
-        None => json!({
-            "ok": true,
-            "item_id": item_id.as_str(),
-            "parent_id": null,
-        }),
+    let val = MoveOutput {
+        schema_version: 1,
+        ok: true,
+        id: item_id.as_str().to_string(),
+        item_id: item_id.as_str().to_string(),
+        previous_parent_id,
+        parent_id: new_parent
+            .as_ref()
+            .map(|parent_id| parent_id.as_str().to_string()),
     };
 
     render(output, &val, |v, w| {
-        let item = v["item_id"].as_str().unwrap_or("");
-        match v["parent_id"].as_str() {
+        let item = v.item_id.as_str();
+        match v.parent_id.as_deref() {
             Some(parent) => writeln!(w, "Moved {item} under parent {parent}"),
             None => writeln!(w, "Moved {item} to top level"),
         }

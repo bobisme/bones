@@ -72,7 +72,7 @@ mod tests {
             "priority",
         ]);
 
-        assert_eq!(parsed.args.list.state.as_deref(), Some("doing"));
+        assert_eq!(parsed.args.list.state, vec!["doing"]);
         assert_eq!(parsed.args.list.kind.as_deref(), Some("task"));
         assert_eq!(parsed.args.list.label, vec!["backend"]);
         assert_eq!(parsed.args.list.sort, "priority");
@@ -82,7 +82,7 @@ mod tests {
     fn build_mine_filter_overrides_assignee() {
         let args = MineArgs {
             list: ListArgs {
-                state: Some("open".to_string()),
+                state: vec!["open".to_string()],
                 all_states: false,
                 all: false,
                 kind: None,
@@ -103,7 +103,7 @@ mod tests {
 
         let filtered = build_mine_filter(&args, "alice".to_string());
         assert_eq!(filtered.assignee.as_deref(), Some("alice"));
-        assert_eq!(filtered.state.as_deref(), Some("open"));
+        assert_eq!(filtered.state, vec!["open"]);
     }
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
 
         let args = MineArgs {
             list: ListArgs {
-                state: None,
+                state: vec![],
                 all_states: false,
                 all: false,
                 kind: None,

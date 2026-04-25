@@ -237,10 +237,12 @@ fn default_kind() -> String {
 /// JSON output for a created bone.
 #[derive(Debug, Clone, Serialize)]
 struct CreateOutput {
+    schema_version: u32,
     id: String,
     title: String,
     kind: String,
     state: String,
+    previous_state: Option<String>,
     urgency: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     size: Option<String>,
@@ -258,6 +260,7 @@ struct CreateOutput {
 
 #[derive(Debug, Serialize)]
 struct CreateBatchOutput {
+    schema_version: u32,
     created: Vec<CreateOutput>,
 }
 
@@ -390,6 +393,7 @@ fn render_create_result(output: OutputMode, result: &CreateOutput) -> anyhow::Re
 
 fn render_create_batch(output: OutputMode, results: &[CreateOutput]) -> anyhow::Result<()> {
     let batch = CreateBatchOutput {
+        schema_version: 1,
         created: results.to_vec(),
     };
     render(output, &batch, |r, w| {
@@ -784,10 +788,12 @@ fn run_create_single(
 
     // 18. Output
     let result = CreateOutput {
+        schema_version: 1,
         id: item_id.as_str().to_string(),
         title: request.title.clone(),
         kind: kind.to_string(),
         state: "open".to_string(),
+        previous_state: None,
         urgency: urgency.to_string(),
         size: size.map(|s| s.to_string()),
         parent: request.parent.clone(),

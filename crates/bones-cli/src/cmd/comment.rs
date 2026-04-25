@@ -65,7 +65,9 @@ pub struct CommentsArgs {
 
 #[derive(Debug, Serialize)]
 struct CommentAddOutput {
+    schema_version: u32,
     ok: bool,
+    id: String,
     item_id: String,
     agent: String,
     body: String,
@@ -291,7 +293,9 @@ fn run_comment_add(
     }
 
     let result = CommentAddOutput {
+        schema_version: 1,
         ok: true,
+        id: resolved_id.clone(),
         item_id: resolved_id,
         agent,
         body: args.body.clone(),

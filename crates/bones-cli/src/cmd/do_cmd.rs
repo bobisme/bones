@@ -54,6 +54,8 @@ struct DoResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     previous_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     new_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     event_hash: Option<String>,
@@ -63,6 +65,7 @@ struct DoResult {
 
 #[derive(Debug, Serialize)]
 struct DoBatchOutput {
+    schema_version: u32,
     results: Vec<DoResult>,
 }
 
@@ -244,6 +247,7 @@ pub fn run_do(
                 id: ok.id,
                 ok: true,
                 previous_state: Some(ok.previous_state),
+                state: Some(ok.new_state.clone()),
                 new_state: Some(ok.new_state),
                 event_hash: Some(ok.event_hash),
                 error: None,
@@ -254,6 +258,7 @@ pub fn run_do(
                     id: raw_id.to_string(),
                     ok: false,
                     previous_state: None,
+                    state: None,
                     new_state: None,
                     event_hash: None,
                     error: Some(err.to_string()),
@@ -262,7 +267,10 @@ pub fn run_do(
         }
     }
 
-    let payload = DoBatchOutput { results };
+    let payload = DoBatchOutput {
+        schema_version: 1,
+        results,
+    };
 
     render(output, &payload, |r, w| {
         writeln!(w, "{:<4}  {:<16}  TRANSITION", "OK", "ID")?;
