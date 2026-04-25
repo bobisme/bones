@@ -186,6 +186,36 @@ impl WorkItem {
     }
 }
 
+fn local_search_rank(item: &WorkItem, query: &str) -> Option<usize> {
+    let item_id = item.item_id.to_ascii_lowercase();
+    if item_id == query {
+        return Some(0);
+    }
+    if item_id.starts_with(query) {
+        return Some(1);
+    }
+    if item_id.contains(query) {
+        return Some(2);
+    }
+    if item.title.to_ascii_lowercase().contains(query) {
+        return Some(3);
+    }
+    None
+}
+
+fn search_sort_key(
+    item: &WorkItem,
+    query: &str,
+    rank_index: &HashMap<&str, usize>,
+) -> (usize, usize) {
+    match local_search_rank(item, query) {
+        Some(rank @ 0..=2) => (rank, 0),
+        _ => rank_index
+            .get(item.item_id.as_str())
+            .map_or((4, 0), |rank| (3, *rank)),
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DetailComment {
     author: String,
@@ -1866,4 +1896,3 @@ pub struct ListView {
     /// terminal so the TUI repaints cleanly.
     pub needs_terminal_refresh: bool,
 }
-

@@ -144,6 +144,7 @@ impl ListView {
 
         let query_active = !self.filter.search_query.trim().is_empty();
         if query_active {
+            let q = self.filter.search_query.trim().to_ascii_lowercase();
             if self.semantic_search_active {
                 let rank_index: HashMap<&str, usize> = self
                     .semantic_search_ids
@@ -151,19 +152,17 @@ impl ListView {
                     .enumerate()
                     .map(|(idx, item_id)| (item_id.as_str(), idx))
                     .collect();
-                filtered.retain(|bone| rank_index.contains_key(bone.item_id.as_str()));
+                filtered.retain(|bone| {
+                    rank_index.contains_key(bone.item_id.as_str())
+                        || local_search_rank(bone, &q).is_some()
+                });
                 filtered.sort_unstable_by(|a, b| {
-                    rank_index
-                        .get(a.item_id.as_str())
-                        .cmp(&rank_index.get(b.item_id.as_str()))
+                    search_sort_key(a, &q, &rank_index)
+                        .cmp(&search_sort_key(b, &q, &rank_index))
                         .then_with(|| a.item_id.cmp(&b.item_id))
                 });
             } else {
-                let q = self.filter.search_query.to_ascii_lowercase();
-                filtered.retain(|bone| {
-                    bone.title.to_ascii_lowercase().contains(&q)
-                        || bone.item_id.to_ascii_lowercase().contains(&q)
-                });
+                filtered.retain(|bone| local_search_rank(bone, &q).is_some());
             }
         }
 

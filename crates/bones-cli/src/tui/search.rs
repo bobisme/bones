@@ -4,7 +4,7 @@
 //! Calls `bones_search::fusion::scoring::hybrid_search()` for full fusion scoring.
 //! Falls back to FTS5-only search if semantic model unavailable.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bones_core::config::load_project_config;
 use bones_core::db::query;
 use bones_search::fusion::{HybridSearchResult, hybrid_search, hybrid_search_fast};
@@ -17,12 +17,123 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 struct EnrichedResult {
     item: HybridSearchResult,
     title: String,
+}
+
+struct DirectIdMatch {
+    rank: usize,
+    result: EnrichedResult,
+}
+
+fn escape_like(query: &str) -> String {
+    let mut escaped = String::with_capacity(query.len());
+    for ch in query.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn direct_id_matches(
+    conn: &rusqlite::Connection,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<DirectIdMatch>> {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let escaped = escape_like(&query);
+    let contains = format!("%{escaped}%");
+    let prefix = format!("{escaped}%");
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let mut stmt = conn.prepare(
+        "SELECT item_id, title,
+                CASE
+                    WHEN lower(item_id) = ?2 THEN 0
+                    WHEN lower(item_id) LIKE ?3 ESCAPE '\\' THEN 1
+                    ELSE 2
+                END AS id_rank
+         FROM items
+         WHERE is_deleted = 0
+           AND lower(item_id) LIKE ?1 ESCAPE '\\'
+         ORDER BY id_rank, length(item_id), item_id
+         LIMIT ?4",
+    )?;
+
+    let rows = stmt.query_map(
+        rusqlite::params![contains, query, prefix, limit],
+        |row| {
+            let item_id: String = row.get(0)?;
+            let title: String = row.get(1)?;
+            let rank: i64 = row.get(2)?;
+            let rank = usize::try_from(rank).unwrap_or(usize::MAX);
+            Ok(DirectIdMatch {
+                rank,
+                result: EnrichedResult {
+                    item: HybridSearchResult {
+                        item_id,
+                        score: 1.0,
+                        lexical_score: 1.0,
+                        semantic_score: 0.0,
+                        structural_score: 0.0,
+                        lexical_rank: rank + 1,
+                        semantic_rank: 0,
+                        structural_rank: 0,
+                    },
+                    title,
+                },
+            })
+        },
+    )?;
+
+    let mut matches = Vec::new();
+    for row in rows {
+        matches.push(row?);
+    }
+    Ok(matches)
+}
+
+fn merge_direct_id_matches(
+    direct: Vec<DirectIdMatch>,
+    ranked: Vec<EnrichedResult>,
+    limit: usize,
+) -> Vec<EnrichedResult> {
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+
+    for item in direct.iter().filter(|item| item.rank <= 1) {
+        if seen.insert(item.result.item.item_id.clone()) {
+            merged.push(EnrichedResult {
+                item: item.result.item.clone(),
+                title: item.result.title.clone(),
+            });
+        }
+    }
+
+    for item in ranked {
+        if seen.insert(item.item.item_id.clone()) {
+            merged.push(item);
+        }
+    }
+
+    for item in direct.into_iter().filter(|item| item.rank > 1) {
+        if seen.insert(item.result.item.item_id.clone()) {
+            merged.push(item.result);
+        }
+    }
+
+    merged.truncate(limit);
+    merged
 }
 
 pub struct SearchView {
@@ -157,6 +268,7 @@ impl SearchView {
             Some(c) => c,
             None => return Ok(()),
         };
+        let direct_matches = direct_id_matches(&conn, &self.query, 20)?;
 
         // Auto-wildcard for simple queries to support "type-ahead" feel
         let effective_query = if !self.query.contains(' ')
@@ -169,8 +281,13 @@ impl SearchView {
         };
 
         // Tier 1: fast search (lexical + structural only).
-        let raw_results = hybrid_search_fast(&effective_query, &conn, 20, 60)
-            .context("fast search failed")?;
+        let raw_results = match hybrid_search_fast(&effective_query, &conn, 20, 60) {
+            Ok(results) => results,
+            Err(err) => {
+                tracing::debug!("search view fast search failed: {err:#}");
+                Vec::new()
+            }
+        };
 
         let mut enriched = Vec::with_capacity(raw_results.len());
         for res in raw_results {
@@ -179,7 +296,7 @@ impl SearchView {
                 .unwrap_or_else(|| "Unknown".to_string());
             enriched.push(EnrichedResult { item: res, title });
         }
-        self.results = enriched;
+        self.results = merge_direct_id_matches(direct_matches, enriched, 20);
 
         if !self.results.is_empty() {
             self.state.select(Some(0));
@@ -190,6 +307,7 @@ impl SearchView {
         // Tier 2: spawn background semantic refinement.
         if let Some(model) = self.semantic_model.clone() {
             let db_path = self.db_path.clone();
+            let raw_query = self.query.clone();
             let query_owned = effective_query;
             let (tx, rx) = std::sync::mpsc::channel();
             self.refinement_rx = Some(rx);
@@ -203,7 +321,7 @@ impl SearchView {
                     Ok(h) => h,
                     Err(e) => {
                         tracing::debug!("search view tier-2 failed: {e:#}");
-                        return;
+                        Vec::new()
                     }
                 };
                 let enriched: Vec<EnrichedResult> = hits
@@ -217,7 +335,14 @@ impl SearchView {
                         Some(EnrichedResult { item: res, title })
                     })
                     .collect();
-                let _ = tx.send(enriched);
+                let direct = match direct_id_matches(&conn, &raw_query, 20) {
+                    Ok(matches) => matches,
+                    Err(e) => {
+                        tracing::debug!("search view direct ID refinement failed: {e:#}");
+                        Vec::new()
+                    }
+                };
+                let _ = tx.send(merge_direct_id_matches(direct, enriched, 20));
             });
         }
 
@@ -398,6 +523,35 @@ mod tests {
         assert_eq!(view.results.len(), 1);
         assert_eq!(view.results[0].item.item_id, "bn-1");
         assert_eq!(view.results[0].title, "Authentication Bug");
+    }
+
+    #[test]
+    fn search_view_finds_item_by_full_id() {
+        let (_dir, db_path) = setup_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_item(&conn, "bn-abc123", "Unrelated title");
+
+        let mut view = SearchView::new(db_path.clone()).unwrap();
+        view.query = "bn-abc123".to_string();
+        view.perform_search().unwrap();
+
+        assert_eq!(view.results.len(), 1);
+        assert_eq!(view.results[0].item.item_id, "bn-abc123");
+        assert_eq!(view.results[0].title, "Unrelated title");
+    }
+
+    #[test]
+    fn search_view_finds_item_by_partial_id() {
+        let (_dir, db_path) = setup_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_item(&conn, "bn-abc123", "Unrelated title");
+
+        let mut view = SearchView::new(db_path.clone()).unwrap();
+        view.query = "abc123".to_string();
+        view.perform_search().unwrap();
+
+        assert_eq!(view.results.len(), 1);
+        assert_eq!(view.results[0].item.item_id, "bn-abc123");
     }
 
     #[test]

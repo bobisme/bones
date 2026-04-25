@@ -28,8 +28,16 @@ impl ListView {
         // Tier 1: fast search (lexical + structural only) — runs synchronously.
         // Replace results atomically instead of clearing first to avoid flash.
         let fast_start = Instant::now();
-        let fast_hits = hybrid_search_fast(&effective_query, &conn, 200, 60)
-            .context("bones fast slash search failed")?;
+        let fast_hits = match hybrid_search_fast(&effective_query, &conn, 200, 60) {
+            Ok(hits) => hits,
+            Err(err) => {
+                tracing::debug!("bones fast slash search failed: {err:#}");
+                self.semantic_search_ids.clear();
+                self.semantic_search_active = false;
+                self.search_refining = false;
+                return Ok(());
+            }
+        };
         let fast_elapsed = fast_start.elapsed();
         self.semantic_search_ids = fast_hits.into_iter().map(|hit| hit.item_id).collect();
         self.semantic_search_active = true;

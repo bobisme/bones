@@ -259,6 +259,24 @@ mod tests {
     }
 
     #[test]
+    fn filter_state_search_matches_partial_item_id() {
+        let mut filter = FilterState::default();
+        filter.search_query = "001".to_string();
+
+        let item = make_item(
+            "bn-001",
+            "unrelated title",
+            "open",
+            "task",
+            "default",
+            vec![],
+            100,
+            200,
+        );
+        assert!(filter.matches(&item));
+    }
+
+    #[test]
     fn filter_state_combined_and_semantics() {
         let mut filter = FilterState::default();
         filter.state = Some("open".to_string());
@@ -859,6 +877,36 @@ mod tests {
         view.apply_filter_and_sort();
         assert_eq!(view.visible_items.len(), 1);
         assert_eq!(view.visible_items[0].item_id, "bn-001");
+    }
+
+    #[test]
+    fn list_view_ranked_search_keeps_direct_item_id_match() {
+        let mut view = make_list_view();
+        view.filter.search_query = "bn-002".to_string();
+        view.semantic_search_active = true;
+        view.semantic_search_ids.clear();
+
+        view.apply_filter_and_sort();
+
+        assert_eq!(view.visible_items.len(), 1);
+        assert_eq!(view.visible_items[0].item_id, "bn-002");
+    }
+
+    #[test]
+    fn list_view_ranked_search_prioritizes_direct_id_match() {
+        let mut view = make_list_view();
+        view.filter.search_query = "bn-002".to_string();
+        view.semantic_search_active = true;
+        view.semantic_search_ids = vec!["bn-001".to_string()];
+
+        view.apply_filter_and_sort();
+
+        let visible_ids: Vec<&str> = view
+            .visible_items
+            .iter()
+            .map(|item| item.item_id.as_str())
+            .collect();
+        assert_eq!(visible_ids, vec!["bn-002", "bn-001"]);
     }
 
     #[test]
