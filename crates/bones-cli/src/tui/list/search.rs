@@ -31,7 +31,7 @@ impl ListView {
         let fast_hits = match hybrid_search_fast(&effective_query, &conn, 200, 60) {
             Ok(hits) => hits,
             Err(err) => {
-                tracing::debug!("bones fast slash search failed: {err:#}");
+                tracing::warn!("bones fast slash search failed: {err:#}");
                 self.semantic_search_ids.clear();
                 self.semantic_search_active = false;
                 self.search_refining = false;

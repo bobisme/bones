@@ -111,24 +111,18 @@ fn merge_direct_id_matches(
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
 
-    for item in direct.iter().filter(|item| item.rank <= 1) {
+    // All direct id matches (exact, prefix, or substring) take priority over
+    // ranked lexical/semantic results. This matches the list view, where
+    // `local_search_rank` orders contains-id above contains-title.
+    for item in direct {
         if seen.insert(item.result.item.item_id.clone()) {
-            merged.push(EnrichedResult {
-                item: item.result.item.clone(),
-                title: item.result.title.clone(),
-            });
+            merged.push(item.result);
         }
     }
 
     for item in ranked {
         if seen.insert(item.item.item_id.clone()) {
             merged.push(item);
-        }
-    }
-
-    for item in direct.into_iter().filter(|item| item.rank > 1) {
-        if seen.insert(item.result.item.item_id.clone()) {
-            merged.push(item.result);
         }
     }
 
@@ -284,7 +278,7 @@ impl SearchView {
         let raw_results = match hybrid_search_fast(&effective_query, &conn, 20, 60) {
             Ok(results) => results,
             Err(err) => {
-                tracing::debug!("search view fast search failed: {err:#}");
+                tracing::warn!("search view fast search failed: {err:#}");
                 Vec::new()
             }
         };
@@ -320,8 +314,11 @@ impl SearchView {
                 let hits = match hybrid_search(&query_owned, &conn, Some(&model), 20, 60) {
                     Ok(h) => h,
                     Err(e) => {
+                        // Leave tier-1 results (already merged with direct id matches
+                        // on the foreground) visible rather than overwriting them with
+                        // a direct-only fallback.
                         tracing::debug!("search view tier-2 failed: {e:#}");
-                        Vec::new()
+                        return;
                     }
                 };
                 let enriched: Vec<EnrichedResult> = hits
@@ -552,6 +549,49 @@ mod tests {
 
         assert_eq!(view.results.len(), 1);
         assert_eq!(view.results[0].item.item_id, "bn-abc123");
+    }
+
+    fn make_enriched(id: &str, title: &str) -> EnrichedResult {
+        EnrichedResult {
+            item: HybridSearchResult {
+                item_id: id.into(),
+                score: 0.5,
+                lexical_score: 0.5,
+                semantic_score: 0.0,
+                structural_score: 0.0,
+                lexical_rank: 1,
+                semantic_rank: 0,
+                structural_rank: 0,
+            },
+            title: title.into(),
+        }
+    }
+
+    fn make_direct(id: &str, title: &str, rank: usize) -> DirectIdMatch {
+        DirectIdMatch {
+            rank,
+            result: make_enriched(id, title),
+        }
+    }
+
+    #[test]
+    fn merge_direct_id_matches_promotes_substring_id_above_ranked() {
+        // Direct hit is a rank-2 (substring) id match; ranked hit is a different
+        // bone whose title contains the query. The id match should still come first.
+        let direct = vec![make_direct("bn-typo", "Authentication bug", 2)];
+        let ranked = vec![make_enriched("bn-other", "fix bn-typo issue")];
+        let merged = merge_direct_id_matches(direct, ranked, 20);
+        let ids: Vec<&str> = merged.iter().map(|r| r.item.item_id.as_str()).collect();
+        assert_eq!(ids, vec!["bn-typo", "bn-other"]);
+    }
+
+    #[test]
+    fn merge_direct_id_matches_dedupes_across_direct_and_ranked() {
+        let direct = vec![make_direct("bn-1", "One", 0)];
+        let ranked = vec![make_enriched("bn-1", "One"), make_enriched("bn-2", "Two")];
+        let merged = merge_direct_id_matches(direct, ranked, 20);
+        let ids: Vec<&str> = merged.iter().map(|r| r.item.item_id.as_str()).collect();
+        assert_eq!(ids, vec!["bn-1", "bn-2"]);
     }
 
     #[test]
