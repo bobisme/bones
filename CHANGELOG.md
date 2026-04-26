@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.24.1 - 2026-04-26
+
+### Added
+
+- **Chief provider JSON contract** — adds a strict machine-readable JSON
+  contract for the chief provider, enabling stable downstream parsing.
+
+### Fixed
+
+- **TUI search now matches bone IDs** — typing a literal ID (e.g.
+  `bn-002` or `001`) reliably surfaces the matching bone in the list
+  view and the dedicated search view, even when the semantic ranker
+  did not surface it. Direct ID matches (exact, prefix, or substring)
+  outrank lexical/semantic results.
+- **Tier-2 search failures no longer wipe Tier-1 results** in the
+  dedicated search view — when semantic refinement errors out, the
+  foreground lexical/structural results stay visible instead of being
+  replaced by an empty set.
+- **Backend search errors are visible by default** — bumped
+  `hybrid_search_fast` failure logs from `debug!` to `warn!` so a
+  broken FTS/SQLite layer surfaces in default logs.
+
 ## v0.24.0 - 2026-04-11
 
 ### Extreme performance pass
