@@ -42,7 +42,13 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(feature = "mimalloc")]
+// `mimalloc` is on by default but yields to `jemalloc` / `dhat-heap`
+// when those are selected, so users can opt into a profiling allocator
+// without `--no-default-features`.
+#[cfg(all(
+    feature = "mimalloc",
+    not(any(feature = "jemalloc", feature = "dhat-heap"))
+))]
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

@@ -59,7 +59,7 @@ bones-search = { workspace = true, features = ["semantic-ort"] }
 bones-search = { workspace = true, features = ["semantic-model2vec"] }
 
 [features]
-default = ["otel"]
+default = ["otel", "mimalloc"]
 ## ONNX-based semantic embeddings (highest quality, requires ONNX Runtime).
 semantic = ["bones-search/semantic-ort"]
 ## Model2Vec static embeddings (no ONNX, Windows-friendly, slightly lower quality).
@@ -74,8 +74,9 @@ jemalloc = ["dep:tikv-jemallocator"]
 ## Use mimalloc as the global allocator. In internal TUI memory benches
 ## mimalloc returns freed pages to the OS more aggressively than either
 ## jemalloc or the system allocator, which matters for long-running TUI
-## sessions. Build with `cargo build --features mimalloc`. Mutually
-## exclusive with `jemalloc` and `dhat-heap`.
+## sessions — so it is on by default. Selecting `jemalloc` or `dhat-heap`
+## takes precedence and disables mimalloc at the global_allocator binding,
+## so `cargo build --features jemalloc` works without `--no-default-features`.
 mimalloc = ["dep:mimalloc"]
 
 [dev-dependencies]
