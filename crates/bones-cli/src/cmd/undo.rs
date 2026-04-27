@@ -34,7 +34,6 @@ use bones_core::undo::{UndoError, compensating_event};
 use clap::Args;
 use serde::Serialize;
 use std::path::Path;
-use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Argument structs
@@ -225,10 +224,10 @@ fn emit_compensating_event(
     prior_events: &[&Event],
     agent: &str,
     dry_run: bool,
-) -> UndoEventResult {
+) -> anyhow::Result<UndoEventResult> {
     // Generate compensating event with placeholder timestamp (0)
     match compensating_event(original, prior_events, agent, 0) {
-        Err(UndoError::GrowOnly(et)) => UndoEventResult {
+        Err(UndoError::GrowOnly(et)) => Ok(UndoEventResult {
             original_hash: original.event_hash.clone(),
             original_type: original.event_type.as_str().to_string(),
             compensating_hash: None,
@@ -236,8 +235,8 @@ fn emit_compensating_event(
             skipped: true,
             skip_reason: Some(format!("{et} is grow-only and cannot be undone")),
             dry_run,
-        },
-        Err(UndoError::NoPriorState(msg)) => UndoEventResult {
+        }),
+        Err(UndoError::NoPriorState(msg)) => Ok(UndoEventResult {
             original_hash: original.event_hash.clone(),
             original_type: original.event_type.as_str().to_string(),
             compensating_hash: None,
@@ -245,14 +244,14 @@ fn emit_compensating_event(
             skipped: true,
             skip_reason: Some(msg),
             dry_run,
-        },
+        }),
         Ok(mut comp_event) => {
             let comp_type = comp_event.event_type.as_str().to_string();
 
             if dry_run {
                 // Compute hash for display but don't write
                 let _ = writer::compute_event_hash(&comp_event).map(|h| comp_event.event_hash = h);
-                return UndoEventResult {
+                return Ok(UndoEventResult {
                     original_hash: original.event_hash.clone(),
                     original_type: original.event_type.as_str().to_string(),
                     compensating_hash: Some(comp_event.event_hash.clone()),
@@ -260,97 +259,37 @@ fn emit_compensating_event(
                     skipped: false,
                     skip_reason: None,
                     dry_run: true,
-                };
+                });
             }
 
             {
                 use bones_core::lock::ShardLock;
+                use std::time::Duration;
+
                 let lock_path = shard_mgr.lock_path();
                 // Acquire lock for atomic timestamp and append
-                let _lock = match ShardLock::acquire(&lock_path, Duration::from_secs(5)) {
-                    Ok(l) => l,
-                    Err(e) => {
-                        return UndoEventResult {
-                            original_hash: original.event_hash.clone(),
-                            original_type: original.event_type.as_str().to_string(),
-                            compensating_hash: None,
-                            compensating_type: Some(comp_type),
-                            skipped: true,
-                            skip_reason: Some(format!("failed to acquire lock: {e}")),
-                            dry_run: false,
-                        };
-                    }
-                };
+                let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+                    .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
 
-                let (year, month) = match shard_mgr.rotate_if_needed() {
-                    Ok(pair) => pair,
-                    Err(e) => {
-                        return UndoEventResult {
-                            original_hash: original.event_hash.clone(),
-                            original_type: original.event_type.as_str().to_string(),
-                            compensating_hash: None,
-                            compensating_type: Some(comp_type),
-                            skipped: true,
-                            skip_reason: Some(format!("failed to rotate shards: {e}")),
-                            dry_run: false,
-                        };
-                    }
-                };
+                let (year, month) = shard_mgr
+                    .rotate_if_needed()
+                    .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
 
-                match shard_mgr.next_timestamp() {
-                    Ok(ts) => comp_event.wall_ts_us = ts,
-                    Err(e) => {
-                        return UndoEventResult {
-                            original_hash: original.event_hash.clone(),
-                            original_type: original.event_type.as_str().to_string(),
-                            compensating_hash: None,
-                            compensating_type: Some(comp_type),
-                            skipped: true,
-                            skip_reason: Some(format!("failed to get timestamp: {e}")),
-                            dry_run: false,
-                        };
-                    }
-                }
+                comp_event.wall_ts_us = shard_mgr
+                    .next_timestamp()
+                    .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
                 if let Err(e) = assign_next_itc(project_root, &mut comp_event) {
-                    return UndoEventResult {
-                        original_hash: original.event_hash.clone(),
-                        original_type: original.event_type.as_str().to_string(),
-                        compensating_hash: None,
-                        compensating_type: Some(comp_type),
-                        skipped: true,
-                        skip_reason: Some(format!("failed to assign ITC stamp: {e}")),
-                        dry_run: false,
-                    };
+                    anyhow::bail!("failed to assign ITC stamp: {e}");
                 }
 
                 // Write the event to the shard
-                let line = match writer::write_event(&mut comp_event) {
-                    Ok(l) => l,
-                    Err(e) => {
-                        return UndoEventResult {
-                            original_hash: original.event_hash.clone(),
-                            original_type: original.event_type.as_str().to_string(),
-                            compensating_hash: None,
-                            compensating_type: Some(comp_type),
-                            skipped: true,
-                            skip_reason: Some(format!("failed to serialize event: {e}")),
-                            dry_run: false,
-                        };
-                    }
-                };
+                let line = writer::write_event(&mut comp_event)
+                    .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
 
-                if let Err(e) = shard_mgr.append_raw(year, month, &line) {
-                    return UndoEventResult {
-                        original_hash: original.event_hash.clone(),
-                        original_type: original.event_type.as_str().to_string(),
-                        compensating_hash: None,
-                        compensating_type: Some(comp_type),
-                        skipped: true,
-                        skip_reason: Some(format!("failed to append event: {e}")),
-                        dry_run: false,
-                    };
-                }
+                shard_mgr
+                    .append_raw(year, month, &line)
+                    .map_err(|e| anyhow::anyhow!("failed to append event: {e}"))?;
             } // Lock released
 
             // Project the compensating event
@@ -362,7 +301,7 @@ fn emit_compensating_event(
                 );
             }
 
-            UndoEventResult {
+            Ok(UndoEventResult {
                 original_hash: original.event_hash.clone(),
                 original_type: original.event_type.as_str().to_string(),
                 compensating_hash: Some(comp_event.event_hash.clone()),
@@ -370,7 +309,7 @@ fn emit_compensating_event(
                 skipped: false,
                 skip_reason: None,
                 dry_run: false,
-            }
+            })
         }
     }
 }
@@ -462,7 +401,7 @@ pub fn run_undo(
             &prior_refs,
             &agent,
             args.dry_run,
-        );
+        )?;
 
         let output_payload = UndoOutput {
             item_id,
@@ -542,7 +481,7 @@ pub fn run_undo(
             &prior_refs,
             &agent,
             args.dry_run,
-        );
+        )?;
         results.push(result);
     }
 
@@ -595,6 +534,7 @@ mod tests {
     use bones_core::model::item_id::ItemId;
     use clap::Parser;
     use std::collections::BTreeMap;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[derive(Parser)]

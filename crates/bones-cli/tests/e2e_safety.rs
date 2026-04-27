@@ -289,6 +289,34 @@ fn undo_specific_event_hash_restores_state() {
 }
 
 #[test]
+fn undo_write_failure_returns_nonzero_status() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let id = create_item(dir.path(), "Undo lock failure");
+    do_item(dir.path(), &id);
+
+    let lock_path = dir.path().join(".bones/lock");
+    fs::remove_file(&lock_path).expect("remove lock file");
+    fs::create_dir(&lock_path).expect("replace lock file with directory");
+
+    let output = bn_cmd(dir.path())
+        .args(["undo", &id, "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "undo should fail when it cannot acquire the shard lock"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to acquire lock") || stderr.contains("Is a directory"),
+        "stderr should report the write-path failure; got: {stderr}"
+    );
+}
+
+#[test]
 fn diagnose_json_schema_is_stable() {
     let dir = TempDir::new().unwrap();
     init_project(dir.path());

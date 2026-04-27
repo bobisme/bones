@@ -1022,6 +1022,27 @@ fn compute_hash_consistent_with_parse_line() {
 }
 
 #[test]
+fn parse_rejects_semantically_equal_but_noncanonical_payload_bytes() {
+    let mut event = base_event(EventType::Create, "bn-a7x", create_data("Hash test"));
+    let line = write_event(&mut event).expect("write");
+    let mut fields: Vec<String> = line
+        .trim_end_matches('\n')
+        .split('\t')
+        .map(str::to_string)
+        .collect();
+
+    fields[6] = fields[6].replacen("\":", "\": ", 1);
+    assert_ne!(
+        fields[6],
+        line.trim_end_matches('\n').split('\t').nth(6).unwrap()
+    );
+
+    let altered_line = fields.join("\t");
+    let err = parse_line(&altered_line).expect_err("non-canonical bytes must fail hash check");
+    assert!(matches!(err, ParseError::HashMismatch { .. }));
+}
+
+#[test]
 fn compute_hash_different_events_different_hashes() {
     let mut e1 = base_event(EventType::Comment, "bn-a7x", comment_data("Event 1"));
     e1.wall_ts_us = 1_000;

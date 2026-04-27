@@ -13,14 +13,11 @@ impl ListView {
             return Ok(());
         }
 
-        let conn = match query::try_open_projection(&self.db_path)? {
-            Some(c) => c,
-            None => {
-                self.semantic_search_ids.clear();
-                self.semantic_search_active = false;
-                self.search_refining = false;
-                return Ok(());
-            }
+        let Some(conn) = query::try_open_projection(&self.db_path)? else {
+            self.semantic_search_ids.clear();
+            self.semantic_search_active = false;
+            self.search_refining = false;
+            return Ok(());
         };
 
         let effective_query =

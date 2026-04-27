@@ -612,6 +612,75 @@ fn import_jsonl_reports_skipped_count_in_summary() {
 }
 
 #[test]
+fn import_jsonl_skips_semantically_invalid_records_and_continues() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let base_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    let valid_a = format!(
+        r#"{{"timestamp":{},"agent":"test-agent","type":"item.create","item_id":"bn-good1","data":{{"kind":"task","title":"Valid one"}}}}"#,
+        base_ts
+    );
+    let bad_id = format!(
+        r#"{{"timestamp":{},"agent":"test-agent","type":"item.create","item_id":"not valid","data":{{"kind":"task","title":"Bad id"}}}}"#,
+        base_ts + 1
+    );
+    let bad_type = format!(
+        r#"{{"timestamp":{},"agent":"test-agent","type":"item.future","item_id":"bn-badtype","data":{{"kind":"task","title":"Bad type"}}}}"#,
+        base_ts + 2
+    );
+    let bad_data = format!(
+        r#"{{"timestamp":{},"agent":"test-agent","type":"item.create","item_id":"bn-baddata","data":{{"kind":"task"}}}}"#,
+        base_ts + 3
+    );
+    let bad_ts = r#"{"timestamp":9223372036854775807,"agent":"test-agent","type":"item.create","item_id":"bn-badts","data":{"kind":"task","title":"Bad timestamp"}}"#;
+    let valid_b = format!(
+        r#"{{"timestamp":{},"agent":"test-agent","type":"item.create","item_id":"bn-good2","data":{{"kind":"task","title":"Valid two"}}}}"#,
+        base_ts + 4
+    );
+    let mixed_file = dir.path().join("semantic_mixed.jsonl");
+    std::fs::write(
+        &mixed_file,
+        format!("{valid_a}\n{bad_id}\n{bad_type}\n{bad_data}\n{bad_ts}\n{valid_b}\n"),
+    )
+    .unwrap();
+
+    let result = bn_cmd(dir.path())
+        .args([
+            "import",
+            "--jsonl",
+            "--input",
+            mixed_file.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "semantic import errors should be skipped: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&result.stdout).expect("must produce valid JSON");
+    assert_eq!(report["total_lines"].as_u64().unwrap_or(0), 6);
+    assert_eq!(report["imported"].as_u64().unwrap_or(0), 2);
+    assert_eq!(report["skipped_invalid"].as_u64().unwrap_or(0), 4);
+
+    rebuild(dir.path());
+    let list_output = bn_cmd(dir.path())
+        .args(["list", "--json"])
+        .output()
+        .unwrap();
+    assert!(list_output.status.success());
+    let list_json: Value = serde_json::from_slice(&list_output.stdout).unwrap();
+    assert_eq!(list_json["total"].as_u64().unwrap_or(0), 2);
+}
+
+#[test]
 fn import_without_mode_flag_fails_with_useful_error() {
     let dir = TempDir::new().unwrap();
     init_project(dir.path());

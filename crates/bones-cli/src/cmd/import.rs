@@ -413,6 +413,15 @@ struct ImportSummary {
     imported_per_type: HashMap<String, usize>,
 }
 
+fn skip_invalid_jsonl_record(
+    report: &mut ImportSummary,
+    line_no: usize,
+    reason: impl std::fmt::Display,
+) {
+    report.skipped_invalid += 1;
+    eprintln!("skip line {line_no}: {reason}");
+}
+
 fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) -> Result<()> {
     let input_reader: Box<dyn BufRead> = match &args.input {
         Some(path) => {
@@ -449,21 +458,60 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
         let record: JsonlEventRecord = match serde_json::from_str(&raw) {
             Ok(record) => record,
             Err(err) => {
-                report.skipped_invalid += 1;
-                eprintln!("skip line {line_no}: invalid JSON - {err}");
+                skip_invalid_jsonl_record(&mut report, line_no, format!("invalid JSON - {err}"));
                 continue;
             }
         };
 
-        let item_id = ItemId::parse(&record.item_id)
-            .with_context(|| format!("line {line_no}: invalid item_id '{}'", record.item_id))?;
+        if let Err(err) = crate::validate::validate_agent(&record.agent) {
+            skip_invalid_jsonl_record(
+                &mut report,
+                line_no,
+                format!("invalid agent '{}': {}", err.value, err.reason),
+            );
+            continue;
+        }
 
-        let event_type = record.event_type.parse::<EventType>().with_context(|| {
-            format!("line {line_no}: unknown event type '{}'", record.event_type)
-        })?;
+        let item_id = match ItemId::parse(&record.item_id) {
+            Ok(item_id) => item_id,
+            Err(err) => {
+                skip_invalid_jsonl_record(
+                    &mut report,
+                    line_no,
+                    format!("invalid item_id '{}': {err}", record.item_id),
+                );
+                continue;
+            }
+        };
 
-        let data = EventData::deserialize_for(event_type, &record.data.to_string())
-            .with_context(|| format!("line {line_no}: invalid data payload"))?;
+        let Ok(event_type) = record.event_type.parse::<EventType>() else {
+            skip_invalid_jsonl_record(
+                &mut report,
+                line_no,
+                format!("unknown event type '{}'", record.event_type),
+            );
+            continue;
+        };
+
+        let data = match EventData::deserialize_for(event_type, &record.data.to_string()) {
+            Ok(data) => data,
+            Err(err) => {
+                skip_invalid_jsonl_record(
+                    &mut report,
+                    line_no,
+                    format!("invalid data payload: {err}"),
+                );
+                continue;
+            }
+        };
+
+        let (year, month) = match event_to_shard_timestamp(record.timestamp) {
+            Ok(year_month) => year_month,
+            Err(err) => {
+                skip_invalid_jsonl_record(&mut report, line_no, err);
+                continue;
+            }
+        };
 
         let mut event = Event {
             wall_ts_us: record.timestamp,
@@ -482,8 +530,6 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
 
         assign_next_itc(project_root, &mut event)?;
         let line = write_event(&mut event).context("failed to serialize imported event")?;
-        let (year, month) = event_to_shard_timestamp(event.wall_ts_us)
-            .with_context(|| format!("line {line_no}: invalid timestamp {}", event.wall_ts_us))?;
 
         {
             use bones_core::lock::ShardLock;

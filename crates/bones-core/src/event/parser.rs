@@ -25,7 +25,6 @@ use std::fmt;
 use tracing::warn;
 
 use crate::event::Event;
-use crate::event::canonical::canonicalize_json;
 use crate::event::data::EventData;
 use crate::event::hash_text::{decode_blake3_hash, encode_blake3_hash, is_valid_blake3_hash};
 use crate::event::migrate_event;
@@ -476,20 +475,9 @@ pub fn parse_line(line: &str) -> Result<ParsedLine, ParseError> {
         return Err(ParseError::InvalidEventHash(event_hash.to_string()));
     }
 
-    // Verify hash matches recomputed value.
-    // The canonical data JSON is used for hashing (keys sorted).
-    // Safety: we already validated `data_json` above so this cannot fail.
-    let canonical_data = serde_json::from_str::<serde_json::Value>(data_json)
-        .map(|v| canonicalize_json(&v))
-        .map_err(|e| ParseError::InvalidDataJson(e.to_string()))?;
+    // Verify hash matches the exact serialized fields in the line.
     let hash_fields: [&str; 7] = [
-        fields[0],
-        fields[1],
-        fields[2],
-        fields[3],
-        fields[4],
-        fields[5],
-        &canonical_data,
+        fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], data_json,
     ];
     let computed = compute_event_hash(&hash_fields);
     let expected_bytes = decode_blake3_hash(event_hash)
