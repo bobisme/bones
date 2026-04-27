@@ -136,6 +136,7 @@ fn check_shard_integrity(
     fixes: &mut Vec<String>,
 ) -> Result<DoctorSection> {
     let mut details = Vec::new();
+    let mut has_missing_manifest = false;
     let status;
 
     match verify_repository(bones_dir, fix) {
@@ -148,6 +149,9 @@ fn check_shard_integrity(
                         "regenerated"
                     }
                     bones_core::verify::ShardCheckStatus::Failed(reason) => {
+                        if reason == "missing manifest" {
+                            has_missing_manifest = true;
+                        }
                         details.push(format!("{}: {reason}", shard.shard_name));
                         "failed"
                     }
@@ -159,6 +163,9 @@ fn check_shard_integrity(
                 status = SectionStatus::Ok;
             } else {
                 status = SectionStatus::Fail;
+                if !fix && has_missing_manifest {
+                    details.push("run with --fix to regenerate missing manifests".into());
+                }
             }
         }
         Err(e) => {
@@ -473,4 +480,79 @@ fn render_human(report: &DoctorReport, w: &mut dyn Write) -> std::io::Result<()>
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn forge_sealed_shard_without_manifest() -> TempDir {
+        let tmp = TempDir::new().expect("tmp");
+        let bones = tmp.path().join(".bones");
+        let mgr = ShardManager::new(&bones);
+        mgr.ensure_dirs().expect("dirs");
+        // Two empty (header-only) shards: 2025-01 is sealed (no manifest),
+        // 2030-01 is the active one. Header-only keeps the rest of the
+        // doctor pipeline (projection rebuild, parse check) clean.
+        mgr.create_shard(2025, 1).expect("old shard");
+        mgr.create_shard(2030, 1).expect("new shard");
+        tmp
+    }
+
+    #[test]
+    fn doctor_hints_at_fix_when_manifest_missing() {
+        let tmp = forge_sealed_shard_without_manifest();
+        let args = DoctorArgs { fix: false };
+        let report = build_doctor_report(&args, tmp.path()).expect("doctor report");
+
+        let integrity = report
+            .sections
+            .iter()
+            .find(|s| s.name == "shard_integrity")
+            .expect("shard_integrity section");
+        assert_eq!(integrity.status, SectionStatus::Fail);
+        assert!(
+            integrity
+                .details
+                .iter()
+                .any(|d| d.contains("run with --fix to regenerate")),
+            "expected --fix hint in details, got: {:?}",
+            integrity.details
+        );
+        assert!(report.fixes_applied.is_empty());
+    }
+
+    #[test]
+    fn doctor_fix_regenerates_missing_manifest_and_omits_hint() {
+        let tmp = forge_sealed_shard_without_manifest();
+        let bones = tmp.path().join(".bones");
+        let mgr = ShardManager::new(&bones);
+        let args = DoctorArgs { fix: true };
+        let report = build_doctor_report(&args, tmp.path()).expect("doctor report");
+
+        let integrity = report
+            .sections
+            .iter()
+            .find(|s| s.name == "shard_integrity")
+            .expect("shard_integrity section");
+        assert_eq!(integrity.status, SectionStatus::Ok);
+        assert!(
+            !integrity
+                .details
+                .iter()
+                .any(|d| d.contains("run with --fix")),
+            "did not expect --fix hint after repair, got: {:?}",
+            integrity.details
+        );
+        assert!(
+            report
+                .fixes_applied
+                .iter()
+                .any(|f| f.contains("regenerated manifest")),
+            "expected regenerated-manifest fix entry, got: {:?}",
+            report.fixes_applied
+        );
+        assert!(mgr.manifest_path(2025, 1).exists());
+    }
 }
