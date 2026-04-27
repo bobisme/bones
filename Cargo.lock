@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "bones-cli"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "bones-core"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "bones-search"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sim"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "bones-core",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "bones-sqlite-vec"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "rusqlite",
  "sqlite-vec",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "bones-triage"
-version = "0.24.1"
+version = "0.24.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -520,9 +520,9 @@ dependencies = [
 
 [[package]]
 name = "clap_complete"
-version = "4.6.2"
+version = "4.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff7a1dccbdd8b078c2bdebff47e404615151534d5043da397ec50286816f9cb"
+checksum = "660c0520455b1013b9bcb0393d5f643d7e4454fb69c915b8d6d2aa0e9a45acc3"
 dependencies = [
  "clap",
 ]
@@ -1964,9 +1964,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "onig"
-version = "6.5.2"
+version = "6.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f0430136375a315630bfaf61d6bca71a048258b312be75f26f910fb4333e44"
+checksum = "0cc3cbf698f9438986c11a880c90a6d04b9de27575afd28bbf45b154b6c709e2"
 dependencies = [
  "bitflags",
  "libc",
@@ -1976,9 +1976,9 @@ dependencies = [
 
 [[package]]
 name = "onig_sys"
-version = "69.9.2"
+version = "69.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "725f3ee364ae6d02cfca12ef2be392cfee2733c2a01f0ed386fb74fa94a0fd26"
+checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
 dependencies = [
  "cc",
  "pkg-config",

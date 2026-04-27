@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.24.2 - 2026-04-27
+
+### Changed
+
+- **`bn` binary now uses mimalloc by default** — long-running TUI sessions
+  on larger corpora were exhibiting RSS bloat (1.3+ GB on glibc) due to
+  per-thread arena fragmentation that does not deflate after spikes.
+  mimalloc returns freed pages to the OS more aggressively. Selecting
+  `jemalloc` or `dhat-heap` at build time still takes precedence, so
+  profiling builds continue to work without `--no-default-features`.
+
+### Fixed
+
+- **`bn doctor` now hints at `--fix` for missing-manifest failures** —
+  matching the existing UX for `projection_drift` and `stale_symlink`.
+  The repair logic was already wired through `verify_repository`'s
+  `regenerate_missing` parameter; only the user-facing hint was missing.
+
 ## v0.24.1 - 2026-04-26
 
 ### Added
