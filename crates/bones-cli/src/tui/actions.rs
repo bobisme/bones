@@ -5,6 +5,7 @@
 //! rendering layer that would corrupt the terminal screen.
 
 use crate::itc_state::assign_next_itc;
+use crate::validate;
 use anyhow::{Context, Result};
 use bones_core::db::{project, query};
 use bones_core::event::Event;
@@ -21,6 +22,38 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
+
+fn append_event_locked(
+    project_root: &Path,
+    shard_mgr: &ShardManager,
+    event: &mut Event,
+) -> Result<()> {
+    if let Err(e) = validate::validate_agent(&event.agent) {
+        anyhow::bail!("invalid agent '{}': {}", e.value, e.reason);
+    }
+
+    use bones_core::lock::ShardLock;
+    let lock_path = shard_mgr.lock_path();
+    let _lock = ShardLock::acquire(&lock_path, Duration::from_secs(5))
+        .map_err(|e| anyhow::anyhow!("failed to acquire lock: {e}"))?;
+
+    let (year, month) = shard_mgr
+        .rotate_if_needed()
+        .map_err(|e| anyhow::anyhow!("failed to rotate shards: {e}"))?;
+
+    event.wall_ts_us = shard_mgr
+        .next_timestamp()
+        .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
+
+    assign_next_itc(project_root, event)?;
+
+    let line = writer::write_event(event).context("serialize event")?;
+    shard_mgr
+        .append_raw(year, month, &line)
+        .context("append to shard")?;
+
+    Ok(())
+}
 
 /// Transition an item to "doing" state.
 ///
@@ -49,10 +82,8 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
         .can_transition_to(target_state)
         .map_err(|e| anyhow::anyhow!("cannot transition '{}': {}", item_id, e.reason))?;
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
-
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -66,11 +97,7 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -107,10 +134,8 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
         .can_transition_to(target_state)
         .map_err(|e| anyhow::anyhow!("cannot transition '{}': {}", item_id, e.reason))?;
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
-
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -124,11 +149,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -172,10 +193,8 @@ pub fn create_item(
         .is_ok()
     });
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
-
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -195,11 +214,7 @@ pub fn create_item(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -248,9 +263,8 @@ pub fn update_item_fields(
     let projector = project::Projector::new(&conn);
 
     for (field, value) in updates {
-        let ts = shard_mgr.next_timestamp().context("get timestamp")?;
         let mut event = Event {
-            wall_ts_us: ts,
+            wall_ts_us: 0,
             agent: agent.to_string(),
             itc: String::new(),
             parents: vec![],
@@ -264,11 +278,7 @@ pub fn update_item_fields(
             event_hash: String::new(),
         };
 
-        assign_next_itc(project_root, &mut event)?;
-        let line = writer::write_event(&mut event).context("serialize event")?;
-        shard_mgr
-            .append(&line, false, Duration::from_secs(5))
-            .context("append to shard")?;
+        append_event_locked(project_root, &shard_mgr, &mut event)?;
         if let Err(e) = projector.project_event(&event) {
             tracing::warn!(
                 "TUI update projection failed for field '{field}' (will recover on rebuild): {e}"
@@ -292,9 +302,8 @@ pub fn add_comment(
     let shard_mgr = ShardManager::new(&bones_dir);
     let projector = project::Projector::new(&conn);
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -307,11 +316,7 @@ pub fn add_comment(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI comment projection failed (will recover on rebuild): {e}");
     }
@@ -337,9 +342,8 @@ pub fn add_link(
     let shard_mgr = ShardManager::new(&bones_dir);
     let projector = project::Projector::new(&conn);
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -353,11 +357,7 @@ pub fn add_link(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI add_link projection failed (will recover on rebuild): {e}");
     }
@@ -383,9 +383,8 @@ pub fn remove_link(
     let shard_mgr = ShardManager::new(&bones_dir);
     let projector = project::Projector::new(&conn);
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -399,11 +398,7 @@ pub fn remove_link(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI remove_link projection failed (will recover on rebuild): {e}");
     }
@@ -474,13 +469,12 @@ pub fn move_item_state(
             .map_err(|e| anyhow::anyhow!("cannot transition '{}': {}", item_id, e.reason))?;
     }
 
-    let ts = shard_mgr.next_timestamp().context("get timestamp")?;
     let mut extra = BTreeMap::new();
     if reopen {
         extra.insert("reopen".to_string(), Value::Bool(true));
     }
     let mut event = Event {
-        wall_ts_us: ts,
+        wall_ts_us: 0,
         agent: agent.to_string(),
         itc: String::new(),
         parents: vec![],
@@ -494,11 +488,7 @@ pub fn move_item_state(
         event_hash: String::new(),
     };
 
-    assign_next_itc(project_root, &mut event)?;
-    let line = writer::write_event(&mut event).context("serialize event")?;
-    shard_mgr
-        .append(&line, false, Duration::from_secs(5))
-        .context("append to shard")?;
+    append_event_locked(project_root, &shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -569,6 +559,17 @@ mod tests {
         projector.project_event(&event).unwrap();
     }
 
+    fn event_lines(project_root: &Path) -> Vec<String> {
+        let shard_mgr = ShardManager::new(project_root.join(".bones"));
+        shard_mgr
+            .replay()
+            .unwrap()
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
     #[test]
     fn do_item_transitions_to_doing() {
         let (_dir, project_root) = setup_project();
@@ -629,5 +630,34 @@ mod tests {
         let item = query::get_item(&conn, &id, false).unwrap().unwrap();
         assert_eq!(item.title, "New Feature Task");
         assert_eq!(item.state, "open");
+    }
+
+    #[test]
+    fn create_task_event_timestamp_matches_clock() {
+        let (_dir, project_root) = setup_project();
+        let db_path = project_root.join(".bones/bones.db");
+
+        create_task(&project_root, &db_path, "test-agent", "Clocked Task").unwrap();
+
+        let lines = event_lines(&project_root);
+        assert_eq!(lines.len(), 1);
+        let fields: Vec<&str> = lines[0].split('\t').collect();
+        let event_ts: i64 = fields[0].parse().unwrap();
+        let clock = ShardManager::new(project_root.join(".bones"))
+            .read_clock()
+            .unwrap();
+        assert_eq!(event_ts, clock);
+    }
+
+    #[test]
+    fn create_task_rejects_invalid_agent_before_writing() {
+        let (_dir, project_root) = setup_project();
+        let db_path = project_root.join(".bones/bones.db");
+
+        let err =
+            create_task(&project_root, &db_path, "bad\tagent", "Invalid Agent Task").unwrap_err();
+
+        assert!(err.to_string().contains("invalid agent"));
+        assert!(event_lines(&project_root).is_empty());
     }
 }

@@ -6,6 +6,9 @@ impl ListView {
             .and_then(Path::parent)
             .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
         let agent = agent::require_agent(None).unwrap_or_else(|_| "tui".to_string());
+        if let Err(e) = validate::validate_agent(&agent) {
+            anyhow::bail!("invalid agent '{}': {}", e.value, e.reason);
+        }
 
         let semantic_enabled = db_path
             .parent()

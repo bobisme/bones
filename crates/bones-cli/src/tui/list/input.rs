@@ -829,7 +829,7 @@ impl ListView {
         let editing_id = self.create_modal_edit_item_id.take();
         let was_edit = editing_id.is_some();
         let id = if let Some(item_id) = editing_id {
-            let updates = vec![
+            let mut updates = vec![
                 ("title".to_string(), json!(draft.title)),
                 (
                     "description".to_string(),
@@ -847,8 +847,41 @@ impl ListView {
                     },
                 ),
                 ("urgency".to_string(), json!(draft.urgency)),
-                ("labels".to_string(), json!(draft.labels)),
             ];
+
+            let current_labels: HashSet<String> = self
+                .detail_item
+                .as_ref()
+                .filter(|detail| detail.id == item_id)
+                .map(|detail| detail.labels.iter().cloned().collect())
+                .unwrap_or_default();
+            let next_labels: HashSet<String> = draft.labels.iter().cloned().collect();
+
+            for label in &draft.labels {
+                if !current_labels.contains(label) {
+                    updates.push((
+                        "labels".to_string(),
+                        json!({
+                            "action": "add",
+                            "label": label,
+                        }),
+                    ));
+                }
+            }
+
+            let mut removed_labels: Vec<String> =
+                current_labels.difference(&next_labels).cloned().collect();
+            removed_labels.sort_unstable();
+            for label in removed_labels {
+                updates.push((
+                    "labels".to_string(),
+                    json!({
+                        "action": "remove",
+                        "label": label,
+                    }),
+                ));
+            }
+
             actions::update_item_fields(
                 &self.project_root,
                 &self.db_path,

@@ -15,7 +15,12 @@ impl ListView {
 
         let conn = match query::try_open_projection(&self.db_path)? {
             Some(c) => c,
-            None => return Ok(()),
+            None => {
+                self.semantic_search_ids.clear();
+                self.semantic_search_active = false;
+                self.search_refining = false;
+                return Ok(());
+            }
         };
 
         let effective_query =
@@ -48,9 +53,9 @@ impl ListView {
             "tier-1 fast search complete"
         );
 
-        // Tier 2: spawn background thread for full semantic refinement.
-        self.search_refining = true;
         if let Some(model) = self.semantic_model.clone() {
+            // Tier 2: spawn background thread for full semantic refinement.
+            self.search_refining = true;
             let db_path = self.db_path.clone();
             let query_owned = effective_query;
             let (tx, rx) = std::sync::mpsc::channel();
@@ -77,6 +82,8 @@ impl ListView {
                 );
                 let _ = tx.send(ids);
             });
+        } else {
+            self.search_refining = false;
         }
 
         Ok(())

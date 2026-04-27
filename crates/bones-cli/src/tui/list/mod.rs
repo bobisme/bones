@@ -22,7 +22,7 @@
     clippy::map_unwrap_or
 )]
 
-use crate::agent;
+use crate::{agent, validate};
 use anyhow::{Context, Result};
 use bones_core::config::load_project_config;
 use bones_core::db::query::{self, ItemFilter, QueryItem, SortOrder};

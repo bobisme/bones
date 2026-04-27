@@ -5,6 +5,11 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bones_core::db::migrations;
+    use bones_core::db::project::ensure_tracking_table;
+    use bones_core::shard::ShardManager;
+    use rusqlite::Connection;
+    use tempfile::TempDir;
 
     // -----------------------------------------------------------------------
     // WorkItem helpers
@@ -30,6 +35,43 @@ mod tests {
             labels: labels.into_iter().map(String::from).collect(),
             created_at_us: created,
             updated_at_us: updated,
+        }
+    }
+
+    fn setup_project() -> (TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project_root = dir.path().to_path_buf();
+        let bones_dir = project_root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+        std::fs::create_dir_all(bones_dir.join("cache")).expect("cache dir");
+
+        let db_path = bones_dir.join("bones.db");
+        let mut conn = Connection::open(&db_path).expect("open db");
+        migrations::migrate(&mut conn).expect("migrate");
+        ensure_tracking_table(&conn).expect("tracking table");
+        ShardManager::new(&bones_dir).init().expect("init shards");
+
+        (dir, project_root, db_path)
+    }
+
+    fn make_detail_item(id: &str, title: &str, labels: Vec<String>) -> DetailItem {
+        DetailItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            description: None,
+            kind: "task".to_string(),
+            state: "open".to_string(),
+            urgency: "default".to_string(),
+            size: None,
+            parent_id: None,
+            labels,
+            assignees: Vec::new(),
+            blockers: Vec::new(),
+            blocked: Vec::new(),
+            relationships: Vec::new(),
+            comments: Vec::new(),
+            created_at_us: 0,
+            updated_at_us: 0,
         }
     }
 
@@ -910,6 +952,37 @@ mod tests {
     }
 
     #[test]
+    fn slash_search_without_semantic_model_does_not_refine_forever() {
+        let (_dir, project_root, db_path) = setup_project();
+        let id = actions::create_item(
+            &project_root,
+            &db_path,
+            "test-agent",
+            "Searchable target",
+            None,
+            Kind::Task,
+            None,
+            Urgency::Default,
+            Vec::new(),
+        )
+        .expect("create item");
+
+        let mut view = make_list_view();
+        view.project_root = project_root;
+        view.db_path = db_path;
+        view.semantic_model = None;
+        view.search_refining = true;
+        view.filter.search_query = "searchable".to_string();
+
+        view.refresh_semantic_search_ids().expect("refresh search");
+
+        assert!(view.semantic_search_active);
+        assert!(view.semantic_search_ids.iter().any(|found| found == &id));
+        assert!(!view.search_refining);
+        assert!(view.semantic_refinement_rx.is_none());
+    }
+
+    #[test]
     fn list_view_filter_clamp_selection_after_filter() {
         let mut view = make_list_view();
         view.select_last(); // index 2
@@ -926,6 +999,78 @@ mod tests {
         let item = view.selected_item().expect("item");
         // Default execution sort still keeps bn-001 before bn-002 for this fixture.
         assert_eq!(item.item_id, "bn-002");
+    }
+
+    #[test]
+    fn edit_modal_writes_label_deltas_not_array_replacement() {
+        let (_dir, project_root, db_path) = setup_project();
+        let id = actions::create_item(
+            &project_root,
+            &db_path,
+            "test-agent",
+            "Editable labels",
+            None,
+            Kind::Task,
+            None,
+            Urgency::Default,
+            vec!["old".to_string()],
+        )
+        .expect("create item");
+
+        let mut view = make_list_view();
+        view.project_root = project_root.clone();
+        view.db_path = db_path.clone();
+        view.detail_item = Some(make_detail_item(
+            &id,
+            "Editable labels",
+            vec!["old".to_string()],
+        ));
+        view.create_modal_edit_item_id = Some(id.clone());
+
+        view.create_from_draft(CreateDraft {
+            title: "Editable labels".to_string(),
+            description: None,
+            kind: "task".to_string(),
+            size: None,
+            urgency: "default".to_string(),
+            labels: vec!["new".to_string()],
+        })
+        .expect("save edit");
+
+        let conn = Connection::open(&db_path).expect("open db");
+        let labels: Vec<String> = query::get_labels(&conn, &id)
+            .expect("labels")
+            .into_iter()
+            .map(|label| label.label)
+            .collect();
+        assert_eq!(labels, vec!["new"]);
+
+        let shard_mgr = ShardManager::new(project_root.join(".bones"));
+        let label_updates: Vec<serde_json::Value> = shard_mgr
+            .replay()
+            .expect("replay")
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                if fields.get(4) == Some(&"item.update") {
+                    let data: serde_json::Value = serde_json::from_str(fields[6]).ok()?;
+                    if data.get("field").and_then(|value| value.as_str()) == Some("labels") {
+                        return Some(data);
+                    }
+                }
+                None
+            })
+            .collect();
+
+        assert_eq!(label_updates.len(), 2);
+        assert!(label_updates.iter().all(|data| data["value"].is_object()));
+        assert!(label_updates
+            .iter()
+            .any(|data| data["value"]["action"] == "add" && data["value"]["label"] == "new"));
+        assert!(label_updates
+            .iter()
+            .any(|data| data["value"]["action"] == "remove" && data["value"]["label"] == "old"));
     }
 
     #[test]
