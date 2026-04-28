@@ -1375,10 +1375,13 @@ fn golden_file_all_events_parse_correctly() {
 
     let content = generate_golden_content(&mut corpus);
 
-    // Write (or update) the golden fixture file for reference
-    let path = golden_fixture_path();
-    std::fs::create_dir_all(path.parent().unwrap()).ok();
-    std::fs::write(&path, &content).ok(); // best-effort; don't fail if read-only
+    if std::env::var_os("BONES_UPDATE_GOLDEN").is_some() {
+        let path = golden_fixture_path();
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create fixture dir");
+        let tmp_path = path.with_extension("tsjson.tmp");
+        std::fs::write(&tmp_path, &content).expect("write temporary golden fixture");
+        std::fs::rename(&tmp_path, &path).expect("replace golden fixture");
+    }
 
     // Parse all lines from the generated content
     let events = parse_lines(&content).expect("all golden events should parse");

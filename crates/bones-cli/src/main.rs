@@ -66,7 +66,7 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use output::{CliError, OutputMode, render_error, resolve_output_mode};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -117,6 +117,18 @@ impl Cli {
     /// Get the agent flag as an Option<&str> for resolution.
     fn agent_flag(&self) -> Option<&str> {
         self.agent.as_deref()
+    }
+}
+
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        if current.join(".bones").is_dir() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
     }
 }
 
@@ -1178,7 +1190,7 @@ fn main() -> anyhow::Result<()> {
         info!("Verbose mode enabled");
     }
 
-    let project_root = std::env::current_dir()?;
+    let current_dir = std::env::current_dir()?;
     let output = cli.output_mode();
 
     // Check that we're inside a bones project for commands that need one.
@@ -1190,17 +1202,22 @@ fn main() -> anyhow::Result<()> {
             | Commands::MergeTool { .. }
             | Commands::MergeDriver { .. }
     );
-    if needs_project && !project_root.join(".bones").is_dir() {
-        render_error(
-            output,
-            &CliError::with_details(
-                "not a bones project (`.bones` directory not found)",
-                "run `bn init` to create a bones project in this directory",
-                "not_a_project",
-            ),
-        )?;
-        anyhow::bail!("not a bones project");
-    }
+    let project_root = if needs_project {
+        find_project_root(&current_dir).ok_or_else(|| {
+            render_error(
+                output,
+                &CliError::with_details(
+                    "not a bones project (`.bones` directory not found)",
+                    "run `bn init` to create a bones project in this directory or a parent",
+                    "not_a_project",
+                ),
+            )
+            .ok();
+            anyhow::anyhow!("not a bones project")
+        })?
+    } else {
+        current_dir
+    };
 
     // Silently fix .bones/.gitattributes if it has the old buggy pattern.
     if needs_project {

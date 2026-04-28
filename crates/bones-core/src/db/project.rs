@@ -328,16 +328,31 @@ impl<'conn> Projector<'conn> {
                     created_at_us, updated_at_us
                 ) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, 0, ?8, ?9, ?10)
                 ON CONFLICT(item_id) DO UPDATE SET
-                    title = excluded.title,
-                    description = excluded.description,
-                    kind = excluded.kind,
-                    urgency = excluded.urgency,
-                    size = excluded.size,
-                    parent_id = excluded.parent_id,
-                    created_at_us = excluded.created_at_us,
-                    search_labels = excluded.search_labels,
-                    updated_at_us = excluded.updated_at_us
-                WHERE items.title = ''",
+                    title = CASE
+                        WHEN items.title = '' THEN excluded.title
+                        ELSE items.title
+                    END,
+                    description = COALESCE(items.description, excluded.description),
+                    kind = CASE
+                        WHEN items.kind = 'task' THEN excluded.kind
+                        ELSE items.kind
+                    END,
+                    urgency = CASE
+                        WHEN items.urgency = 'default' THEN excluded.urgency
+                        ELSE items.urgency
+                    END,
+                    size = COALESCE(items.size, excluded.size),
+                    parent_id = COALESCE(items.parent_id, excluded.parent_id),
+                    created_at_us = MIN(items.created_at_us, excluded.created_at_us),
+                    search_labels = CASE
+                        WHEN items.search_labels = '' THEN excluded.search_labels
+                        ELSE items.search_labels
+                    END,
+                    updated_at_us = MAX(items.updated_at_us, excluded.updated_at_us)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM projected_events
+                    WHERE item_id = excluded.item_id AND event_type = 'item.create'
+                )",
                 params![
                     event.item_id.as_str(),
                     title,
@@ -364,6 +379,7 @@ impl<'conn> Projector<'conn> {
                     )
                     .with_context(|| format!("insert label '{label}' for {}", event.item_id))?;
             }
+            self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
         }
 
         Ok(())
@@ -480,24 +496,7 @@ impl<'conn> Projector<'conn> {
                 }
 
                 if changed {
-                    // Reconstruct search_labels from item_labels table to keep FTS in sync.
-                    let mut stmt = self.conn.prepare(
-                        "SELECT label FROM item_labels WHERE item_id = ?1 ORDER BY label",
-                    )?;
-                    let label_rows = stmt.query_map(params![event.item_id.as_str()], |row| {
-                        row.get::<_, String>(0)
-                    })?;
-
-                    let mut label_strings = Vec::new();
-                    for label_res in label_rows {
-                        label_strings.push(label_res?);
-                    }
-
-                    let search_labels = label_strings.join(" ");
-                    self.conn.execute(
-                        "UPDATE items SET search_labels = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                        params![search_labels, event.wall_ts_us, event.item_id.as_str()],
-                    )?;
+                    self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
                 }
             }
             _ => {
@@ -801,6 +800,28 @@ impl<'conn> Projector<'conn> {
                 .with_context(|| format!("create placeholder item for {}", event.item_id))?;
         }
 
+        Ok(())
+    }
+
+    fn refresh_search_labels(&self, item_id: &str, updated_at_us: i64) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT label FROM item_labels WHERE item_id = ?1 ORDER BY label")?;
+        let label_rows = stmt.query_map(params![item_id], |row| row.get::<_, String>(0))?;
+
+        let mut label_strings = Vec::new();
+        for label_res in label_rows {
+            label_strings.push(label_res?);
+        }
+
+        let search_labels = label_strings.join(" ");
+        self.conn.execute(
+            "UPDATE items
+             SET search_labels = ?1,
+                 updated_at_us = MAX(updated_at_us, ?2)
+             WHERE item_id = ?3",
+            params![search_labels, updated_at_us, item_id],
+        )?;
         Ok(())
     }
 }
@@ -1948,6 +1969,40 @@ mod tests {
         let item = query::get_item(&conn, "bn-late", false).unwrap().unwrap();
         assert_eq!(item.title, "Real Title");
         assert_eq!(item.created_at_us, 900);
+    }
+
+    #[test]
+    fn late_create_backfills_placeholder_after_field_update() {
+        let conn = test_db();
+        let projector = Projector::new(&conn);
+
+        let update = make_event(
+            EventType::Update,
+            "bn-late",
+            EventData::Update(UpdateData {
+                field: "title".into(),
+                value: serde_json::json!("Updated before create"),
+                extra: BTreeMap::new(),
+            }),
+            "h1",
+            1000,
+        );
+        projector.project_event(&update).unwrap();
+
+        let create = make_create("bn-late", "Initial title", "h2", 900);
+        projector.project_event(&create).unwrap();
+
+        let item = query::get_item(&conn, "bn-late", false).unwrap().unwrap();
+        assert_eq!(item.title, "Updated before create");
+        assert_eq!(item.kind, "task");
+        assert_eq!(item.size.as_deref(), Some("m"));
+        assert_eq!(item.description.as_deref(), Some("A detailed description"));
+        assert_eq!(item.created_at_us, 900);
+        assert_eq!(item.updated_at_us, 1000);
+
+        let labels = query::get_labels(&conn, "bn-late").unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(item.search_labels, "auth backend");
     }
 
     /// Regression: Projector::new() must create the projected_events table
