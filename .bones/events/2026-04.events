@@ -155,3 +155,7 @@
 1777395961444866	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3hQ0		item.move	bn-ckr1	{"state":"doing"}	blake3:iV6C3-Yh_DUGOKQQbRNKRon8jtlCUfV_KDb87FDvmf0
 1777395961457333	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3hg0		item.assign	bn-ckr1	{"action":"assign","agent":"bones-dev"}	blake3:0JSPNjRPjBU3TsaW3RIb2lbf4LKWRwiBVzYVfpc4hWg
 1777396110158409	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3hw0		item.move	bn-ckr1	{"state":"done"}	blake3:W_0pYsUxLSZuQ8xOj5Ltts2e5Jpws_sA6GllcuSXpeI
+1777413543633123	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3iA0		item.create	bn-1ihg	{"description":"Prepare and publish the v0.24.3 patch release.","kind":"task","title":"Cut v0.24.3 release"}	blake3:mhRTUFg9jWAdlVuB3Hj-309g-cxfyySkZ0X0w5sZGPw
+1777413547738232	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3iQ0		item.move	bn-1ihg	{"state":"doing"}	blake3:4widK-desFFLhCTGme8u8R30RZoMAWA5o9mzeDQ_Qac
+1777413547745780	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3ig0		item.assign	bn-1ihg	{"action":"assign","agent":"bones-dev"}	blake3:hjt0MWo1WqrFFfK0_7_wx7sJ4LrlwTYvZPl90a1Nf-s
+1777414011380402	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3iw0		item.move	bn-1ihg	{"state":"done"}	blake3:6RGJAlSOw5D4vVuP_prjz8H6nc8m4Gs_jCIg5sjC1xA
