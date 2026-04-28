@@ -947,11 +947,19 @@ fn collect_edges(raw: &RawGraph) -> Vec<(String, String)> {
 
 /// Truncate a string to `max_len` characters, adding "..." if truncated.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    if max_len == 0 {
+        return String::new();
+    }
+    if max_len <= 3 {
+        return ".".repeat(max_len);
+    }
+
+    let mut out: String = s.chars().take(max_len - 3).collect();
+    out.push_str("...");
+    out
 }
 
 /// Show the full project directed dependency graph.
@@ -1473,6 +1481,14 @@ mod tests {
         let result = truncate(&long, 50);
         assert!(result.len() <= 50);
         assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_unicode_string_without_panicking() {
+        let long = "é".repeat(60);
+        let result = truncate(&long, 50);
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 50);
     }
 
     /// Full integration: set up project, add deps, render graph.

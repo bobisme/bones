@@ -147,6 +147,16 @@ impl Event {
     }
 }
 
+fn truncate_for_display(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+
+    let mut preview: String = value.chars().take(max_chars).collect();
+    preview.push_str("...");
+    preview
+}
+
 impl std::fmt::Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -164,22 +174,14 @@ impl std::fmt::Display for Event {
                 EventData::Move(d) => format!("move: {}", d.state),
                 EventData::Assign(d) => format!("{}: {}", d.action, d.agent),
                 EventData::Comment(d) => {
-                    let preview = if d.body.len() > 40 {
-                        format!("{}...", &d.body[..40])
-                    } else {
-                        d.body.clone()
-                    };
+                    let preview = truncate_for_display(&d.body, 40);
                     format!("comment: {preview}")
                 }
                 EventData::Link(d) => format!("link: {} {}", d.link_type, d.target),
                 EventData::Unlink(d) => format!("unlink: {}", d.target),
                 EventData::Delete(_) => "delete".to_string(),
                 EventData::Compact(d) => {
-                    let preview = if d.summary.len() > 40 {
-                        format!("{}...", &d.summary[..40])
-                    } else {
-                        d.summary.clone()
-                    };
+                    let preview = truncate_for_display(&d.summary, 40);
                     format!("compact: {preview}")
                 }
                 EventData::Snapshot(_) => "snapshot".to_string(),
@@ -280,6 +282,20 @@ mod tests {
         assert!(display.contains("item.create"));
         assert!(display.contains("bn-a3f8"));
         assert!(display.contains("Fix auth retry"));
+    }
+
+    #[test]
+    fn event_display_truncates_unicode_comment_without_panicking() {
+        let mut event = sample_create_event();
+        event.event_type = EventType::Comment;
+        event.data = EventData::Comment(CommentData {
+            body: "é".repeat(60),
+            extra: BTreeMap::new(),
+        });
+
+        let display = event.to_string();
+        assert!(display.contains("comment:"));
+        assert!(display.contains("..."));
     }
 
     #[test]

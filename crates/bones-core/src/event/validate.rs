@@ -407,11 +407,13 @@ fn parse_error_to_validation(err: &ParseError, line_num: usize, raw: &str) -> Va
 
 /// Truncate a line to 256 characters for inclusion in error reports.
 fn truncate_line(line: &str) -> String {
-    if line.len() > 256 {
-        format!("{}…", &line[..256])
-    } else {
-        line.to_string()
+    if line.chars().count() <= 256 {
+        return line.to_string();
     }
+
+    let mut truncated: String = line.chars().take(256).collect();
+    truncated.push('…');
+    truncated
 }
 
 /// Check shard file against its manifest.
@@ -1006,6 +1008,14 @@ mod tests {
         let long = "a".repeat(300);
         let truncated = truncate_line(&long);
         assert!(truncated.len() < 300);
+        assert!(truncated.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_line_unicode_does_not_split_codepoint() {
+        let long = "é".repeat(300);
+        let truncated = truncate_line(&long);
+        assert_eq!(truncated.chars().count(), 257);
         assert!(truncated.ends_with('…'));
     }
 

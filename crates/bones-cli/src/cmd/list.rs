@@ -637,12 +637,7 @@ fn render_list_human(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<
             format!("  [{}]", item.labels.join(", "))
         };
 
-        let max_title_len = 40usize;
-        let title = if item.title.len() > max_title_len {
-            format!("{}…", &item.title[..max_title_len.saturating_sub(1)])
-        } else {
-            item.title.clone()
-        };
+        let title = truncate_title(&item.title, 40);
 
         rows.push(vec![
             item.id.clone(),
@@ -665,6 +660,19 @@ fn render_list_human(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<
     }
 
     Ok(())
+}
+
+fn truncate_title(title: &str, max_chars: usize) -> String {
+    if title.chars().count() <= max_chars {
+        return title.to_string();
+    }
+    if max_chars == 0 {
+        return String::new();
+    }
+
+    let mut out: String = title.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn render_list_text(resp: &ListResponse, w: &mut dyn Write) -> std::io::Result<()> {
@@ -997,6 +1005,27 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         // Title should be truncated (not all 60 chars)
         assert!(!out.contains(&long_title));
+        assert!(out.contains('…'));
+    }
+
+    #[test]
+    fn render_list_human_truncates_unicode_title_without_panicking() {
+        let long_title = "é".repeat(60);
+        let resp = make_response(vec![ListItem {
+            id: "bn-u".into(),
+            title: long_title,
+            kind: "task".into(),
+            state: "open".into(),
+            urgency: "default".into(),
+            size: None,
+            parent_id: None,
+            labels: vec![],
+            assignees: vec![],
+            updated_at_us: 1000,
+        }]);
+        let mut buf = Vec::new();
+        render_list_human(&resp, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
         assert!(out.contains('…'));
     }
 

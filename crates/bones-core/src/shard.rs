@@ -1082,7 +1082,7 @@ pub fn validate_shard_header(path: &Path) -> Result<(), ShardError> {
             reason: format!(
                 "expected header '{}', found '{}'",
                 SHARD_HEADER,
-                &trimmed[..trimmed.len().min(80)]
+                trimmed.chars().take(80).collect::<String>()
             ),
         });
     }
@@ -1272,6 +1272,17 @@ mod tests {
         let first = mgr.init().expect("first");
         let second = mgr.init().expect("second");
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn validate_shard_header_reports_unicode_without_panicking() {
+        let (_tmp, mgr) = setup();
+        mgr.ensure_dirs().expect("dirs");
+        let path = mgr.shard_path(2026, 4);
+        fs::write(&path, format!("{}\n", "é".repeat(120))).expect("write shard");
+
+        let err = validate_shard_header(&path).expect_err("invalid header");
+        assert!(err.to_string().contains("expected header"));
     }
 
     // -----------------------------------------------------------------------
