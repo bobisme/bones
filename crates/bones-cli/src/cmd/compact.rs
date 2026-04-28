@@ -139,6 +139,11 @@ pub fn run_compact(args: &CompactArgs, output: OutputMode, project_root: &Path) 
         let should_write = verification.as_ref().is_none_or(|v| v != "some_failed");
 
         if should_write {
+            use bones_core::lock::ShardLock;
+            use std::time::Duration;
+
+            let _lock = ShardLock::acquire(&shard_mgr.lock_path(), Duration::from_secs(5))
+                .context("acquire shard lock for compaction")?;
             let (year, month) = shard_mgr.rotate_if_needed()?;
             for snapshot in &snapshots {
                 let line = writer::write_line(snapshot).context("serialize snapshot event")?;

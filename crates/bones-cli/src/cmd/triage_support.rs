@@ -180,7 +180,7 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
         .map(|id| urgent_chain_pressure.get(id).map_or(0.0, |r| r.pressure))
         .collect();
     let urgent_chain_norm = normalize_metric(&urgent_chain_raw);
-    let weights = sampled_weights_from_feedback(seed_from_graph(normalized.content_hash()));
+    let weights = sampled_weights_from_feedback(conn, seed_from_graph(normalized.content_hash()));
 
     // Build set of item IDs that have at least one active child.
     let ids_with_children: HashSet<&str> = active_items
@@ -475,6 +475,14 @@ const fn pagerank_method_label(method: PageRankMethod) -> &'static str {
 }
 
 fn pagerank_cache_path(conn: &Connection) -> Option<PathBuf> {
+    Some(
+        bones_dir_from_conn(conn)?
+            .join("cache")
+            .join(PAGERANK_CACHE_FILE),
+    )
+}
+
+fn bones_dir_from_conn(conn: &Connection) -> Option<PathBuf> {
     let mut stmt = conn.prepare("PRAGMA database_list").ok()?;
     let rows = stmt
         .query_map([], |row| {
@@ -491,11 +499,14 @@ fn pagerank_cache_path(conn: &Connection) -> Option<PathBuf> {
         }
 
         let db_path = PathBuf::from(file_path);
-        let bones_dir = db_path.parent()?;
-        return Some(bones_dir.join("cache").join(PAGERANK_CACHE_FILE));
+        return db_path.parent().map(PathBuf::from);
     }
 
     None
+}
+
+fn project_root_from_conn(conn: &Connection) -> Option<PathBuf> {
+    bones_dir_from_conn(conn)?.parent().map(PathBuf::from)
 }
 
 fn load_pagerank_cache(path: &PathBuf) -> Result<Option<PageRankDiskCache>> {
@@ -563,8 +574,8 @@ fn diff_edge_changes(
     changes
 }
 
-fn sampled_weights_from_feedback(seed: u64) -> CompositeWeights<f64> {
-    let Ok(project_root) = std::env::current_dir() else {
+fn sampled_weights_from_feedback(conn: &Connection, seed: u64) -> CompositeWeights<f64> {
+    let Some(project_root) = project_root_from_conn(conn) else {
         return CompositeWeights::default();
     };
     let agent_id = std::env::var("BONES_AGENT")
@@ -881,6 +892,24 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("in-memory db");
         migrations::migrate(&mut conn).expect("migrate");
         conn
+    }
+
+    #[test]
+    fn project_root_is_derived_from_projection_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(&bones_dir).expect("create .bones");
+
+        let db_path = bones_dir.join("bones.db");
+        let mut conn = Connection::open(&db_path).expect("file db");
+        migrations::migrate(&mut conn).expect("migrate");
+
+        let expected_cache = bones_dir.join("cache").join(PAGERANK_CACHE_FILE);
+        assert_eq!(project_root_from_conn(&conn).as_deref(), Some(dir.path()));
+        assert_eq!(
+            pagerank_cache_path(&conn).as_deref(),
+            Some(expected_cache.as_path())
+        );
     }
 
     fn insert_item(
