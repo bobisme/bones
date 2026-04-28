@@ -135,3 +135,7 @@
 1777344153598781	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE38Qw		item.move	bn-z9z6	{"state":"doing"}	blake3:Mzp1nrURCDkXo8Ai8Ix5yQaPdZ9OXAULanH7TFIjb58
 1777344153606935	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE38gw		item.assign	bn-z9z6	{"action":"assign","agent":"bones-dev"}	blake3:uRe1X06QQ0Ez664Ojz0GgEVkvxPwkZm06qV2ll-S0Y0
 1777344636111494	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE38ww		item.move	bn-z9z6	{"state":"done"}	blake3:Tk2o5oaYV9Dyi7_f_AIrdwxFfj6ydu2JdSzZnP61LcA
+1777345799437292	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE39Aw		item.create	bn-2f36	{"description":"Explore core code paths, trace execution flows, identify obvious bugs, and apply focused fixes.","kind":"task","title":"Fresh-eyes bug fixes"}	blake3:6Pjr0611CUCD7zxk6SUKUxyaPNJ9RCP_5Qbc3UgH7Ts
+1777345802556993	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE39Qw		item.move	bn-2f36	{"state":"doing"}	blake3:Vyk4OoORdvi31SC8N9mDiYH26iRE7ZwT2CTSFt6gWGk
+1777345802574743	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE39gw		item.assign	bn-2f36	{"action":"assign","agent":"bones-dev"}	blake3:JU1PnyfkiAyGLivl0ptnevbHxjmOz4ZLtHPLQddUx4E
+1777346610367628	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE39ww		item.move	bn-2f36	{"state":"done"}	blake3:8zsjTsyxKYCaxQPsw337-FsXc5bQhNpBdHf4jzOk-Oo
