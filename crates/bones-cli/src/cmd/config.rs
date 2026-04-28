@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use bones_core::config::{EffectiveConfig, resolve_config};
+use bones_core::config::{EffectiveConfig, ProjectConfig, resolve_config, validate_project_config};
 use clap::{Args, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use toml::Value;
@@ -131,6 +131,7 @@ fn apply_set(root: &mut Value, scope: ConfigScope, key: &str, raw: &str) -> Resu
         .ok_or_else(|| anyhow!("Section {section} must be a TOML table"))?;
 
     section_table.insert(leaf.to_string(), parsed);
+    validate_project_value(root, scope)?;
     Ok(())
 }
 
@@ -149,7 +150,20 @@ fn apply_unset(root: &mut Value, scope: ConfigScope, key: &str) -> Result<()> {
         }
     }
 
+    validate_project_value(root, scope)?;
     Ok(())
+}
+
+fn validate_project_value(root: &Value, scope: ConfigScope) -> Result<()> {
+    if scope != ConfigScope::Project {
+        return Ok(());
+    }
+
+    let config: ProjectConfig = root
+        .clone()
+        .try_into()
+        .context("Project config is not valid")?;
+    validate_project_config(&config)
 }
 
 fn split_known_key(scope: ConfigScope, key: &str) -> Result<(&str, &str)> {

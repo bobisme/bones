@@ -111,8 +111,45 @@ pub fn load_project_config(project_root: &Path) -> Result<ProjectConfig> {
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
 
-    toml::from_str::<ProjectConfig>(&content)
-        .with_context(|| format!("Failed to parse {}", path.display()))
+    let config = toml::from_str::<ProjectConfig>(&content)
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+    validate_project_config(&config)
+        .with_context(|| format!("Invalid project config {}", path.display()))?;
+    Ok(config)
+}
+
+/// Validate semantic invariants that serde cannot express.
+///
+/// # Errors
+///
+/// Returns an error if numeric thresholds are non-finite, outside the
+/// normalized score range, or ordered inconsistently.
+pub fn validate_project_config(config: &ProjectConfig) -> Result<()> {
+    validate_threshold(
+        "search.duplicate_threshold",
+        config.search.duplicate_threshold,
+    )?;
+    validate_threshold("search.related_threshold", config.search.related_threshold)?;
+
+    if config.search.related_threshold > config.search.duplicate_threshold {
+        anyhow::bail!(
+            "search.related_threshold ({}) must be less than or equal to search.duplicate_threshold ({})",
+            config.search.related_threshold,
+            config.search.duplicate_threshold
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_threshold(name: &str, value: f64) -> Result<()> {
+    if !value.is_finite() {
+        anyhow::bail!("{name} must be finite");
+    }
+    if !(0.0..=1.0).contains(&value) {
+        anyhow::bail!("{name} must be between 0.0 and 1.0");
+    }
+    Ok(())
 }
 
 /// Load user-level configuration from `<config-dir>/bones/config.toml`.
@@ -262,6 +299,49 @@ mod tests {
         assert_eq!(cfg.search.model, "minilm-l6-v2-int8");
         assert!(cfg.triage.feedback_learning);
         assert!(!cfg.done.require_reason);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_config_rejects_out_of_range_thresholds() {
+        let root = make_temp_dir("project-bad-threshold");
+        std::fs::create_dir_all(root.join(".bones")).expect("create .bones");
+        std::fs::write(
+            root.join(".bones/config.toml"),
+            r#"
+[search]
+duplicate_threshold = 1.2
+"#,
+        )
+        .expect("write config");
+
+        let err = load_project_config(&root).expect_err("invalid threshold should fail");
+        assert!(err.to_string().contains("Invalid project config"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_config_rejects_inverted_thresholds() {
+        let root = make_temp_dir("project-inverted-thresholds");
+        std::fs::create_dir_all(root.join(".bones")).expect("create .bones");
+        std::fs::write(
+            root.join(".bones/config.toml"),
+            r#"
+[search]
+duplicate_threshold = 0.6
+related_threshold = 0.7
+"#,
+        )
+        .expect("write config");
+
+        let err = load_project_config(&root).expect_err("inverted thresholds should fail");
+        assert!(err.to_string().contains("Invalid project config"));
+        assert!(
+            err.chain()
+                .any(|cause| cause.to_string().contains("search.related_threshold"))
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 
