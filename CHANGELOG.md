@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.24.3 - 2026-04-28
+
+### Fixed
+
+- **Hardened TUI event writes** — event-writing actions now preserve user
+  input and error state more reliably across selection, filtering, and search
+  flows.
+- **Improved data integrity checks** — import, undo, parser, and reporting
+  paths now reject more malformed inputs and surface clearer failures instead
+  of silently accepting inconsistent state.
+- **Fixed cache and projection edge cases** — binary cache freshness,
+  projection dirty-state handling, incremental replay, and triage graph
+  construction now handle stale or inconsistent derived data more defensively.
+- **Repaired create/block and ITC state handling** — `bn create` block-link
+  flows and ITC path state updates now behave correctly in nested and
+  multi-event cases.
+- **Hardened projection and golden-file tests** — projection selection and
+  canonical parser fixtures now fail more predictably when assumptions drift.
+- **Anchored triage feedback and compaction locking** — triage support output
+  is tied to the selected item, and compaction now respects lock ownership
+  more consistently.
+- **Made text truncation Unicode-safe** — CLI graph/list rendering, event
+  display, validation output, and shard range reads no longer split inside
+  multi-byte characters.
+- **Validated search threshold configuration** — invalid semantic search
+  threshold values are now rejected during config parsing instead of producing
+  surprising runtime behavior.
+- **Saturated cache range reads** — `CacheReader::read_range` no longer
+  overflows in debug builds when passed an extremely large count.
+
 ## v0.24.2 - 2026-04-27
 
 ### Changed
