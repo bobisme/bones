@@ -53,11 +53,24 @@ fn seed_for_agent(agent: &str) -> Stamp {
 }
 
 fn itc_state_path(project_root: &Path, agent: &str) -> PathBuf {
-    project_root
-        .join(".bones")
+    find_bones_dir(project_root)
+        .unwrap_or_else(|| project_root.join(".bones"))
         .join("itc")
         .join("agents")
         .join(format!("{}.itc", encode_agent_id(agent)))
+}
+
+fn find_bones_dir(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        let candidate = current.join(".bones");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 fn encode_agent_id(agent_id: &str) -> String {
@@ -103,5 +116,19 @@ mod tests {
         let second_stamp = stamp_from_text(&second).expect("decode second");
         assert!(first_stamp.leq(&second_stamp));
         assert!(!second_stamp.leq(&first_stamp));
+    }
+
+    #[test]
+    fn next_itc_uses_nearest_parent_bones_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nested = temp.path().join("src").join("nested");
+        fs::create_dir_all(temp.path().join(".bones")).expect("bones dir");
+        fs::create_dir_all(&nested).expect("nested dir");
+
+        let stamp = next_itc(&nested, "alice").expect("stamp");
+
+        assert!(stamp.starts_with("itc:v3:"));
+        assert!(temp.path().join(".bones/itc/agents/alice.itc").is_file());
+        assert!(!nested.join(".bones").exists());
     }
 }

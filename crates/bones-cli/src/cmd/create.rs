@@ -20,13 +20,13 @@ use bones_core::config::load_project_config;
 use bones_core::db;
 use bones_core::db::project;
 use bones_core::event::Event;
-use bones_core::event::data::{CreateData, EventData};
+use bones_core::event::data::{CreateData, EventData, LinkData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
 use bones_core::model::item::Kind;
 use bones_core::model::item::Size;
 use bones_core::model::item::Urgency;
-use bones_core::model::item_id::generate_item_id;
+use bones_core::model::item_id::{ItemId, generate_item_id};
 use bones_core::shard::ShardManager;
 use bones_search::find_duplicates_with_model;
 use bones_search::fusion::scoring::SearchConfig;
@@ -611,7 +611,9 @@ fn run_create_single(
         }
     }
 
-    // 10. Validate --blocks targets exist
+    // 10. Validate --blocks targets exist. Preserve input order while avoiding
+    // duplicate link events for repeated flags.
+    let mut block_targets: Vec<String> = Vec::new();
     for block_target in &request.blocks {
         if let Err(e) = validate::validate_item_id(block_target) {
             anyhow::bail!("{}", e.reason);
@@ -621,6 +623,9 @@ fn run_create_single(
             && !db::query::item_exists(&conn, block_target)?
         {
             anyhow::bail!("blocks target '{block_target}' not found");
+        }
+        if !block_targets.iter().any(|target| target == block_target) {
+            block_targets.push(block_target.clone());
         }
     }
 
@@ -747,6 +752,7 @@ fn run_create_single(
         data: EventData::Create(create_data),
         event_hash: String::new(),
     };
+    let mut emitted_events = Vec::with_capacity(1 + block_targets.len());
 
     {
         use bones_core::lock::ShardLock;
@@ -775,14 +781,49 @@ fn run_create_single(
         shard_mgr
             .append_raw(year, month, &line)
             .map_err(|e| anyhow::anyhow!("failed to write event: {e}"))?;
+
+        emitted_events.push(event.clone());
+
+        for block_target in &block_targets {
+            let mut link_event = Event {
+                wall_ts_us: shard_mgr
+                    .next_timestamp()
+                    .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?,
+                agent: agent.clone(),
+                itc: String::new(),
+                parents: vec![],
+                event_type: EventType::Link,
+                item_id: ItemId::parse(block_target)
+                    .map_err(|e| anyhow::anyhow!("invalid blocks target '{block_target}': {e}"))?,
+                data: EventData::Link(LinkData {
+                    target: item_id.as_str().to_string(),
+                    link_type: "blocks".to_string(),
+                    extra: BTreeMap::new(),
+                }),
+                event_hash: String::new(),
+            };
+
+            assign_next_itc(project_root, &mut link_event)?;
+
+            let line = writer::write_event(&mut link_event)
+                .map_err(|e| anyhow::anyhow!("failed to serialize link event: {e}"))?;
+
+            shard_mgr
+                .append_raw(year, month, &line)
+                .map_err(|e| anyhow::anyhow!("failed to write link event: {e}"))?;
+
+            emitted_events.push(link_event);
+        }
     }
 
     // 17. Project into SQLite (best-effort — projection can be rebuilt)
     if let Ok(conn) = db::open_projection(&db_path) {
         let _ = project::ensure_tracking_table(&conn);
         let projector = project::Projector::new(&conn);
-        if let Err(e) = projector.project_event(&event) {
-            tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+        for emitted_event in &emitted_events {
+            if let Err(e) = projector.project_event(emitted_event) {
+                tracing::warn!("projection failed (will be fixed on next rebuild): {e}");
+            }
         }
     }
 
@@ -1276,6 +1317,100 @@ labels:
         let id1: Vec<&str> = lines[0].split('\t').collect();
         let id2: Vec<&str> = lines[1].split('\t').collect();
         assert_ne!(id1[5], id2[5], "IDs should be unique");
+    }
+
+    #[test]
+    fn create_with_blocks_emits_dependency_link() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        let target_args = CreateArgs {
+            title: Some("Blocked target".to_string()),
+            from_file: None,
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
+            description: None,
+            blocks: vec![],
+            force: true,
+            allow_secret: false,
+        };
+        run_create(&target_args, Some("agent"), OutputMode::Json, root).unwrap();
+
+        let db_path = bones_dir.join("bones.db");
+        let conn = db::open_projection(&db_path).unwrap();
+        let target_id = db::query::list_items(
+            &conn,
+            &db::query::ItemFilter {
+                include_deleted: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .into_iter()
+        .find(|item| item.title == "Blocked target")
+        .unwrap()
+        .item_id;
+        drop(conn);
+
+        let blocker_args = CreateArgs {
+            title: Some("New blocker".to_string()),
+            from_file: None,
+            kind: "task".to_string(),
+            size: None,
+            urgency: None,
+            parent: None,
+            label: vec![],
+            tag: vec![],
+            labels: vec![],
+            tags: vec![],
+            description: None,
+            blocks: vec![target_id.clone()],
+            force: true,
+            allow_secret: false,
+        };
+        run_create(&blocker_args, Some("agent"), OutputMode::Json, root).unwrap();
+
+        let conn = db::open_projection(&db_path).unwrap();
+        let blocker_id = db::query::list_items(
+            &conn,
+            &db::query::ItemFilter {
+                include_deleted: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .into_iter()
+        .find(|item| item.title == "New blocker")
+        .unwrap()
+        .item_id;
+
+        let deps = db::query::get_dependencies(&conn, &target_id).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].item_id, target_id);
+        assert_eq!(deps[0].depends_on_item_id, blocker_id);
+        assert_eq!(deps[0].link_type, "blocks");
+
+        let replay = shard_mgr.replay().unwrap();
+        let lines: Vec<&str> = replay
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .collect();
+        assert_eq!(lines.len(), 3);
+        let link_fields: Vec<&str> = lines[2].split('\t').collect();
+        assert_eq!(link_fields[4], "item.link");
+        assert_eq!(link_fields[5], target_id);
+        assert!(link_fields[6].contains(&blocker_id));
     }
 
     #[test]
