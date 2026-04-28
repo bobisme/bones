@@ -113,7 +113,7 @@ impl CacheReader {
         }
 
         let all = self.read_all()?;
-        let end = (start + count).min(all.len());
+        let end = start.saturating_add(count).min(all.len());
         Ok(all[start..end].to_vec())
     }
 
@@ -303,6 +303,20 @@ mod tests {
 
         // Request more than available
         let range = reader.read_range(1, 100).unwrap();
+        assert_eq!(range.len(), 1);
+        assert_eq!(range[0].wall_ts_us, 2000);
+    }
+
+    #[test]
+    fn read_range_saturates_large_count() {
+        let events = vec![
+            make_event(1000, "a", EventType::Create, "bn-001"),
+            make_event(2000, "b", EventType::Create, "bn-002"),
+        ];
+        let bytes = encode_events(&events, 0).unwrap();
+        let reader = CacheReader::from_bytes(bytes).unwrap();
+
+        let range = reader.read_range(1, usize::MAX).unwrap();
         assert_eq!(range.len(), 1);
         assert_eq!(range[0].wall_ts_us, 2000);
     }
