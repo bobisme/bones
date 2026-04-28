@@ -147,3 +147,7 @@
 1777393995519331	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3_Qw		item.move	bn-3u7t	{"state":"doing"}	blake3:Wb1KfUMLIZC6U5J8nXaH9mTuVucVleFN0BND2YeqA4Y
 1777393995523092	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3_gw		item.assign	bn-3u7t	{"action":"assign","agent":"bones-dev"}	blake3:6xnTeDPgxydc2LbEtuTdAN0V1RTUoL1eKrHZU6mM94g
 1777394309631064	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3_ww		item.move	bn-3u7t	{"state":"done"}	blake3:zSn9wbjuE25s-hNK6aKAVizII8n-c7Sxw7FbKAsmWHY
+1777394715693437	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3gA0		item.create	bn-486j	{"description":"Fourth exploratory pass through different code paths to find and fix obvious bugs and reliability issues.","kind":"task","title":"Fresh-eyes bug fixes pass 4"}	blake3:RQW9bEGk1n4rEv6u-qeAZvLZbrR2kg7_HQsLvtZSFso
+1777394720584642	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3gQ0		item.move	bn-486j	{"state":"doing"}	blake3:TSYLtTbYqzbM9gcnDRCKqRBwuWo-XGo1x2vQg2hJmX4
+1777394720598053	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3gg0		item.assign	bn-486j	{"action":"assign","agent":"bones-dev"}	blake3:-8MMMc14dsqFfdfe_LXczRIrbGD9mAFXRXdOoVxeq3E
+1777394935792892	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3gw0		item.move	bn-486j	{"state":"done"}	blake3:-UaN1Bx67fSf2vm5-SFJhgAV7mGJUk7JLGXI6Zfu9Ts
