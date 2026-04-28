@@ -57,7 +57,7 @@ pub struct RawGraph {
     pub graph: DiGraph<String, ()>,
     /// Mapping from item ID to petgraph `NodeIndex`.
     pub node_map: HashMap<String, NodeIndex>,
-    /// BLAKE3 content hash of the edge set used for cache invalidation.
+    /// BLAKE3 content hash of the active node and edge set used for cache invalidation.
     pub content_hash: String,
 }
 
@@ -69,8 +69,8 @@ impl RawGraph {
     /// (even those with no dependencies) so downstream metrics see the
     /// full node set.
     ///
-    /// The content hash is derived from the sorted list of `(blocker, blocked)`
-    /// pairs, so it changes only when edges change.
+    /// The content hash is derived from the sorted active node IDs and sorted
+    /// `(blocker, blocked)` pairs, so item-only graph changes invalidate caches.
     ///
     /// # Errors
     ///
@@ -84,16 +84,16 @@ impl RawGraph {
         let mut graph = DiGraph::<String, ()>::new();
         let mut node_map: HashMap<String, NodeIndex> = HashMap::with_capacity(item_ids.len());
 
-        for id in item_ids {
+        for id in &item_ids {
             let idx = graph.add_node(id.clone());
-            node_map.insert(id, idx);
+            node_map.insert(id.clone(), idx);
         }
 
         // Step 2: load blocking edges and add them to the graph.
         let edges = load_blocking_edges(conn)?;
 
-        // Compute content hash before mutating graph.
-        let content_hash = compute_edge_hash(&edges);
+        // Compute content hash from the complete graph identity.
+        let content_hash = compute_graph_hash(&item_ids, &edges);
 
         for (blocker, blocked) in edges {
             // If either endpoint is not already a node, add it.
@@ -151,7 +151,7 @@ impl RawGraph {
 /// Load all non-deleted item IDs from the projection database.
 fn load_item_ids(conn: &Connection) -> Result<Vec<String>> {
     let mut stmt = conn
-        .prepare("SELECT item_id FROM items WHERE is_deleted = 0")
+        .prepare("SELECT item_id FROM items WHERE is_deleted = 0 ORDER BY item_id")
         .context("prepare item_ids query")?;
 
     let ids = stmt
@@ -193,9 +193,15 @@ fn load_blocking_edges(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(edges)
 }
 
-/// Compute a BLAKE3 hash of the sorted edge list for cache invalidation.
-fn compute_edge_hash(edges: &[(String, String)]) -> String {
+/// Compute a BLAKE3 hash of sorted active nodes and sorted edges for cache invalidation.
+fn compute_graph_hash(item_ids: &[String], edges: &[(String, String)]) -> String {
     let mut hasher = blake3::Hasher::new();
+    hasher.update(b"nodes\x00");
+    for item_id in item_ids {
+        hasher.update(item_id.as_bytes());
+        hasher.update(b"\x00");
+    }
+    hasher.update(b"edges\x00");
     for (blocker, blocked) in edges {
         hasher.update(blocker.as_bytes());
         hasher.update(b"\x00");
@@ -336,6 +342,26 @@ mod tests {
         assert_ne!(
             empty_hash, with_edge_hash,
             "hash must change when edges added"
+        );
+    }
+
+    #[test]
+    fn content_hash_changes_with_node_only_items() {
+        let conn = setup_db();
+        insert_item(&conn, "bn-001");
+
+        let one_node_hash = RawGraph::from_sqlite(&conn)
+            .expect("build graph")
+            .content_hash;
+
+        insert_item(&conn, "bn-002");
+        let two_node_hash = RawGraph::from_sqlite(&conn)
+            .expect("build graph")
+            .content_hash;
+
+        assert_ne!(
+            one_node_hash, two_node_hash,
+            "hash must change when active nodes change without edge changes"
         );
     }
 

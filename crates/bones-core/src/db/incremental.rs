@@ -66,6 +66,58 @@ pub struct ApplyReport {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Return the current event-log cursor as `(total_byte_len, last_event_hash)`.
+///
+/// This scans shard lines in replay order, mirroring the full rebuild parser so
+/// callers can compare projection cursor metadata against the actual log end.
+///
+/// # Errors
+///
+/// Returns an error if shard replay or event parsing fails.
+pub fn event_log_cursor(events_dir: &Path) -> Result<(usize, Option<String>)> {
+    let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
+    let shard_mgr = ShardManager::new(bones_dir);
+
+    let mut version_checked = false;
+    let mut shard_version = crate::event::parser::CURRENT_VERSION;
+    let mut line_no = 0;
+    let mut total_byte_len = 0;
+    let mut last_event_hash = None;
+
+    let shard_line_iter = shard_mgr.replay_lines()?;
+    for line_res in shard_line_iter {
+        let (offset, line): (usize, String) =
+            line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
+        line_no += 1;
+        total_byte_len = offset + line.len();
+
+        if !version_checked && line.trim_start().starts_with("# bones event log v") {
+            version_checked = true;
+            shard_version = crate::event::parser::detect_version(&line)
+                .map_err(|msg| anyhow::anyhow!("version check failed at line {line_no}: {msg}"))?;
+            continue;
+        }
+
+        match crate::event::parser::parse_line(&line) {
+            Ok(crate::event::parser::ParsedLine::Event(event)) => {
+                let event = crate::event::migrate_event(*event, shard_version)
+                    .map_err(|e| anyhow::anyhow!("migration failed at line {line_no}: {e}"))?;
+                last_event_hash = Some(event.event_hash);
+            }
+            Ok(
+                crate::event::parser::ParsedLine::Comment(_)
+                | crate::event::parser::ParsedLine::Blank,
+            ) => {}
+            Err(crate::event::parser::ParseError::InvalidEventType(raw)) => {
+                tracing::warn!(line = line_no, event_type = %raw, "skipping unknown event type");
+            }
+            Err(e) => anyhow::bail!("parse error at line {line_no}: {e}"),
+        }
+    }
+
+    Ok((total_byte_len, last_event_hash))
+}
+
 /// Apply only events newer than the high-water mark to the projection.
 ///
 /// Steps:

@@ -458,3 +458,44 @@ fn doctor_reports_projection_drift_as_fail() {
         .expect("projection_drift section should be present");
     assert_eq!(drift["status"].as_str().unwrap(), "FAIL");
 }
+
+#[test]
+fn doctor_reports_projection_hash_drift_as_fail() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+    create_item(dir.path(), "Hash drift me");
+
+    let db_path = dir.path().join(".bones/bones.db");
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.execute(
+        "UPDATE projection_meta SET last_event_hash = 'blake3:not-the-log-tail' WHERE id = 1",
+        [],
+    )
+    .unwrap();
+
+    let output = bn_cmd(dir.path())
+        .args(["admin", "doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "doctor should fail on projection hash drift"
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["ok"].as_bool().unwrap(), false);
+    let drift = json["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "projection_drift")
+        .expect("projection_drift section should be present");
+    assert_eq!(drift["status"].as_str().unwrap(), "FAIL");
+    let details = drift["details"].as_array().unwrap();
+    assert!(
+        details
+            .iter()
+            .any(|detail| detail.as_str() == Some("cursor_hash_match=false")),
+        "doctor details should report cursor_hash_match=false"
+    );
+}

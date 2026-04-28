@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
-use crate::cache::{decode_events, encode_events};
+use crate::cache::{decode_events, encode_events, fingerprint_dir};
 use crate::event::Event;
 use crate::event::parser::parse_lines;
 use crate::shard::ShardManager;
@@ -48,12 +48,27 @@ impl CacheWriter {
     ///
     /// Returns an error if encoding or file I/O fails.
     pub fn write_to_file(&self, path: &Path) -> Result<CacheStats> {
+        self.write_to_file_with_created_at_us(path, now_us())
+    }
+
+    /// Encode all buffered events with an explicit header timestamp/fingerprint.
+    ///
+    /// Cache lifecycle callers use this to store their freshness fingerprint in
+    /// the legacy `created_at_us` header field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding or file I/O fails.
+    pub fn write_to_file_with_created_at_us(
+        &self,
+        path: &Path,
+        created_at_us: u64,
+    ) -> Result<CacheStats> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("create cache dir {}", parent.display()))?;
         }
 
-        let created_at_us = now_us();
         let bytes = encode_events(&self.events, created_at_us)
             .map_err(|e| anyhow::anyhow!("encode cache events: {e}"))?;
 
@@ -126,7 +141,8 @@ pub fn rebuild_cache(events_dir: &Path, cache_path: &Path) -> Result<CacheStats>
         writer.push_event(event);
     }
 
-    writer.write_to_file(cache_path)
+    let fingerprint = fingerprint_dir(events_dir).context("compute cache freshness fingerprint")?;
+    writer.write_to_file_with_created_at_us(cache_path, fingerprint)
 }
 
 fn estimated_source_bytes(events: &[Event]) -> usize {

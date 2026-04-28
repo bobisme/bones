@@ -74,23 +74,7 @@ pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
     let dirty_marker = projection_dirty_marker_path(bones_dir);
     let marker_exists = dirty_marker.exists();
 
-    // Try opening existing projection (raw to avoid recursion).
-    let needs_rebuild = marker_exists
-        || query::try_open_projection_raw(&db_path)?.is_none_or(|conn| {
-            // Check if projection is current by comparing cursor against
-            // shard content. If cursor is at 0 with no hash, the DB was
-            // freshly created and needs a full rebuild.
-            let (offset, hash) = query::get_projection_cursor(&conn).unwrap_or((0, None));
-            if offset == 0 && hash.is_none() {
-                true
-            } else {
-                // Check if cursor and shard content are out of sync (new events beyond cursor, or cursor overshoots after sync).
-                let mgr = crate::shard::ShardManager::new(bones_dir);
-                let total_bytes = mgr.total_content_len().unwrap_or(0);
-                let cursor = usize::try_from(offset).unwrap_or(0);
-                total_bytes != cursor
-            }
-        });
+    let needs_rebuild = projection_needs_rebuild(bones_dir, &events_dir, &db_path, marker_exists)?;
 
     if needs_rebuild {
         debug!("projection stale or missing, running incremental rebuild");
@@ -103,6 +87,43 @@ pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
 
     // Re-open after potential rebuild (raw to avoid recursion).
     query::try_open_projection_raw(&db_path)
+}
+
+fn projection_needs_rebuild(
+    bones_dir: &Path,
+    events_dir: &Path,
+    db_path: &Path,
+    marker_exists: bool,
+) -> Result<bool> {
+    if marker_exists {
+        return Ok(true);
+    }
+
+    let Some(conn) = query::try_open_projection_raw(db_path)? else {
+        return Ok(true);
+    };
+
+    let (offset, hash) = query::get_projection_cursor(&conn).unwrap_or((0, None));
+    if offset == 0 && hash.is_none() {
+        return Ok(true);
+    }
+
+    let (total_bytes, last_hash) =
+        incremental::event_log_cursor(events_dir).context("read event log cursor")?;
+    let cursor = usize::try_from(offset).unwrap_or(usize::MAX);
+    let stale = total_bytes != cursor || hash != last_hash;
+    if stale {
+        debug!(
+            cursor,
+            total_bytes,
+            cursor_hash = ?hash,
+            last_hash = ?last_hash,
+            bones_dir = %bones_dir.display(),
+            "projection cursor drift detected"
+        );
+    }
+
+    Ok(stale)
 }
 
 fn configure_connection(conn: &Connection) -> anyhow::Result<()> {
@@ -196,6 +217,29 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path().join("bones-projection.sqlite3");
         (dir, path)
+    }
+
+    fn make_create(item_id: &str, title: &str, ts: i64) -> Event {
+        Event {
+            wall_ts_us: ts,
+            agent: "test-agent".to_string(),
+            itc: "itc:AQ".to_string(),
+            parents: vec![],
+            event_type: EventType::Create,
+            item_id: ItemId::new_unchecked(item_id),
+            data: EventData::Create(CreateData {
+                title: title.to_string(),
+                kind: Kind::Task,
+                size: None,
+                urgency: Urgency::Default,
+                labels: vec![],
+                parent: None,
+                causation: None,
+                description: None,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: String::new(),
+        }
     }
 
     #[test]
@@ -309,5 +353,71 @@ mod tests {
             !marker.exists(),
             "dirty marker should be cleared after successful recovery"
         );
+    }
+
+    #[test]
+    fn ensure_projection_rebuilds_when_log_hash_changes_without_size_change() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard");
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+
+        let mut first = make_create("bn-alpha", "first title", 1_700_000_000_000_000);
+        let first_line = writer::write_event(&mut first).expect("serialize first create");
+        shard_mgr
+            .append_raw(year, month, &first_line)
+            .expect("append first event");
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        let first_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE item_id = 'bn-alpha'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count first item");
+        assert_eq!(first_count, 1);
+        drop(conn);
+
+        let mut second = make_create("bn-bravo", "other title", 1_700_000_000_000_000);
+        let second_line = writer::write_event(&mut second).expect("serialize second create");
+        assert_ne!(first.event_hash, second.event_hash);
+        assert_eq!(
+            first_line.len(),
+            second_line.len(),
+            "test setup needs a same-length event-log rewrite"
+        );
+
+        let shard_path = shard_mgr.shard_path(year, month);
+        let original_content = std::fs::read_to_string(&shard_path).expect("read shard");
+        let event_start = original_content
+            .rfind(&first_line)
+            .expect("original event line present");
+        let replacement = format!("{}{}", &original_content[..event_start], second_line);
+        assert_eq!(original_content.len(), replacement.len());
+        std::fs::write(&shard_path, replacement).expect("rewrite shard with same byte length");
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection after rewrite")
+            .expect("projection connection");
+        let counts: (i64, i64) = conn
+            .query_row(
+                "SELECT
+                    SUM(CASE WHEN item_id = 'bn-alpha' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN item_id = 'bn-bravo' THEN 1 ELSE 0 END)
+                 FROM items",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("count rewritten items");
+        assert_eq!(counts, (0, 1));
     }
 }

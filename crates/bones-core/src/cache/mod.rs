@@ -34,6 +34,12 @@ pub mod manager;
 pub mod reader;
 pub mod writer;
 
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+
 pub use codec::{
     ColumnCodec, EventTypeCodec, InternedStringCodec, ItemIdCodec, RawBytesCodec, TimestampCodec,
     ValueCodec,
@@ -135,6 +141,57 @@ fn checksum(data: &[u8]) -> u64 {
         }
     }
     !crc
+}
+
+/// Compute the fast freshness fingerprint used for event-log cache invalidation.
+///
+/// The fingerprint covers `.events` filenames, byte lengths, and mtimes. It is
+/// stored in the cache header's `created_at_us` field by cache rebuild paths.
+pub(crate) fn fingerprint_dir(dir: &Path) -> Result<u64> {
+    if !dir.exists() {
+        return Ok(0);
+    }
+
+    let mut entries: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+
+    let read_dir = fs::read_dir(dir).with_context(|| format!("read dir {}", dir.display()))?;
+
+    for entry in read_dir {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if !name.ends_with(".events") {
+            continue;
+        }
+
+        let meta = entry.metadata()?;
+        let size = meta.len();
+        let mtime_ns = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+
+        entries.insert(name, (size, mtime_ns));
+    }
+
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for (name, (size, mtime)) in &entries {
+        for byte in name.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        for byte in size.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        for byte in mtime.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+
+    Ok(hash)
 }
 
 // ---------------------------------------------------------------------------

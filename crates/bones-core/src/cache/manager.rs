@@ -17,12 +17,12 @@
 //! header (repurposed — the actual wall-clock creation time is not critical).
 //! This avoids adding a separate metadata file.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::cache::fingerprint_dir;
 use crate::cache::reader::CacheReader;
 use crate::cache::writer::rebuild_cache;
 use crate::event::Event;
@@ -246,67 +246,6 @@ impl CacheManager {
 }
 
 // ---------------------------------------------------------------------------
-// Fingerprinting
-// ---------------------------------------------------------------------------
-
-/// Compute a fingerprint over `.events` files in a directory.
-///
-/// Uses a sorted `BTreeMap` of (filename → (size, `mtime_ns`)) tuples, then
-/// hashes them with a simple FNV-1a-style combiner. Returns 0 if the
-/// directory doesn't exist or is empty.
-fn fingerprint_dir(dir: &Path) -> Result<u64> {
-    if !dir.exists() {
-        return Ok(0);
-    }
-
-    let mut entries: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-
-    let read_dir = fs::read_dir(dir).with_context(|| format!("read dir {}", dir.display()))?;
-
-    for entry in read_dir {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        // Only consider .events files (skip manifests, symlinks, etc.)
-        if !name.ends_with(".events") {
-            continue;
-        }
-
-        // Resolve symlinks for metadata
-        let meta = entry.metadata()?;
-        let size = meta.len();
-        let mtime_ns = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
-
-        entries.insert(name, (size, mtime_ns));
-    }
-
-    // Hash the sorted entries
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
-    for (name, (size, mtime)) in &entries {
-        for byte in name.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV-1a prime
-        }
-        // Mix in size
-        for byte in size.to_le_bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-        // Mix in mtime
-        for byte in mtime.to_le_bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-    }
-
-    Ok(hash)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -509,6 +448,24 @@ mod tests {
 
         assert_eq!(stats.total_events, 1);
         assert!(cache_path.exists());
+    }
+
+    #[test]
+    fn rebuild_creates_fresh_cache_for_manager_fast_path() {
+        let e1 = make_event("bn-001", 1000);
+        let e2 = make_event("bn-002", 2000);
+        let (_tmp, events_dir, cache_path) = setup_bones(&[e1, e2]);
+
+        let mgr = CacheManager::new(&events_dir, &cache_path);
+        mgr.rebuild().unwrap();
+
+        assert!(
+            mgr.is_fresh().unwrap(),
+            "manual rebuild should write the freshness fingerprint expected by CacheManager"
+        );
+        let result = mgr.load_events().unwrap();
+        assert_eq!(result.source, LoadSource::Cache);
+        assert_eq!(result.events.len(), 2);
     }
 
     // === fingerprinting ===================================================

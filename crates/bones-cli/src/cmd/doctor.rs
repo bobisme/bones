@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bones_core::event::parser::{ParsedLine, parse_line};
 use bones_core::event::writer::SHARD_HEADER;
 use bones_core::shard::{ShardManager, validate_shard_header};
@@ -360,13 +360,14 @@ fn check_projection_drift(
 
     let (cursor_offset, cursor_hash) = bones_core::db::query::get_projection_cursor(&conn)?;
 
-    let shard_mgr = ShardManager::new(bones_dir);
-    let total_len = shard_mgr
-        .total_content_len()
-        .map_err(|e| anyhow::anyhow!("total_content_len: {e}"))?;
+    let events_dir = bones_dir.join("events");
+    let (total_len, expected_last_hash) =
+        bones_core::db::incremental::event_log_cursor(&events_dir)
+            .context("read event log cursor")?;
     let expected_offset = i64::try_from(total_len).unwrap_or(i64::MAX);
 
     let offset_ok = cursor_offset == expected_offset;
+    let hash_ok = cursor_hash == expected_last_hash;
     let mut details = vec![format!(
         "cursor_offset={cursor_offset} expected={expected_offset} match={offset_ok}"
     )];
@@ -374,8 +375,12 @@ fn check_projection_drift(
     if let Some(hash) = &cursor_hash {
         details.push(format!("cursor_hash={hash}"));
     }
+    if let Some(hash) = &expected_last_hash {
+        details.push(format!("expected_last_hash={hash}"));
+    }
+    details.push(format!("cursor_hash_match={hash_ok}"));
 
-    if offset_ok {
+    if offset_ok && hash_ok {
         return Ok(DoctorSection {
             name: "projection_drift".into(),
             status: SectionStatus::Ok,
