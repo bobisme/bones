@@ -15,6 +15,15 @@ fn bn_cmd(dir: &Path) -> Command {
     cmd
 }
 
+fn bn_cmd_default_logging(dir: &Path) -> Command {
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("bn"));
+    cmd.current_dir(dir);
+    cmd.env("AGENT", "test-agent");
+    cmd.env_remove("BONES_LOG");
+    cmd.env_remove("OTEL_EXPORTER_OTLP_ENDPOINT");
+    cmd
+}
+
 fn init_project(dir: &Path) {
     bn_cmd(dir).args(["init"]).assert().success();
 }
@@ -99,6 +108,64 @@ fn dup_json_returns_candidates_for_similar_items() {
     let json: Value = serde_json::from_slice(&output.stdout).expect("dup --json must parse");
     assert_eq!(json["source_id"], source);
     assert!(json["candidates"].is_array());
+}
+
+#[test]
+fn update_rebuilds_missing_projection_before_resolving_item() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let id = create_item(dir.path(), "Projection warmup target");
+    fs::remove_file(dir.path().join(".bones/bones.db")).expect("remove projection db");
+
+    let output = bn_cmd(dir.path())
+        .args([
+            "update",
+            &id,
+            "--title",
+            "Updated without prior read",
+            "--json",
+        ])
+        .output()
+        .expect("update should not crash");
+    assert!(
+        output.status.success(),
+        "update failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("update --json must parse");
+    assert_eq!(json["results"][0]["id"], id);
+    assert_eq!(json["results"][0]["ok"], true);
+}
+
+#[test]
+fn projection_rebuild_logs_do_not_pollute_json_stdout() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    create_item(dir.path(), "JSON output target");
+    fs::remove_file(dir.path().join(".bones/bones.db")).expect("remove projection db");
+
+    let output = bn_cmd_default_logging(dir.path())
+        .args(["list", "--json", "--all"])
+        .output()
+        .expect("list should not crash");
+    assert!(
+        output.status.success(),
+        "list failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.trim_start().starts_with("INFO"),
+        "stdout must begin with JSON, got: {stdout}"
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).expect("list --json must parse");
+    assert_eq!(json["total"].as_u64().unwrap_or(0), 1);
 }
 
 #[test]

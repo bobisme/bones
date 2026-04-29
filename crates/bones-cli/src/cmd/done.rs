@@ -9,6 +9,7 @@
 //! move event for the parent goal.
 
 use crate::agent;
+use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
@@ -19,6 +20,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(test)]
 use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
@@ -346,9 +348,7 @@ pub fn run_done(
     })?;
 
     // 3. Open projection DB
-    let db_path = bones_dir.join("bones.db");
-    let conn = db::open_projection(&db_path)?;
-    let _ = project::ensure_tracking_table(&conn);
+    let conn = open_projection_for_mutation(&bones_dir)?;
     let shard_mgr = ShardManager::new(&bones_dir);
 
     // 4. Process each item independently

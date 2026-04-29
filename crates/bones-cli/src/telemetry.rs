@@ -199,7 +199,12 @@ fn init_noop() -> TelemetryGuard {
     let _ = match format.as_str() {
         "json" => tracing_subscriber::registry()
             .with(filter)
-            .with(tracing_subscriber::fmt::layer().json().with_ansi(false))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(false)
+                    .with_writer(std::io::stderr),
+            )
             .try_init(),
         _ => tracing_subscriber::registry()
             .with(filter)
@@ -211,7 +216,8 @@ fn init_noop() -> TelemetryGuard {
                     .with_thread_ids(false)
                     .with_thread_names(false)
                     .with_file(false)
-                    .with_line_number(false),
+                    .with_line_number(false)
+                    .with_writer(std::io::stderr),
             )
             .try_init(),
     };

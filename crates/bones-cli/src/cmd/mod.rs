@@ -52,3 +52,14 @@ pub mod update;
 pub mod urgency;
 pub mod verify;
 pub mod warm_search;
+
+fn open_projection_for_mutation(
+    bones_dir: &std::path::Path,
+) -> anyhow::Result<rusqlite::Connection> {
+    let db_path = bones_dir.join("bones.db");
+    let Some(conn) = bones_core::db::query::try_open_projection(&db_path)? else {
+        anyhow::bail!("projection database not found; run `bn init` or `bn admin rebuild`");
+    };
+    let _ = bones_core::db::project::ensure_tracking_table(&conn);
+    Ok(conn)
+}
