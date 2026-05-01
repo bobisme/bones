@@ -569,8 +569,7 @@ pub fn auto_recover(bones_dir: &Path) -> Result<HealthCheckResult, RecoveryError
         if cache_events_bin.exists() {
             // Validate cache header (first 4 bytes should be magic)
             let is_valid = fs::read(&cache_events_bin)
-                .map(|data| data.len() >= 4 && &data[..4] == b"BCEV")
-                .unwrap_or(false);
+                .is_ok_and(|data| data.len() >= 4 && &data[..4] == b"BCEV");
 
             if !is_valid {
                 match recover_corrupt_cache(&cache_events_bin) {

@@ -235,9 +235,7 @@ fn probe_binary_cache(events_bin: &Path) -> bool {
     let available = match std::fs::File::open(events_bin) {
         Ok(mut f) => {
             let mut magic = [0u8; 4];
-            f.read_exact(&mut magic)
-                .map(|()| magic == CACHE_MAGIC)
-                .unwrap_or(false)
+            f.read_exact(&mut magic).is_ok() && magic == CACHE_MAGIC
         }
         Err(e) => {
             debug!(error = %e, "binary_cache probe: cannot open file");

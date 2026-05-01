@@ -1023,8 +1023,7 @@ fn current_year_month() -> (i32, u32) {
 fn system_time_us() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_micros() as i64)
 }
 
 /// Check if `path` is a legacy forwarding-pointer shard.

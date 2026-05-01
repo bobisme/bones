@@ -287,8 +287,8 @@ fn build_report(project_root: &Path) -> Result<DiagnoseReport> {
     }
 
     let orphan_item_ids: Vec<String> = non_create_event_counts
-        .iter()
-        .filter_map(|(item_id, _)| {
+        .keys()
+        .filter_map(|item_id| {
             if created_items.contains(item_id) {
                 None
             } else {

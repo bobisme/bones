@@ -49,9 +49,7 @@ impl WeightPosterior {
         let alpha = sanitize_shape(self.alpha_param, PRIOR_ALPHA);
         let beta = sanitize_shape(self.beta_param, PRIOR_BETA);
 
-        Beta::new(alpha, beta)
-            .map(|distribution| distribution.sample(rng))
-            .unwrap_or(0.5)
+        Beta::new(alpha, beta).map_or(0.5, |distribution| distribution.sample(rng))
     }
 }
 

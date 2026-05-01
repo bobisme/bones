@@ -365,16 +365,14 @@ fn dfs_has_cycle(graph: &BlockingGraph, node: &str, color: &mut HashMap<String, 
     color.insert(node.to_string(), Color::Gray);
 
     for neighbor in graph.get_blockers(node) {
-        match color.get(neighbor) {
-            Some(Color::White) => {
-                if dfs_has_cycle(graph, neighbor, color) {
-                    return true;
-                }
+        match color.get(neighbor).copied() {
+            Some(Color::White) if dfs_has_cycle(graph, neighbor, color) => {
+                return true;
             }
             Some(Color::Gray) => {
                 return true; // Back edge found — cycle exists.
             }
-            _ => {} // Black — no cycle through this edge.
+            _ => {} // White (no cycle below) or Black — no cycle through this edge.
         }
     }
 

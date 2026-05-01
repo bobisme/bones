@@ -548,11 +548,10 @@ impl ListView {
                 self.edit_link_modal = None;
                 self.input_mode = InputMode::Normal;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if !modal.links.is_empty() {
+            KeyCode::Char('j') | KeyCode::Down
+                if !modal.links.is_empty() => {
                     modal.list_idx = (modal.list_idx + 1).min(modal.links.len() - 1);
                 }
-            }
             KeyCode::Char('k') | KeyCode::Up => {
                 modal.list_idx = modal.list_idx.saturating_sub(1);
             }
@@ -1234,7 +1233,7 @@ impl ListView {
                     created_at_us: comment.created_at_us,
                 })
                 .collect();
-        comments.sort_by(|a, b| a.created_at_us.cmp(&b.created_at_us));
+        comments.sort_by_key(|a| a.created_at_us);
 
         Ok(DetailItem {
             id: item.item_id,

@@ -1494,18 +1494,16 @@ fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key
                 *col = 0;
             }
         }
-        KeyCode::Up => {
-            if *row > 0 {
+        KeyCode::Up
+            if *row > 0 => {
                 *row -= 1;
                 *col = (*col).min(char_len(&lines[*row]));
             }
-        }
-        KeyCode::Down => {
-            if *row + 1 < lines.len() {
+        KeyCode::Down
+            if *row + 1 < lines.len() => {
                 *row += 1;
                 *col = (*col).min(char_len(&lines[*row]));
             }
-        }
         KeyCode::Home => *col = 0,
         KeyCode::End => *col = char_len(&lines[*row]),
         KeyCode::Enter => insert_newline(lines, row, col),
@@ -1514,12 +1512,11 @@ fn edit_multiline(lines: &mut Vec<String>, row: &mut usize, col: &mut usize, key
         }
         KeyCode::Delete => delete_multiline(lines, row, col),
         KeyCode::Char('\n' | '\r') => insert_newline(lines, row, col),
-        KeyCode::Char(c) => {
-            if !ctrl && !alt {
+        KeyCode::Char(c)
+            if !ctrl && !alt => {
                 insert_char_at(&mut lines[*row], *col, c);
                 *col += 1;
             }
-        }
         _ => {}
     }
 }
@@ -1701,26 +1698,24 @@ fn edit_single_line_readline(text: &mut String, cursor: &mut usize, key: KeyEven
         KeyCode::Right => *cursor = (*cursor + 1).min(char_len(text)),
         KeyCode::Home => *cursor = 0,
         KeyCode::End => *cursor = char_len(text),
-        KeyCode::Backspace => {
-            if *cursor > 0 {
+        KeyCode::Backspace
+            if *cursor > 0 => {
                 let remove_idx = *cursor - 1;
                 remove_char_at(text, remove_idx);
                 *cursor = remove_idx;
                 return true;
             }
-        }
         KeyCode::Delete => {
             let before = text.len();
             remove_char_at(text, *cursor);
             return text.len() != before;
         }
-        KeyCode::Char(c) => {
-            if !ctrl && !alt && !matches!(c, '\n' | '\r') {
+        KeyCode::Char(c)
+            if !ctrl && !alt && !matches!(c, '\n' | '\r') => {
                 insert_char_at(text, *cursor, c);
                 *cursor += 1;
                 return true;
             }
-        }
         _ => {}
     }
     false

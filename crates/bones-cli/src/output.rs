@@ -192,11 +192,9 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
                 }
                 need_newline = false;
             }
-            Event::Start(Tag::Paragraph) => {
-                if need_newline {
-                    writeln!(w)?;
-                    need_newline = false;
-                }
+            Event::Start(Tag::Paragraph) if need_newline => {
+                writeln!(w)?;
+                need_newline = false;
             }
             Event::End(TagEnd::Paragraph) => {
                 if !line_buf.is_empty() {
@@ -232,11 +230,9 @@ pub fn pretty_markdown(w: &mut dyn Write, text: &str) -> io::Result<()> {
                     let _ = write!(line_buf, "`{code}`");
                 }
             }
-            Event::SoftBreak | Event::HardBreak => {
-                if !line_buf.is_empty() {
-                    writeln!(w, "{line_buf}")?;
-                    line_buf.clear();
-                }
+            Event::SoftBreak | Event::HardBreak if !line_buf.is_empty() => {
+                writeln!(w, "{line_buf}")?;
+                line_buf.clear();
             }
             Event::Rule => {
                 if !line_buf.is_empty() {
