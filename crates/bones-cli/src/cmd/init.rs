@@ -5,7 +5,7 @@ use crate::cmd::bones_gitignore::ensure_bones_gitignore;
 use crate::git;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 use anyhow::{Context as _, Result};
-use chrono::Local;
+use chrono::Utc;
 use clap::Args;
 use std::path::Path;
 
@@ -84,7 +84,7 @@ pub fn run_init(args: &InitArgs, output: OutputMode, project_root: &Path) -> Res
     })?;
 
     // Create initial shard named for current month (YYYY-MM.events)
-    let shard_name = Local::now().format("%Y-%m.events").to_string();
+    let shard_name = Utc::now().format("%Y-%m.events").to_string();
     let shard_path = events_dir.join(&shard_name);
     std::fs::write(&shard_path, SHARD_HEADER)
         .with_context(|| format!("Failed to write shard file: {}", shard_path.display()))?;
@@ -361,7 +361,7 @@ mod tests {
         .expect("init should succeed");
 
         // Read the active shard directly
-        let expected_name = Local::now().format("%Y-%m.events").to_string();
+        let expected_name = Utc::now().format("%Y-%m.events").to_string();
         let shard_path = root.join(".bones/events").join(&expected_name);
         let content = fs::read_to_string(&shard_path).expect("shard readable");
         assert!(
@@ -389,7 +389,7 @@ mod tests {
         )
         .expect("init should succeed");
 
-        let expected_name = Local::now().format("%Y-%m.events").to_string();
+        let expected_name = Utc::now().format("%Y-%m.events").to_string();
         let shard_path = root.join(".bones/events").join(&expected_name);
         assert!(
             shard_path.is_file(),
