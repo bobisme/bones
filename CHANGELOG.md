@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.24.4 - 2026-04-30
+
+### Fixed
+
+- **Rebuild projection before mutations** — `bn do`, `bn done`, `bn reopen`,
+  `bn update`, and `bn archive` now refresh the projection before applying
+  state changes, preventing mutations from being applied against a stale
+  in-memory view.
+- **UTC consistency for shard naming** — `bn init` now uses UTC (matching
+  shard rotation and event timestamps) instead of local time. Removes a
+  month-boundary inconsistency where init could create a shard named for
+  a different month than the one the rotator would select.
+
 ## v0.24.3 - 2026-04-28
 
 ### Fixed
