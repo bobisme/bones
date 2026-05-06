@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.24.5 - 2026-05-06
+
+### Improved
+
+- **`bn next` and `bn triage` now name the bottleneck when parent-blocked
+  propagation suppresses every leaf.** Previously, on projects where a chain
+  of `goal A blocks goal B` edges fenced off all descendants, `bn next` just
+  said "(no unblocked items ready right now)" and agents got stuck. The
+  empty-state output now reports how many leaves are suppressed and lists
+  the top blocked/punted ancestors driving the suppression. `bn triage`
+  gains a "Blocking Ancestors" section between Blocked Hubs and Quick Wins
+  with the same data, plus a `parent-blocked-chain` advice line in text
+  mode. The propagation rule itself is unchanged.
+
 ## v0.24.4 - 2026-04-30
 
 ### Fixed
