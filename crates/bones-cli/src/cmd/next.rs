@@ -19,7 +19,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::agent;
 use crate::cmd::do_cmd;
-use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
+use crate::cmd::triage_support::{
+    BlockingAncestor, RankedItem, blocking_ancestor_reason, build_triage_snapshot,
+    compute_blocking_ancestors,
+};
 use crate::output::{CliError, OutputMode, render, render_error, render_mode};
 
 /// Scheduling mode for multi-agent assignments.
@@ -77,6 +80,11 @@ struct NextAssignment {
 #[derive(Debug, Serialize)]
 struct EmptyNext {
     message: String,
+    /// Ancestors causing parent-blocked propagation, sorted by suppressed
+    /// descendant count desc. Empty when emptiness is not caused by
+    /// propagation (e.g. project simply has no active work).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    bottlenecks: Vec<BlockingAncestor>,
 }
 
 /// Execute `bn next`.
@@ -146,12 +154,20 @@ pub fn run_next(
 
     let snapshot = build_triage_snapshot(&conn, chrono::Utc::now().timestamp_micros())?;
     if snapshot.unblocked_ranked.is_empty() {
-        let empty = EmptyNext {
-            message: "No unblocked items are currently ready".to_string(),
+        let total_suppressed = snapshot.parent_block_origin.len();
+        let bottlenecks = compute_blocking_ancestors(&snapshot);
+        let message = if bottlenecks.is_empty() {
+            "No unblocked items are currently ready".to_string()
+        } else {
+            format!(
+                "No unblocked items are currently ready. {total_suppressed} ready leaf(ves) are suppressed by parent-blocked propagation; close or unblock the items listed below to release them."
+            )
         };
-        return render(output, &empty, |_, w| {
-            writeln!(w, "(no unblocked items ready right now)")
-        });
+        let empty = EmptyNext {
+            message,
+            bottlenecks,
+        };
+        return render_mode(output, &empty, render_empty_text, render_empty_human);
     }
 
     // Build a set of IDs that need decomposition for quick lookup.
@@ -196,6 +212,7 @@ pub fn run_next(
             // Every unblocked item needs decomposition — tell the agent.
             let empty = EmptyNext {
                 message: "All unblocked items need decomposition into subtasks before work can begin. Run `bn triage` to see which items need breaking down.".to_string(),
+                bottlenecks: Vec::new(),
             };
             return render(output, &empty, |_, w| {
                 writeln!(
@@ -495,6 +512,54 @@ fn parse_assignment_count(count: usize) -> Result<usize, CliError> {
     }
 
     Ok(count)
+}
+
+fn render_empty_text(payload: &EmptyNext, w: &mut dyn Write) -> std::io::Result<()> {
+    if payload.bottlenecks.is_empty() {
+        return writeln!(w, "(no unblocked items ready right now)");
+    }
+    writeln!(w, "advice\tparent-blocked-chain\t{}", payload.message)?;
+    writeln!(w, "ID\tKIND\tREASON\tSUPPRESSES\tTITLE")?;
+    for b in &payload.bottlenecks {
+        writeln!(
+            w,
+            "{}\t{}\t{}\t{}\t{}",
+            b.id,
+            b.kind,
+            blocking_ancestor_reason(b),
+            b.suppressed_descendants,
+            b.title,
+        )?;
+    }
+    Ok(())
+}
+
+fn render_empty_human(payload: &EmptyNext, w: &mut dyn Write) -> std::io::Result<()> {
+    if payload.bottlenecks.is_empty() {
+        return writeln!(w, "(no unblocked items ready right now)");
+    }
+    writeln!(w, "{}", payload.message)?;
+    writeln!(w)?;
+    writeln!(w, "Bottleneck ancestors")?;
+    writeln!(w, "{:-<88}", "")?;
+    writeln!(
+        w,
+        "{:<10}  {:<6}  {:>10}  {:<28}  TITLE",
+        "ID", "KIND", "SUPPRESSES", "REASON"
+    )?;
+    writeln!(w, "{:-<88}", "")?;
+    for b in &payload.bottlenecks {
+        writeln!(
+            w,
+            "{:<10}  {:<6}  {:>10}  {:<28}  {}",
+            b.id,
+            b.kind,
+            b.suppressed_descendants,
+            blocking_ancestor_reason(b),
+            b.title,
+        )?;
+    }
+    Ok(())
 }
 
 fn score_bounds(items: &[RankedItem]) -> (f64, f64) {

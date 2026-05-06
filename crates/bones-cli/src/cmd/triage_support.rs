@@ -45,6 +45,82 @@ pub struct RankedItem {
     pub updated_at_us: i64,
 }
 
+/// An ancestor that suppresses ready descendants via parent-blocked propagation.
+/// Surfaced by `bn next` (when there are no unblocked items) and by `bn triage`
+/// to point users at the most leveraged thing to unblock.
+#[derive(Debug, Clone, Serialize)]
+pub struct BlockingAncestor {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub state: String,
+    pub urgency: String,
+    /// Number of dependency-graph blockers on this ancestor (before
+    /// parent-blocked propagation). Zero when suppression originates from
+    /// punt urgency rather than a `blocks` edge.
+    pub direct_blockers: usize,
+    /// Number of ready descendants this ancestor suppresses via propagation.
+    pub suppressed_descendants: usize,
+}
+
+/// Maximum rows surfaced in `bn next` empty-state and `bn triage` bottleneck
+/// section.
+pub const BLOCKING_ANCESTOR_MAX_ROWS: usize = 5;
+
+/// Aggregate parent-block origins from a snapshot into a sorted bottleneck
+/// list. Returns an empty vec when no items were suppressed by propagation.
+pub fn compute_blocking_ancestors(snapshot: &TriageSnapshot) -> Vec<BlockingAncestor> {
+    if snapshot.parent_block_origin.is_empty() {
+        return Vec::new();
+    }
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for ancestor in snapshot.parent_block_origin.values() {
+        *counts.entry(ancestor.as_str()).or_insert(0) += 1;
+    }
+    let by_id: HashMap<&str, &RankedItem> = snapshot
+        .ranked
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect();
+    let mut rows: Vec<BlockingAncestor> = counts
+        .into_iter()
+        .filter_map(|(ancestor_id, count)| {
+            let item = by_id.get(ancestor_id)?;
+            Some(BlockingAncestor {
+                id: item.id.clone(),
+                title: item.title.clone(),
+                kind: item.kind.clone(),
+                state: item.state.clone(),
+                urgency: format!("{:?}", item.urgency).to_ascii_lowercase(),
+                direct_blockers: snapshot
+                    .direct_blocker_counts
+                    .get(ancestor_id)
+                    .copied()
+                    .unwrap_or(0),
+                suppressed_descendants: count,
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.suppressed_descendants
+            .cmp(&a.suppressed_descendants)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    rows.truncate(BLOCKING_ANCESTOR_MAX_ROWS);
+    rows
+}
+
+/// Human-readable reason describing why an ancestor blocks its descendants.
+pub fn blocking_ancestor_reason(b: &BlockingAncestor) -> String {
+    if b.urgency == "punt" {
+        "punted".to_string()
+    } else if b.direct_blockers > 0 {
+        format!("blocked by {} active dep(s)", b.direct_blockers)
+    } else {
+        "blocked".to_string()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TriageSnapshot {
     pub ranked: Vec<RankedItem>,
@@ -55,6 +131,14 @@ pub struct TriageSnapshot {
     pub cycles: Vec<Vec<String>>,
     /// IDs suppressed due to punt (directly punted or descendants of punted goals).
     pub punt_suppressed: HashSet<String>,
+    /// For each item suppressed solely by parent-blocked propagation, the
+    /// nearest blocked-or-punted ancestor along its parent chain. Items with
+    /// their own direct blockers are not tracked here.
+    pub parent_block_origin: HashMap<String, String>,
+    /// Direct blocker counts as loaded from the dependency graph, before
+    /// parent-blocked propagation overlays inherited blocker entries. Use this
+    /// when reporting "blocked by N active deps" for the originating ancestor.
+    pub direct_blocker_counts: HashMap<String, usize>,
 }
 
 /// Number of days without an update before a "doing" item is considered stale.
@@ -101,17 +185,22 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
             stale_in_progress: Vec::new(),
             cycles,
             punt_suppressed: HashSet::new(),
+            parent_block_origin: HashMap::new(),
+            direct_blocker_counts: HashMap::new(),
         });
     }
 
     let mut unresolved_blockers = load_unresolved_blocker_counts(conn)?;
+    let direct_blocker_counts = unresolved_blockers.clone();
     let active_unblocks = load_active_unblocks_counts(conn)?;
 
     // Propagate blocked status from parent goals to their children.
     // If a goal is blocked (e.g. Phase I blocks Phase II), all children of
     // Phase II should also be treated as blocked so triage doesn't recommend
     // them before their parent's blockers are resolved.
-    let punt_suppressed = propagate_parent_blocked(&active_items, &mut unresolved_blockers);
+    let propagation = propagate_parent_blocked(&active_items, &mut unresolved_blockers);
+    let punt_suppressed = propagation.punt_suppressed;
+    let parent_block_origin = propagation.parent_block_origin;
     let urgency_by_id: HashMap<String, Urgency> = active_items
         .iter()
         .map(|item| {
@@ -371,6 +460,8 @@ pub fn build_triage_snapshot(conn: &Connection, now_us: i64) -> Result<TriageSna
         stale_in_progress,
         cycles,
         punt_suppressed,
+        parent_block_origin,
+        direct_blocker_counts,
     })
 }
 
@@ -607,6 +698,19 @@ fn is_active_state(state: &str) -> bool {
     !matches!(state, "done" | "archived")
 }
 
+/// Result of parent-block propagation.
+pub struct PropagationResult {
+    /// IDs suppressed due to punt (either directly punted or descendants of a
+    /// punted ancestor). These items should be excluded from all triage
+    /// sections, not just `unblocked_ranked`.
+    pub punt_suppressed: HashSet<String>,
+    /// For each descendant suppressed by inheriting a blocked ancestor, the
+    /// nearest blocked-or-punted ancestor encountered while walking up the
+    /// parent chain. Used to point users at the bottleneck when `bn next`
+    /// would otherwise return nothing.
+    pub parent_block_origin: HashMap<String, String>,
+}
+
 /// Walk parent chains and propagate blocked status downward.
 ///
 /// If a goal has `blocked_by_active > 0` or `urgency == "punt"`, every
@@ -614,14 +718,10 @@ fn is_active_state(state: &str) -> bool {
 /// blocker count so that triage treats it as blocked.  Punted goals are
 /// treated identically to blocked goals: their children should not surface
 /// in `triage` or `next` recommendations.
-///
-/// Returns the set of item IDs that are suppressed due to punt (either
-/// directly punted or descendants of a punted ancestor). These items should
-/// be excluded from all triage sections, not just `unblocked_ranked`.
 fn propagate_parent_blocked(
     active_items: &[query::QueryItem],
     unresolved_blockers: &mut HashMap<String, usize>,
-) -> HashSet<String> {
+) -> PropagationResult {
     // Build parent_id lookup for active items.
     let parent_of: HashMap<&str, &str> = active_items
         .iter()
@@ -649,6 +749,8 @@ fn propagate_parent_blocked(
         .map(|item| item.item_id.clone())
         .collect();
 
+    let mut parent_block_origin: HashMap<String, String> = HashMap::new();
+
     for item in active_items {
         // Only propagate to items that appear unblocked on their own.
         if unresolved_blockers.get(&item.item_id).copied().unwrap_or(0) > 0 {
@@ -666,6 +768,7 @@ fn propagate_parent_blocked(
             if ancestor_blocked || ancestor_punted {
                 // Ancestor is blocked or punted — suppress this descendant.
                 unresolved_blockers.insert(item.item_id.clone(), 1);
+                parent_block_origin.insert(item.item_id.clone(), pid.to_string());
                 if ancestor_punted {
                     punt_suppressed.insert(item.item_id.clone());
                 }
@@ -675,7 +778,10 @@ fn propagate_parent_blocked(
         }
     }
 
-    punt_suppressed
+    PropagationResult {
+        punt_suppressed,
+        parent_block_origin,
+    }
 }
 
 fn load_unresolved_blocker_counts(conn: &Connection) -> Result<HashMap<String, usize>> {
@@ -1353,6 +1459,115 @@ mod tests {
             !unblocked_ids.contains(&"bn-task2"),
             "Phase II task should be blocked (inherited from parent goal)"
         );
+    }
+
+    #[test]
+    fn parent_block_origin_records_nearest_blocked_ancestor() {
+        let conn = test_db();
+
+        // Phase I task is unblocked. Phase II blocked by Phase I; Phase III blocked by Phase II.
+        insert_goal_with_children(
+            &conn,
+            "bn-phase1",
+            "Phase I",
+            &[("bn-leaf1", "Phase 1 leaf")],
+        );
+        insert_goal_with_children(
+            &conn,
+            "bn-phase2",
+            "Phase II",
+            &[("bn-leaf2", "Phase 2 leaf")],
+        );
+        insert_goal_with_children(
+            &conn,
+            "bn-phase3",
+            "Phase III",
+            &[("bn-leaf3", "Phase 3 leaf")],
+        );
+        insert_blocks_edge(&conn, "bn-phase1", "bn-phase2");
+        insert_blocks_edge(&conn, "bn-phase2", "bn-phase3");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+
+        // Each suppressed leaf is recorded with its nearest blocked ancestor.
+        assert_eq!(
+            snapshot
+                .parent_block_origin
+                .get("bn-leaf2")
+                .map(String::as_str),
+            Some("bn-phase2"),
+            "leaf under Phase II should be suppressed by Phase II"
+        );
+        assert_eq!(
+            snapshot
+                .parent_block_origin
+                .get("bn-leaf3")
+                .map(String::as_str),
+            Some("bn-phase3"),
+            "leaf under Phase III should be suppressed by Phase III"
+        );
+        // Phase I leaf has no blocked ancestor and must NOT appear in the map.
+        assert!(
+            !snapshot.parent_block_origin.contains_key("bn-leaf1"),
+            "Phase I leaf is genuinely ready and should not be in parent_block_origin"
+        );
+
+        // direct_blocker_counts reflects pre-propagation graph state — Phase II and
+        // Phase III each have one blocker; Phase I has none; leaves have none.
+        assert_eq!(
+            snapshot.direct_blocker_counts.get("bn-phase2").copied(),
+            Some(1)
+        );
+        assert_eq!(
+            snapshot.direct_blocker_counts.get("bn-phase3").copied(),
+            Some(1)
+        );
+        assert!(!snapshot.direct_blocker_counts.contains_key("bn-phase1"));
+        assert!(!snapshot.direct_blocker_counts.contains_key("bn-leaf2"));
+    }
+
+    #[test]
+    fn compute_blocking_ancestors_aggregates_and_sorts() {
+        let conn = test_db();
+
+        // bn-blocked has 2 leaf children, blocked by bn-blocker.
+        // bn-other has 1 leaf child, blocked by bn-blocker.
+        // bn-blocker is unblocked but is a goal (so goals can hold work too).
+        insert_goal_with_children(&conn, "bn-blocker", "Blocker", &[]);
+        insert_goal_with_children(
+            &conn,
+            "bn-blocked",
+            "Big blocked",
+            &[("bn-c1", "child 1"), ("bn-c2", "child 2")],
+        );
+        insert_goal_with_children(&conn, "bn-other", "Small blocked", &[("bn-c3", "child 3")]);
+        insert_blocks_edge(&conn, "bn-blocker", "bn-blocked");
+        insert_blocks_edge(&conn, "bn-blocker", "bn-other");
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let ancestors = compute_blocking_ancestors(&snapshot);
+
+        assert_eq!(ancestors.len(), 2, "both blocked goals should appear");
+        // Sorted by suppressed descendants desc.
+        assert_eq!(ancestors[0].id, "bn-blocked");
+        assert_eq!(ancestors[0].suppressed_descendants, 2);
+        assert_eq!(ancestors[0].direct_blockers, 1);
+        assert_eq!(ancestors[0].kind, "goal");
+        assert_eq!(ancestors[1].id, "bn-other");
+        assert_eq!(ancestors[1].suppressed_descendants, 1);
+    }
+
+    #[test]
+    fn compute_blocking_ancestors_empty_when_no_propagation() {
+        let conn = test_db();
+        // A standalone unblocked goal with one task — no propagation occurs.
+        insert_goal_with_children(&conn, "bn-g", "Goal", &[("bn-t", "Task")]);
+
+        let snapshot = build_triage_snapshot(&conn, 100).expect("snapshot");
+        let ancestors = compute_blocking_ancestors(&snapshot);
+
+        assert!(ancestors.is_empty());
+        assert!(snapshot.parent_block_origin.is_empty());
     }
 
     #[test]

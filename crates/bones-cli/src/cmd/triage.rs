@@ -7,7 +7,10 @@ use serde::Serialize;
 
 use bones_core::db::query;
 
-use crate::cmd::triage_support::{RankedItem, build_triage_snapshot};
+use crate::cmd::triage_support::{
+    BlockingAncestor, RankedItem, blocking_ancestor_reason, build_triage_snapshot,
+    compute_blocking_ancestors,
+};
 use crate::output::{
     CliError, OutputMode, pretty_color_enabled, pretty_section, render_error, render_mode,
 };
@@ -96,6 +99,9 @@ pub fn run_triage(
     });
     blocked_hubs.truncate(5);
 
+    let blocking_ancestors = compute_blocking_ancestors(&snapshot);
+    let total_suppressed = snapshot.parent_block_origin.len();
+
     let mut quick_wins: Vec<&RankedItem> = snapshot
         .unblocked_ranked
         .iter()
@@ -129,6 +135,7 @@ pub fn run_triage(
         &top_picks,
         &actionable_blockers,
         &blocked_hubs,
+        &blocking_ancestors,
         &quick_wins,
         &needs_decomposition,
         &stale_in_progress,
@@ -146,6 +153,8 @@ pub fn run_triage(
                 &top_picks,
                 &actionable_blockers,
                 &blocked_hubs,
+                &blocking_ancestors,
+                total_suppressed,
                 &quick_wins,
                 &needs_decomposition,
                 &stale_in_progress,
@@ -159,6 +168,8 @@ pub fn run_triage(
                 &top_picks,
                 &actionable_blockers,
                 &blocked_hubs,
+                &blocking_ancestors,
+                total_suppressed,
                 &quick_wins,
                 &needs_decomposition,
                 &stale_in_progress,
@@ -174,6 +185,7 @@ fn build_rows(
     top_picks: &[&RankedItem],
     actionable_blockers: &[&RankedItem],
     blocked_hubs: &[&RankedItem],
+    blocking_ancestors: &[BlockingAncestor],
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
     stale_in_progress: &[&RankedItem],
@@ -186,6 +198,14 @@ fn build_rows(
     push_rows(&mut rows, top_picks, "top_pick");
     push_rows(&mut rows, actionable_blockers, "actionable_blocker");
     push_rows(&mut rows, blocked_hubs, "blocked_hub");
+    for b in blocking_ancestors {
+        rows.push(TriageRow {
+            id: b.id.clone(),
+            title: b.title.clone(),
+            score: 0.0,
+            section: "blocking_ancestor".to_string(),
+        });
+    }
     push_rows(&mut rows, quick_wins, "quick_win");
     push_rows(&mut rows, needs_decomposition, "needs_decomposition");
     push_rows(&mut rows, stale_in_progress, "stale_in_progress");
@@ -224,6 +244,8 @@ fn render_triage_human(
     top_picks: &[&RankedItem],
     actionable_blockers: &[&RankedItem],
     blocked_hubs: &[&RankedItem],
+    blocking_ancestors: &[BlockingAncestor],
+    total_suppressed: usize,
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
     stale_in_progress: &[&RankedItem],
@@ -280,6 +302,27 @@ fn render_triage_human(
                     DIM
                 )
             )?;
+        }
+    }
+    writeln!(w)?;
+
+    write_section_heading(w, "Blocking Ancestors", color)?;
+    if blocking_ancestors.is_empty() {
+        writeln!(w, "  (none)")?;
+    } else {
+        writeln!(
+            w,
+            "  {}",
+            style_if(
+                color,
+                &format!(
+                    "{total_suppressed} ready leaf(ves) suppressed by parent-blocked propagation"
+                ),
+                DIM
+            )
+        )?;
+        for b in blocking_ancestors {
+            write_blocking_ancestor_line(w, b, color)?;
         }
     }
     writeln!(w)?;
@@ -377,6 +420,27 @@ fn write_section_heading(w: &mut dyn Write, title: &str, color: bool) -> std::io
     }
 }
 
+fn write_blocking_ancestor_line(
+    w: &mut dyn Write,
+    b: &BlockingAncestor,
+    color: bool,
+) -> std::io::Result<()> {
+    use crossterm::style::Stylize;
+    let detail = format!(
+        "{} {}; suppresses {} leaf(ves)",
+        b.kind,
+        blocking_ancestor_reason(b),
+        b.suppressed_descendants,
+    );
+    if color {
+        writeln!(w, "  {} {}", b.id.clone().cyan(), b.title)?;
+        writeln!(w, "    {}", detail.dark_grey())
+    } else {
+        writeln!(w, "  {} {}", b.id, b.title)?;
+        writeln!(w, "    {detail}")
+    }
+}
+
 fn write_item_line(w: &mut dyn Write, item: &RankedItem, color: bool) -> std::io::Result<()> {
     use crossterm::style::Stylize;
     if color {
@@ -404,6 +468,8 @@ fn render_triage_text(
     top_picks: &[&RankedItem],
     actionable_blockers: &[&RankedItem],
     blocked_hubs: &[&RankedItem],
+    blocking_ancestors: &[BlockingAncestor],
+    total_suppressed: usize,
     quick_wins: &[&RankedItem],
     needs_decomposition: &[&RankedItem],
     stale_in_progress: &[&RankedItem],
@@ -439,6 +505,17 @@ fn render_triage_text(
             item.unblocks_active,
             format_score(item.score),
             item.title.replace('\t', " ")
+        )?;
+    }
+    for b in blocking_ancestors {
+        writeln!(
+            w,
+            "blocking_ancestor\t{}\t{} {}; suppresses {}\t-\t{}",
+            b.id,
+            b.kind,
+            blocking_ancestor_reason(b),
+            b.suppressed_descendants,
+            b.title.replace('\t', " "),
         )?;
     }
     for item in quick_wins {
@@ -481,9 +558,16 @@ fn render_triage_text(
             cycle.join(" -> ").replace('\t', " ")
         )?;
     }
+    if !blocking_ancestors.is_empty() {
+        writeln!(
+            w,
+            "advice\tparent-blocked-chain\t{total_suppressed} ready leaf(ves) suppressed by parent-blocked propagation; close or unblock items in section 'blocking_ancestor' to release them"
+        )?;
+    }
     if top_picks.is_empty()
         && actionable_blockers.is_empty()
         && blocked_hubs.is_empty()
+        && blocking_ancestors.is_empty()
         && quick_wins.is_empty()
         && needs_decomposition.is_empty()
         && stale_in_progress.is_empty()
@@ -631,11 +715,13 @@ mod tests {
 
         let stale: Vec<RankedItem> = vec![];
         let stale_refs: Vec<&RankedItem> = stale.iter().collect();
+        let blocking_ancestors: Vec<BlockingAncestor> = Vec::new();
 
         let rows = build_rows(
             &top_refs,
             &actionable_refs,
             &hub_refs,
+            &blocking_ancestors,
             &quick_refs,
             &decomp_refs,
             &stale_refs,
@@ -669,6 +755,7 @@ mod tests {
 
         let stale: Vec<RankedItem> = vec![];
         let stale_refs: Vec<&RankedItem> = stale.iter().collect();
+        let blocking_ancestors: Vec<BlockingAncestor> = Vec::new();
 
         let mut buf = Vec::new();
         render_triage_text(
@@ -676,6 +763,8 @@ mod tests {
             &top_refs,
             &actionable_refs,
             &hub_refs,
+            &blocking_ancestors,
+            0,
             &quick_refs,
             &decomp_refs,
             &stale_refs,
@@ -718,10 +807,12 @@ mod tests {
         ]);
         let score_map = HashMap::from([("bn-act".to_string(), 0.9), ("bn-hub".to_string(), 0.7)]);
 
+        let blocking_ancestors: Vec<BlockingAncestor> = Vec::new();
         let rows = build_rows(
             &empty_refs,
             &actionable_refs,
             &hub_refs,
+            &blocking_ancestors,
             &empty_refs,
             &empty_refs,
             &empty_refs,
@@ -748,6 +839,8 @@ mod tests {
             &empty_refs,
             &actionable_refs,
             &hub_refs,
+            &blocking_ancestors,
+            0,
             &empty_refs,
             &empty_refs,
             &empty_refs,
