@@ -345,6 +345,15 @@ enum Commands {
     #[command(hide = true)]
     #[command(
         next_help_heading = "Lifecycle",
+        about = "Revert a bone from doing back to open",
+        long_about = "Transition a bone in 'doing' state back to 'open' (e.g. when an agent abandons or hands off work mid-flight). Use `bn reopen` for done/archived bones instead.",
+        after_help = "EXAMPLES:\n    # Unstart a bone\n    bn unstart bn-abc\n\n    # Multiple bones\n    bn unstart bn-abc bn-def\n\n    # Machine-readable output\n    bn unstart bn-abc --format json"
+    )]
+    Unstart(cmd::unstart::UnstartArgs),
+
+    #[command(hide = true)]
+    #[command(
+        next_help_heading = "Lifecycle",
         about = "Reverse the last N events on a bone via compensating events",
         long_about = "Emit compensating events that reverse the effect of prior events.\n\n\
                       Does NOT delete or modify existing events — the append-only event log\n\
@@ -826,6 +835,8 @@ enum BoneCommand {
     Delete(cmd::delete::DeleteArgs),
     #[command(about = "Reopen a closed or archived bone")]
     Reopen(cmd::reopen::ReopenArgs),
+    #[command(about = "Revert a bone from doing back to open")]
+    Unstart(cmd::unstart::UnstartArgs),
     #[command(about = "Reverse recent events with compensating events")]
     Undo(cmd::undo::UndoArgs),
     #[command(about = "Add labels to a bone")]
@@ -1294,6 +1305,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Reopen(ref args) => timing::timed("cmd.reopen", || {
             cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
         }),
+        Commands::Unstart(ref args) => timing::timed("cmd.unstart", || {
+            cmd::unstart::run_unstart(args, cli.agent_flag(), output, &project_root)
+        }),
         Commands::Undo(ref args) => timing::timed("cmd.undo", || {
             cmd::undo::run_undo(args, cli.agent_flag(), output, &project_root)
         }),
@@ -1413,6 +1427,9 @@ fn main() -> anyhow::Result<()> {
             }
             BoneCommand::Reopen(args) => {
                 cmd::reopen::run_reopen(args, cli.agent_flag(), output, &project_root)
+            }
+            BoneCommand::Unstart(args) => {
+                cmd::unstart::run_unstart(args, cli.agent_flag(), output, &project_root)
             }
             BoneCommand::Undo(args) => {
                 cmd::undo::run_undo(args, cli.agent_flag(), output, &project_root)

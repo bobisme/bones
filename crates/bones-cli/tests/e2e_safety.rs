@@ -499,3 +499,63 @@ fn doctor_reports_projection_hash_drift_as_fail() {
         "doctor details should report cursor_hash_match=false"
     );
 }
+
+#[test]
+fn unstart_reverts_doing_to_open() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let id = create_item(dir.path(), "Abandoned mid-flight");
+    do_item(dir.path(), &id);
+    assert_eq!(get_item_state(dir.path(), &id), "doing");
+
+    let output = bn_cmd(dir.path())
+        .args(["unstart", &id, "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "unstart failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(get_item_state(dir.path(), &id), "open");
+
+    // Round-trip should work — agent can pick the bone back up.
+    do_item(dir.path(), &id);
+    assert_eq!(get_item_state(dir.path(), &id), "doing");
+}
+
+#[test]
+fn unstart_rejects_done_with_reopen_hint() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let id = create_item(dir.path(), "Already done");
+    done_item(dir.path(), &id);
+
+    let output = bn_cmd(dir.path()).args(["unstart", &id]).output().unwrap();
+    assert!(!output.status.success(), "unstart should fail on done item");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("bn reopen"),
+        "stderr should hint at bn reopen; got: {stderr}"
+    );
+}
+
+#[test]
+fn unstart_rejects_already_open() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    let id = create_item(dir.path(), "Still open");
+    let output = bn_cmd(dir.path()).args(["unstart", &id]).output().unwrap();
+
+    assert!(!output.status.success(), "unstart should fail on open item");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already open"),
+        "stderr should explain already-open state; got: {stderr}"
+    );
+}
