@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.24.6 - 2026-05-06
+
+### Added
+
+- **`bn unstart`** — revert a bone from `doing` back to `open`. Closes the
+  gap between `bn do` (open → doing) and `bn reopen` (done/archived → open):
+  there was no first-class way to walk back a `bn do` when an agent
+  abandoned or handed off work mid-flight, and the workaround
+  (`bn done` then `bn reopen`) round-tripped through `done` and polluted
+  the event log with a spurious closure. `bn unstart <id> [<id>...]`
+  emits an `item.move` event with `{"unstart": true}` in extra fields so
+  downstream filters can distinguish a true reversion. Available as both
+  `bn unstart` and `bn bone unstart`. Rejects `done`/`archived` with a
+  hint to use `bn reopen` instead.
+
 ## v0.24.5 - 2026-05-06
 
 ### Improved
