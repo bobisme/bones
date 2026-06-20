@@ -7,3 +7,7 @@ fuzz/Cargo.lock
 fuzz/artifacts/
 fuzz/corpus/
 fuzz/coverage/
+# maw admin tree (consolidated layout) — runtime/admin only
+/.maw/
+/.manifold/
+/repo.git/
