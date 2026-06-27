@@ -7,3 +7,5 @@ events/*.events merge=union
 # Never union them — that corrupts the integrity record. Let merges surface a
 # conflict; regenerate with `bn verify` / rebuild after merging a sealed shard.
 events/*.manifest -merge
+
+events/** merge=union
