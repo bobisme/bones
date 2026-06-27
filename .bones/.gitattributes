@@ -1,2 +1,9 @@
 # bones: merge policy for event logs
-events/** merge=union
+# Event logs are append-only and replay order-independent: union concatenates
+# both sides' new lines (duplicates dedupe by event hash on replay).
+events/*.events merge=union
+
+# Manifests are single coherent snapshots (count + byte_len + file_hash).
+# Never union them — that corrupts the integrity record. Let merges surface a
+# conflict; regenerate with `bn verify` / rebuild after merging a sealed shard.
+events/*.manifest -merge
