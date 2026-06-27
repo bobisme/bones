@@ -38,26 +38,67 @@ pub fn init() {
     }
 
     let gitattributes_path = bones_dir.join(".gitattributes");
-    let attr_line = "events/** merge=union\n";
-    let legacy_attr = "events merge=union";
+    let events_entry = "events/*.events merge=union";
+    let manifest_entry = "events/*.manifest -merge";
+    // Patterns superseded by the scoped entries above. `events merge=union`
+    // matched only a file literally named `events`; `events/** merge=union`
+    // was over-broad and (wrongly) union-merged the `.manifest` snapshots.
+    let legacy_bare = "events merge=union";
+    let legacy_glob = "events/** merge=union";
+    let managed_block = "\
+# bones: merge policy for event logs
+# Event logs are append-only and replay order-independent: union concatenates
+# both sides' new lines (duplicates dedupe by event hash on replay).
+events/*.events merge=union
 
-    let mut content = if gitattributes_path.exists() {
+# Manifests are single coherent snapshots (count + byte_len + file_hash).
+# Never union them — that corrupts the integrity record. Let merges surface a
+# conflict; regenerate with `bn verify` / rebuild after merging a sealed shard.
+events/*.manifest -merge
+";
+
+    let existing = if gitattributes_path.exists() {
         std::fs::read_to_string(&gitattributes_path).unwrap_or_default()
     } else {
         String::new()
     };
 
-    // Migrate old buggy pattern that only matched a file named `events`.
-    if content.contains(legacy_attr) && !content.contains("events/**") {
-        content = content.replace(legacy_attr, "events/** merge=union");
-        let _ = std::fs::write(&gitattributes_path, &content);
-    } else if !content.contains("events/** merge=union") {
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str(attr_line);
-        let _ = std::fs::write(gitattributes_path, content);
+    let has_events = existing.lines().any(|line| line.trim() == events_entry);
+    let has_manifest = existing.lines().any(|line| line.trim() == manifest_entry);
+    let has_legacy = existing.lines().any(|line| {
+        let t = line.trim();
+        t == legacy_bare || t == legacy_glob
+    });
+
+    if has_events && has_manifest && !has_legacy {
+        return;
     }
+
+    // Strip bones-managed and superseded legacy lines, then re-emit the block,
+    // preserving any user-added entries.
+    let managed: std::collections::HashSet<&str> = managed_block
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .chain([legacy_bare, legacy_glob])
+        .collect();
+
+    let mut kept: Vec<&str> = existing
+        .lines()
+        .filter(|line| !managed.contains(line.trim()))
+        .collect();
+    while kept.last().is_some_and(|line| line.trim().is_empty()) {
+        kept.pop();
+    }
+
+    let mut out = String::new();
+    if !kept.is_empty() {
+        out.push_str(&kept.join("\n"));
+        out.push_str("\n\n");
+    }
+    out.push_str(managed_block);
+
+    let _ = std::fs::write(gitattributes_path, out);
 }
 
 #[cfg(test)]

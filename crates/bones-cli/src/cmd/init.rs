@@ -229,7 +229,14 @@ mod tests {
 
         let bones_content = fs::read_to_string(root.join(".bones/.gitattributes"))
             .expect(".bones/.gitattributes readable");
-        assert!(bones_content.contains("events/** merge=union"));
+        assert!(bones_content.contains("events/*.events merge=union"));
+        assert!(bones_content.contains("events/*.manifest -merge"));
+        // The over-broad glob must not be emitted (it would union .manifest files).
+        assert!(
+            !bones_content
+                .lines()
+                .any(|l| l.trim() == "events/** merge=union")
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

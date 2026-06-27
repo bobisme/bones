@@ -1,13 +1,32 @@
 use anyhow::{Context, Result};
-use std::io::Write;
+use std::collections::HashSet;
 use std::path::Path;
 
-const MANAGED_HEADER: &str = "# bones: merge policy for event logs";
-const BONES_ENTRY: &str = "events/** merge=union";
+const EVENTS_ENTRY: &str = "events/*.events merge=union";
+const MANIFEST_ENTRY: &str = "events/*.manifest -merge";
 const LEGACY_ROOT_ENTRY: &str = ".bones/events merge=union";
 /// Old pattern that matched only a file literally named `events`, not files
 /// inside the `events/` directory.
-const LEGACY_BONES_ENTRY: &str = "events merge=union";
+const LEGACY_BARE_ENTRY: &str = "events merge=union";
+/// Over-broad pattern: it (wrongly) applied the union merge driver to the
+/// `.manifest` snapshot files alongside the `.events` logs, corrupting their
+/// integrity records on merge. Superseded by [`EVENTS_ENTRY`] + [`MANIFEST_ENTRY`].
+const LEGACY_GLOB_ENTRY: &str = "events/** merge=union";
+
+/// The canonical bones-managed block. Event logs are append-only and replay
+/// order-independent, so `union` is safe; manifests are single coherent
+/// snapshots that must never be union-merged.
+const MANAGED_BLOCK: &str = "\
+# bones: merge policy for event logs
+# Event logs are append-only and replay order-independent: union concatenates
+# both sides' new lines (duplicates dedupe by event hash on replay).
+events/*.events merge=union
+
+# Manifests are single coherent snapshots (count + byte_len + file_hash).
+# Never union them — that corrupts the integrity record. Let merges surface a
+# conflict; regenerate with `bn verify` / rebuild after merging a sealed shard.
+events/*.manifest -merge
+";
 
 pub fn ensure_bones_gitattributes(bones_dir: &Path) -> Result<()> {
     let path = bones_dir.join(".gitattributes");
@@ -18,37 +37,44 @@ pub fn ensure_bones_gitattributes(bones_dir: &Path) -> Result<()> {
         String::new()
     };
 
-    // Migrate: replace the old buggy pattern with the correct one.
-    if existing
+    let has_events = existing.lines().any(|line| line.trim() == EVENTS_ENTRY);
+    let has_manifest = existing.lines().any(|line| line.trim() == MANIFEST_ENTRY);
+    let has_legacy = existing.lines().any(|line| {
+        let t = line.trim();
+        t == LEGACY_BARE_ENTRY || t == LEGACY_GLOB_ENTRY
+    });
+
+    // Already in the desired end state with nothing to migrate.
+    if has_events && has_manifest && !has_legacy {
+        return Ok(());
+    }
+
+    // Lines bones manages: the canonical block plus the superseded legacy
+    // entries. Strip them all so the block can be re-emitted cleanly without
+    // duplicating entries or comments, while preserving any user-added lines.
+    let managed: HashSet<&str> = MANAGED_BLOCK
         .lines()
-        .any(|line| line.trim() == LEGACY_BONES_ENTRY)
-    {
-        let updated = existing.replace(LEGACY_BONES_ENTRY, BONES_ENTRY);
-        std::fs::write(&path, updated)
-            .with_context(|| format!("failed to update {}", path.display()))?;
-        return Ok(());
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .chain([LEGACY_BARE_ENTRY, LEGACY_GLOB_ENTRY])
+        .collect();
+
+    let mut kept: Vec<&str> = existing
+        .lines()
+        .filter(|line| !managed.contains(line.trim()))
+        .collect();
+    while kept.last().is_some_and(|line| line.trim().is_empty()) {
+        kept.pop();
     }
 
-    if existing.lines().any(|line| line.trim() == BONES_ENTRY) {
-        return Ok(());
+    let mut out = String::new();
+    if !kept.is_empty() {
+        out.push_str(&kept.join("\n"));
+        out.push_str("\n\n");
     }
+    out.push_str(MANAGED_BLOCK);
 
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("failed to open {} for append", path.display()))?;
-
-    if !existing.is_empty() && !existing.ends_with('\n') {
-        writeln!(file)?;
-    }
-    if !existing.is_empty() {
-        writeln!(file)?;
-    }
-    if !existing.lines().any(|line| line.trim() == MANAGED_HEADER) {
-        writeln!(file, "{MANAGED_HEADER}")?;
-    }
-    writeln!(file, "{BONES_ENTRY}")?;
+    std::fs::write(&path, &out).with_context(|| format!("failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -89,12 +115,24 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn creates_bones_gitattributes_with_union_entry() {
+    fn creates_bones_gitattributes_with_scoped_entries() {
         let dir = TempDir::new().expect("tmp");
         ensure_bones_gitattributes(dir.path()).expect("ensure gitattributes");
 
         let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
-        assert!(content.contains(BONES_ENTRY));
+        assert!(
+            content.contains(EVENTS_ENTRY),
+            "events entry missing:\n{content}"
+        );
+        assert!(
+            content.contains(MANIFEST_ENTRY),
+            "manifest entry missing:\n{content}"
+        );
+        // The over-broad glob must never be emitted.
+        assert!(
+            !content.lines().any(|l| l.trim() == LEGACY_GLOB_ENTRY),
+            "over-broad glob emitted:\n{content}"
+        );
     }
 
     #[test]
@@ -102,13 +140,59 @@ mod tests {
         let dir = TempDir::new().expect("tmp");
         ensure_bones_gitattributes(dir.path()).expect("first");
         ensure_bones_gitattributes(dir.path()).expect("second");
+        ensure_bones_gitattributes(dir.path()).expect("third");
 
         let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
-        let count = content
-            .lines()
-            .filter(|line| line.trim() == BONES_ENTRY)
-            .count();
-        assert_eq!(count, 1, "duplicate entry found:\n{content}");
+        for entry in [EVENTS_ENTRY, MANIFEST_ENTRY] {
+            let count = content.lines().filter(|line| line.trim() == entry).count();
+            assert_eq!(count, 1, "duplicate `{entry}`:\n{content}");
+        }
+    }
+
+    #[test]
+    fn migrates_legacy_glob_entry_to_scoped() {
+        let dir = TempDir::new().expect("tmp");
+        std::fs::write(
+            dir.path().join(".gitattributes"),
+            "# bones: merge policy for event logs\nevents/** merge=union\n",
+        )
+        .expect("seed");
+
+        ensure_bones_gitattributes(dir.path()).expect("migrate");
+
+        let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
+        assert!(
+            !content.lines().any(|l| l.trim() == LEGACY_GLOB_ENTRY),
+            "over-broad glob still present:\n{content}"
+        );
+        assert!(
+            content.contains(EVENTS_ENTRY),
+            "events entry missing:\n{content}"
+        );
+        assert!(
+            content.contains(MANIFEST_ENTRY),
+            "manifest entry missing:\n{content}"
+        );
+    }
+
+    #[test]
+    fn preserves_user_added_entries() {
+        let dir = TempDir::new().expect("tmp");
+        std::fs::write(
+            dir.path().join(".gitattributes"),
+            "*.png binary\nevents/** merge=union\n",
+        )
+        .expect("seed");
+
+        ensure_bones_gitattributes(dir.path()).expect("migrate");
+
+        let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
+        assert!(
+            content.contains("*.png binary"),
+            "user line lost:\n{content}"
+        );
+        assert!(content.contains(EVENTS_ENTRY));
+        assert!(content.contains(MANIFEST_ENTRY));
     }
 
     #[test]
@@ -140,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_bones_entry_to_glob() {
+    fn migrates_legacy_bare_entry_to_scoped() {
         let dir = TempDir::new().expect("tmp");
         std::fs::write(
             dir.path().join(".gitattributes"),
@@ -152,12 +236,16 @@ mod tests {
 
         let content = std::fs::read_to_string(dir.path().join(".gitattributes")).expect("read");
         assert!(
-            content.contains("events/** merge=union"),
+            content.contains(EVENTS_ENTRY),
             "new pattern missing:\n{content}"
         );
         assert!(
-            !content.contains("\nevents merge=union"),
-            "old pattern still present:\n{content}"
+            content.contains(MANIFEST_ENTRY),
+            "manifest entry missing:\n{content}"
+        );
+        assert!(
+            !content.lines().any(|l| l.trim() == LEGACY_BARE_ENTRY),
+            "old bare pattern still present:\n{content}"
         );
     }
 }
