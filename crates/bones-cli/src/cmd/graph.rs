@@ -29,7 +29,7 @@ use crate::validate;
 // ---------------------------------------------------------------------------
 
 /// Output format for graph rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphFormat {
     /// Nested tree with unicode glyphs matching TUI style (default).
     #[default]
@@ -62,29 +62,35 @@ pub struct GraphArgs {
     #[arg(long)]
     pub depth: Option<usize>,
 
-    /// Output format. Overrides --mermaid / --dot when given explicitly.
-    #[arg(long, value_enum)]
-    pub format: Option<GraphFormat>,
-
     /// Output as a Mermaid diagram.
-    #[arg(long, conflicts_with = "dot")]
+    #[arg(long, conflicts_with_all = ["dot", "ascii"])]
     pub mermaid: bool,
 
     /// Output as a Graphviz DOT diagram.
-    #[arg(long, conflicts_with = "mermaid")]
+    #[arg(long, conflicts_with_all = ["mermaid", "ascii"])]
     pub dot: bool,
+
+    /// Output as the legacy flat layered ASCII listing.
+    #[arg(long, conflicts_with_all = ["mermaid", "dot"])]
+    pub ascii: bool,
 }
 
 impl GraphArgs {
-    /// Resolve the requested graph format from CLI flags.
-    const fn resolved_format(&self) -> GraphFormat {
-        if let Some(f) = self.format {
-            return f;
-        }
+    /// Resolve the requested graph render format.
+    ///
+    /// The `--mermaid` / `--dot` / `--ascii` flags select a graph-specific
+    /// renderer; otherwise the global `--format` (pretty/text) drives the
+    /// nested-tree style. JSON is handled separately by the caller via
+    /// [`OutputMode::is_json`].
+    const fn resolved_format(&self, output: OutputMode) -> GraphFormat {
         if self.mermaid {
             GraphFormat::Mermaid
         } else if self.dot {
             GraphFormat::Dot
+        } else if self.ascii {
+            GraphFormat::Ascii
+        } else if matches!(output, OutputMode::Text) {
+            GraphFormat::Text
         } else {
             GraphFormat::Pretty
         }
@@ -880,7 +886,7 @@ fn run_graph_item(
     }
 
     // Mermaid / DOT / ASCII / Pretty / Text output
-    match args.resolved_format() {
+    match args.resolved_format(output) {
         GraphFormat::Mermaid => {
             print!("{}", render_mermaid_item(raw, &meta, id, args));
         }
@@ -1076,7 +1082,7 @@ fn run_graph_summary(
         .collect();
 
     // Mermaid / DOT / ASCII / Pretty / Text output
-    match args.resolved_format() {
+    match args.resolved_format(output) {
         GraphFormat::Mermaid => {
             print!(
                 "{}",
@@ -1090,7 +1096,7 @@ fn run_graph_summary(
             );
         }
         GraphFormat::Pretty | GraphFormat::Text => {
-            let pretty = args.resolved_format() == GraphFormat::Pretty;
+            let pretty = args.resolved_format(output) == GraphFormat::Pretty;
             let mut out = String::new();
 
             // Header
@@ -1390,9 +1396,9 @@ mod tests {
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: false,
+            ascii: false,
         };
 
         // Just check it doesn't panic/error
@@ -1436,9 +1442,9 @@ mod tests {
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: false,
+            ascii: false,
         };
 
         let result = run_graph_summary(&raw, &conn, &args, OutputMode::Pretty);
@@ -1574,9 +1580,9 @@ mod tests {
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: false,
+            ascii: false,
         };
         let result = run_graph(&args, OutputMode::Pretty, &root);
         assert!(result.is_ok(), "run_graph failed: {:?}", result.err());
@@ -1631,9 +1637,9 @@ mod tests {
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: true,
             dot: false,
+            ascii: false,
         };
 
         let out = render_mermaid_item(&raw, &meta, "bn-aaa", &args);
@@ -1683,9 +1689,9 @@ mod tests {
             down: true,
             up: false,
             depth: None,
-            format: None,
             mermaid: true,
             dot: false,
+            ascii: false,
         };
         let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_down);
         assert!(out.contains("bn-ccc"), "downstream should show C: {out}");
@@ -1700,9 +1706,9 @@ mod tests {
             down: false,
             up: true,
             depth: None,
-            format: None,
             mermaid: true,
             dot: false,
+            ascii: false,
         };
         let out = render_mermaid_item(&raw, &meta, "bn-bbb", &args_up);
         assert!(out.contains("bn-aaa"), "upstream should show A: {out}");
@@ -1759,9 +1765,9 @@ mod tests {
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: true,
+            ascii: false,
         };
 
         let out = render_dot_item(&raw, &meta, "bn-aaa", &args);
@@ -1902,49 +1908,57 @@ mod tests {
 
     #[test]
     fn graph_format_from_args() {
+        // No render flag: global output mode drives pretty vs text.
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: false,
+            ascii: false,
         };
-        assert_eq!(args.resolved_format(), GraphFormat::Pretty);
+        assert_eq!(
+            args.resolved_format(OutputMode::Pretty),
+            GraphFormat::Pretty
+        );
+        assert_eq!(args.resolved_format(OutputMode::Text), GraphFormat::Text);
+        // JSON falls through to Pretty here; the caller short-circuits JSON.
+        assert_eq!(args.resolved_format(OutputMode::Json), GraphFormat::Pretty);
 
+        // Render flags override the global output mode.
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: true,
             dot: false,
+            ascii: false,
         };
-        assert_eq!(args.resolved_format(), GraphFormat::Mermaid);
+        assert_eq!(args.resolved_format(OutputMode::Text), GraphFormat::Mermaid);
 
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
-            format: None,
             mermaid: false,
             dot: true,
+            ascii: false,
         };
-        assert_eq!(args.resolved_format(), GraphFormat::Dot);
+        assert_eq!(args.resolved_format(OutputMode::Text), GraphFormat::Dot);
 
         let args = GraphArgs {
             id: None,
             down: false,
             up: false,
             depth: None,
-            format: Some(GraphFormat::Text),
             mermaid: false,
             dot: false,
+            ascii: true,
         };
-        assert_eq!(args.resolved_format(), GraphFormat::Text);
+        assert_eq!(args.resolved_format(OutputMode::Pretty), GraphFormat::Ascii);
     }
 
     #[test]

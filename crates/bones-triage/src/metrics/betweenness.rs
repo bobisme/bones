@@ -117,7 +117,7 @@ pub fn betweenness_centrality(ng: &NormalizedGraph) -> HashMap<String, f64> {
             for &v in &predecessors[wi] {
                 let vi = g.to_index(v);
                 if sigma[wi] > 0.0 {
-                    delta[vi] += (sigma[vi] / sigma[wi]) * (1.0 + delta[wi]);
+                    delta[vi] = (sigma[vi] / sigma[wi]).mul_add(1.0 + delta[wi], delta[vi]);
                 }
             }
 

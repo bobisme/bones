@@ -611,7 +611,7 @@ fn decode_embeddings(
 
                     let token_base = (b * out_tokens + t) * hidden;
                     for h in 0..hidden {
-                        emb[h] += data[token_base + h] * mask_weight;
+                        emb[h] = data[token_base + h].mul_add(mask_weight, emb[h]);
                     }
                     weight_sum += mask_weight;
                 }

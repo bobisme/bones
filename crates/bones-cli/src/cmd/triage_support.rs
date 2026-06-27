@@ -892,7 +892,8 @@ fn compute_urgent_chain_pressure(
                             .max(1) as f64;
                         let branching_damp = 1.0 / fan_in.sqrt();
                         let attenuation = URGENT_CHAIN_DECAY.powi(depth.saturating_sub(1) as i32);
-                        source_pressure += seed * attenuation * branching_damp;
+                        source_pressure =
+                            (seed * attenuation).mul_add(branching_damp, source_pressure);
                         if urgency == Urgency::Urgent {
                             urgent_sources.push(descendant_id.to_string());
                         }

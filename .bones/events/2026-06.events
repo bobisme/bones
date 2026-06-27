@@ -1,0 +1,6 @@
+# bones event log v1
+# fields: wall_ts_us	agent	itc	parents	type	item_id	data	event_hash
+1782501394262734	bob	itc:v3:AWKSc8kyZJPJk5EAAAAAQau9WtV610AAAAEzAQ		item.create	bn-xq3l	{"description":"in ~/src/access\n\nbn triage graph --format text panics","kind":"bug","labels":["cli"],"title":"triage graph --format text panic"}	blake3:zrAk1q_ER6gcPiNUTcRqr6RWyyV4xdWC7zb8MYHdMwk
+1782501531448097	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3AQ		item.move	bn-xq3l	{"state":"doing"}	blake3:cqR56lkDDV8GubUwun5nI9B1v4UYbQKP5eFmWaEM8N8
+1782501531451488	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3Ag		item.assign	bn-xq3l	{"action":"assign","agent":"bones-dev"}	blake3:070OqEImI3kz0V5eWzMvkvl1y9LvvxjR92hLzxtqifw
+1782583026194315	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3Aw		item.move	bn-xq3l	{"state":"done"}	blake3:3SVjVNRoSGWhNj9qL59IU87udRPxFzB2G87Tqgf8ks4
