@@ -487,12 +487,13 @@ fn run_create_single(
     if let Err(e) = validate::validate_title(&request.title) {
         return render_and_bail(output, e.to_cli_error());
     }
-    let all_labels = request.labels.clone();
-    for label in &all_labels {
-        if let Err(e) = validate::validate_label(label) {
-            return render_and_bail(output, e.to_cli_error());
-        }
-    }
+    // Normalize labels to canonical storage form so that `bn create -l` agrees
+    // with `bn bone label add` (namespaced labels like `goal:manual`, lowercase,
+    // whitespace collapsed).
+    let all_labels = match validate::normalize_labels(&request.labels) {
+        Ok(labels) => labels,
+        Err(e) => return render_and_bail(output, e.to_cli_error()),
+    };
 
     // 3. Parse/validate kind
     let kind: Kind = match validate::validate_kind(&request.kind) {

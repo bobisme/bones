@@ -259,13 +259,16 @@ pub fn run_list(
         render_error(output, &e.to_cli_error())?;
         anyhow::bail!("{}", e.reason);
     }
-    let all_labels = args.all_labels();
-    for label in &all_labels {
-        if let Err(e) = validate::validate_label(label) {
+    // Normalize the --label filter to canonical storage form so it matches the
+    // labels persisted by `bn create -l` / `bn bone label add` (namespaced,
+    // lowercase). Without this, `--label Goal:Manual` would never match.
+    let normalized_labels = match validate::normalize_labels(&args.all_labels()) {
+        Ok(labels) => labels,
+        Err(e) => {
             render_error(output, &e.to_cli_error())?;
             anyhow::bail!("{}", e.reason);
         }
-    }
+    };
     if let Some(ref urgency) = args.urgency
         && urgency.parse::<Urgency>().is_err()
     {
@@ -344,7 +347,7 @@ pub fn run_list(
         anyhow::bail!("invalid date range");
     }
 
-    let response = build_list_response(&conn, args, sort, since_us, until_us)?;
+    let response = build_list_response(&conn, args, &normalized_labels, sort, since_us, until_us)?;
 
     if output.is_json() {
         return render(output, &response, |_, _| Ok(()));
@@ -361,12 +364,11 @@ pub fn run_list(
 fn build_list_response(
     conn: &rusqlite::Connection,
     args: &ListArgs,
+    all_labels: &[String],
     sort: ListSort,
     since_us: Option<i64>,
     until_us: Option<i64>,
 ) -> anyhow::Result<ListResponse> {
-    let all_labels = args.all_labels();
-
     // Default to showing open items unless any filter is explicitly set.
     // Pagination/sort alone should not disable this default behavior.
     let statuses = normalized_statuses(args);
@@ -1155,7 +1157,15 @@ mod tests {
         args.offset = 1;
         args.sort = "created".into();
 
-        let response = build_list_response(&conn, &args, ListSort::CreatedAsc, None, None).unwrap();
+        let response = build_list_response(
+            &conn,
+            &args,
+            &args.all_labels(),
+            ListSort::CreatedAsc,
+            None,
+            None,
+        )
+        .unwrap();
         // Default filter is state=open; we inserted 3 open rows total.
         assert_eq!(response.total, 3);
         assert_eq!(response.limit, 2);
@@ -1174,14 +1184,27 @@ mod tests {
         args.state = vec!["doing".into()];
 
         // bn-002 has updated_at_us=2001
-        let response =
-            build_list_response(&conn, &args, ListSort::UpdatedDesc, Some(2000), Some(2001))
-                .unwrap();
+        let response = build_list_response(
+            &conn,
+            &args,
+            &args.all_labels(),
+            ListSort::UpdatedDesc,
+            Some(2000),
+            Some(2001),
+        )
+        .unwrap();
         assert_eq!(response.total, 1);
         assert_eq!(response.items[0].id, "bn-002");
 
-        let response_none =
-            build_list_response(&conn, &args, ListSort::UpdatedDesc, Some(2002), None).unwrap();
+        let response_none = build_list_response(
+            &conn,
+            &args,
+            &args.all_labels(),
+            ListSort::UpdatedDesc,
+            Some(2002),
+            None,
+        )
+        .unwrap();
         assert_eq!(response_none.total, 0);
     }
 
@@ -1194,8 +1217,15 @@ mod tests {
         let mut args = default_args();
         args.all_states = true;
 
-        let response =
-            build_list_response(&conn, &args, ListSort::UpdatedDesc, None, None).unwrap();
+        let response = build_list_response(
+            &conn,
+            &args,
+            &args.all_labels(),
+            ListSort::UpdatedDesc,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(response.total, 3);
         let states: std::collections::HashSet<&str> = response
             .items

@@ -177,6 +177,70 @@ fn label_add_then_show_reflects_label() {
     );
 }
 
+/// Regression: `bn create -l goal:manual` must accept the namespace separator
+/// and store the same canonical label that `bn bone label add` would, and the
+/// `bn list --label` filter must match it. Previously `create` and `list` used a
+/// stricter validator that rejected ':' while `label add` accepted it.
+#[test]
+fn create_and_list_accept_namespaced_labels() {
+    let dir = TempDir::new().unwrap();
+    init_project(dir.path());
+
+    // create -l with a colon must succeed (was rejected before the fix).
+    let out = bn_cmd(dir.path())
+        .args([
+            "create",
+            "--title",
+            "Namespaced",
+            "-l",
+            "goal:manual",
+            "--json",
+        ])
+        .output()
+        .expect("create should not crash");
+    assert!(
+        out.status.success(),
+        "create -l goal:manual failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let created: Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+    let id = created["id"].as_str().expect("id field").to_string();
+
+    rebuild(dir.path());
+
+    // The stored label is the canonical namespaced form.
+    let item = show_item_json(dir.path(), &id);
+    let labels = item["labels"].as_array().expect("labels array");
+    assert!(
+        labels.iter().any(|l| l == "goal:manual"),
+        "create should store 'goal:manual', got: {labels:?}"
+    );
+
+    // And the list filter matches it (filter is normalized the same way).
+    let filtered = list_items_filtered(dir.path(), &["--label", "goal:manual"]);
+    assert_eq!(
+        filtered.len(),
+        1,
+        "list --label goal:manual should match the created item"
+    );
+    assert_eq!(filtered[0]["id"].as_str().unwrap(), id);
+
+    // Mixed-case / whitespace input normalizes identically regardless of entry
+    // point, so create and label add agree on the canonical form.
+    let id2 = create_item(dir.path(), "Another");
+    bn_cmd(dir.path())
+        .args(["label", "add", &id2, "Goal:Manual"])
+        .assert()
+        .success();
+    rebuild(dir.path());
+    let item2 = show_item_json(dir.path(), &id2);
+    let labels2 = item2["labels"].as_array().expect("labels array");
+    assert!(
+        labels2.iter().any(|l| l == "goal:manual"),
+        "label add should normalize 'Goal:Manual' to 'goal:manual', got: {labels2:?}"
+    );
+}
+
 #[test]
 fn label_rm_removes_label() {
     let dir = TempDir::new().unwrap();
@@ -982,8 +1046,8 @@ fn list_filter_combined_state_and_label() {
     let id_open_unlabeled = create_item(dir.path(), "Open unlabeled");
     let id_doing_labeled = create_item(dir.path(), "Doing labeled");
 
-    // Note: --label filter uses validate_label which requires [a-zA-Z0-9-_] only (no ':').
-    // Use a plain label name without namespace separator.
+    // --label filter is normalized the same as stored labels (namespaced labels
+    // like `area:frontend` are allowed); a plain label keeps this case simple.
     bn_cmd(dir.path())
         .args(["tag", &id_open_labeled, "target-release"])
         .assert()

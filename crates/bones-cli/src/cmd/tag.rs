@@ -44,111 +44,10 @@ pub struct UntagArgs {
     pub additional_ids: Vec<String>,
 }
 
-/// Normalize a label into canonical storage form.
-///
-/// Rules:
-/// - trim surrounding whitespace
-/// - convert to lowercase
-/// - collapse internal whitespace to `-`
-/// - allow at most one namespace separator `:` (not at start/end)
-/// - reject `/`
-/// - segments must start with ASCII alphanumeric and then contain only
-///   ASCII alphanumeric, `-`, or `_`
-pub fn normalize_label(input: &str) -> Result<String, validate::ValidationError> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(validate::ValidationError::new(
-            "label",
-            input,
-            "must not be empty",
-            "provide a non-empty label",
-            "invalid_label",
-        ));
-    }
-
-    let normalized = trimmed
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-")
-        .to_ascii_lowercase();
-
-    if normalized.chars().count() > validate::MAX_LABEL_LEN {
-        return Err(validate::ValidationError::new(
-            "label",
-            input,
-            format!("must be <= {} characters", validate::MAX_LABEL_LEN),
-            "shorten the label",
-            "invalid_label",
-        ));
-    }
-
-    if normalized.contains('/') {
-        return Err(validate::ValidationError::new(
-            "label",
-            input,
-            "must not contain '/'",
-            "remove '/' from the label",
-            "invalid_label",
-        ));
-    }
-
-    let colon_count = normalized.matches(':').count();
-    if colon_count > 1 || normalized.starts_with(':') || normalized.ends_with(':') {
-        return Err(validate::ValidationError::new(
-            "label",
-            input,
-            "namespace separator ':' may appear at most once and not at start/end",
-            "use labels like backend or area:frontend",
-            "invalid_label",
-        ));
-    }
-
-    for segment in normalized.split(':') {
-        let mut chars = segment.chars();
-        let Some(first) = chars.next() else {
-            return Err(validate::ValidationError::new(
-                "label",
-                input,
-                "namespace segment must not be empty",
-                "use labels like backend or area:frontend",
-                "invalid_label",
-            ));
-        };
-
-        if !first.is_ascii_alphanumeric() {
-            return Err(validate::ValidationError::new(
-                "label",
-                input,
-                "must start with an ASCII letter or number",
-                "start each label segment with [a-z0-9]",
-                "invalid_label",
-            ));
-        }
-
-        if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-            return Err(validate::ValidationError::new(
-                "label",
-                input,
-                "may only contain ASCII letters, numbers, '-', '_', and a single ':' separator",
-                "remove spaces or punctuation from the label",
-                "invalid_label",
-            ));
-        }
-    }
-
-    Ok(normalized)
-}
-
-fn normalize_labels(inputs: &[String]) -> Result<Vec<String>, validate::ValidationError> {
-    let mut out = Vec::new();
-    for label in inputs {
-        let normalized = normalize_label(label)?;
-        if !out.contains(&normalized) {
-            out.push(normalized);
-        }
-    }
-    Ok(out)
-}
+// Label normalization is the single source of truth in `crate::validate` so that
+// `bn create -l`, `bn list --label`, and `bn bone label add/remove` all agree on
+// label syntax (including the `goal:manual` namespace convention).
+use crate::validate::normalize_labels;
 
 /// Open the projection DB, returning a helpful error if it doesn't exist.
 fn open_db(project_root: &std::path::Path) -> anyhow::Result<Connection> {
@@ -591,6 +490,7 @@ pub fn run_untag(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validate::normalize_label;
 
     #[test]
     fn tag_args_parses() {

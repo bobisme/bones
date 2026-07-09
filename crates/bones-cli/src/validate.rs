@@ -134,49 +134,113 @@ fn is_valid_item_id_segments(rest: &str) -> bool {
     true
 }
 
-pub fn validate_label(s: &str) -> Result<(), ValidationError> {
-    if s.is_empty() {
+/// Normalize a label into canonical storage form.
+///
+/// This is the single source of truth for label syntax across all commands
+/// (`bn create -l`, `bn list --label`, `bn bone label add/remove`). Rules:
+/// - trim surrounding whitespace
+/// - convert to lowercase
+/// - collapse internal whitespace to `-`
+/// - allow at most one namespace separator `:` (not at start/end), e.g. `goal:manual`
+/// - reject `/`
+/// - each `:`-delimited segment must start with an ASCII alphanumeric and then
+///   contain only ASCII alphanumeric, `-`, or `_`
+pub fn normalize_label(input: &str) -> Result<String, ValidationError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
         return Err(ValidationError::new(
             "label",
-            s,
+            input,
             "must not be empty",
             "provide a non-empty label",
             "invalid_label",
         ));
     }
-    if s.chars().count() > MAX_LABEL_LEN {
+
+    let normalized = trimmed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_ascii_lowercase();
+
+    if normalized.chars().count() > MAX_LABEL_LEN {
         return Err(ValidationError::new(
             "label",
-            s,
+            input,
             format!("must be <= {MAX_LABEL_LEN} characters"),
             "shorten the label",
             "invalid_label",
         ));
     }
 
-    let mut chars = s.chars();
-    let first = chars.next().unwrap();
-    if !first.is_ascii_alphanumeric() {
+    if normalized.contains('/') {
         return Err(ValidationError::new(
             "label",
-            s,
-            "must start with an ASCII letter or number",
-            "start the label with [a-zA-Z0-9]",
+            input,
+            "must not contain '/'",
+            "remove '/' from the label",
             "invalid_label",
         ));
     }
 
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    let colon_count = normalized.matches(':').count();
+    if colon_count > 1 || normalized.starts_with(':') || normalized.ends_with(':') {
         return Err(ValidationError::new(
             "label",
-            s,
-            "may only contain ASCII letters, numbers, '-' or '_'",
-            "remove spaces or punctuation from the label",
+            input,
+            "namespace separator ':' may appear at most once and not at start/end",
+            "use labels like backend or area:frontend",
             "invalid_label",
         ));
     }
 
-    Ok(())
+    for segment in normalized.split(':') {
+        let mut chars = segment.chars();
+        let Some(first) = chars.next() else {
+            return Err(ValidationError::new(
+                "label",
+                input,
+                "namespace segment must not be empty",
+                "use labels like backend or area:frontend",
+                "invalid_label",
+            ));
+        };
+
+        if !first.is_ascii_alphanumeric() {
+            return Err(ValidationError::new(
+                "label",
+                input,
+                "must start with an ASCII letter or number",
+                "start each label segment with [a-z0-9]",
+                "invalid_label",
+            ));
+        }
+
+        if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(ValidationError::new(
+                "label",
+                input,
+                "may only contain ASCII letters, numbers, '-', '_', and a single ':' separator",
+                "remove spaces or punctuation from the label",
+                "invalid_label",
+            ));
+        }
+    }
+
+    Ok(normalized)
+}
+
+/// Normalize a list of labels, preserving order and dropping duplicates that
+/// collapse to the same canonical form.
+pub fn normalize_labels(inputs: &[String]) -> Result<Vec<String>, ValidationError> {
+    let mut out = Vec::new();
+    for label in inputs {
+        let normalized = normalize_label(label)?;
+        if !out.contains(&normalized) {
+            out.push(normalized);
+        }
+    }
+    Ok(out)
 }
 
 pub fn validate_agent(s: &str) -> Result<(), ValidationError> {
@@ -333,9 +397,30 @@ mod tests {
 
     #[test]
     fn label_rules() {
-        assert!(validate_label("backend_api").is_ok());
-        assert!(validate_label("-bad").is_err());
-        assert!(validate_label("bad label").is_err());
+        assert_eq!(normalize_label("backend_api").unwrap(), "backend_api");
+        // Namespaced labels (single ':') are allowed and normalized consistently.
+        assert_eq!(normalize_label("goal:manual").unwrap(), "goal:manual");
+        assert_eq!(
+            normalize_label(" Area:Needs Triage ").unwrap(),
+            "area:needs-triage"
+        );
+        assert!(normalize_label("-bad").is_err());
+        // Whitespace collapses to '-' rather than erroring.
+        assert_eq!(normalize_label("bad label").unwrap(), "bad-label");
+        assert!(normalize_label("area:team:backend").is_err());
+        assert!(normalize_label("docs/readme").is_err());
+        assert!(normalize_label(":lead").is_err());
+    }
+
+    #[test]
+    fn normalize_labels_dedupes() {
+        let out = normalize_labels(&[
+            "Backend".to_string(),
+            "backend".to_string(),
+            "goal:manual".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(out, vec!["backend", "goal:manual"]);
     }
 
     #[test]
