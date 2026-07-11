@@ -118,6 +118,11 @@ fn restore_fts_triggers(conn: &rusqlite::Connection) -> Result<()> {
 pub struct RebuildReport {
     /// Total events replayed from all shards.
     pub event_count: usize,
+    /// Number of events that failed to project and were skipped during the
+    /// rebuild. Non-zero means the rebuilt projection is still incomplete
+    /// (e.g. the log was appended to mid-rebuild) and the dirty marker must
+    /// be retained for a later retry.
+    pub projection_errors: usize,
     /// Total unique items in the rebuilt projection.
     pub item_count: usize,
     /// Wall-clock elapsed time for the rebuild.
@@ -169,6 +174,7 @@ fn check_sealed_shard_integrity(shard_mgr: &ShardManager) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if shard reading, event parsing, or projection fails.
+#[allow(clippy::too_many_lines)]
 pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let start = Instant::now();
 
@@ -212,6 +218,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let mut line_no = 0;
     let mut total_projected = 0;
     let mut total_duplicates = 0;
+    let mut total_errors = 0;
     let mut last_event_hash = None;
     let mut total_byte_len = 0;
 
@@ -248,6 +255,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
                         .context("project batch during rebuild")?;
                     total_projected += stats.projected;
                     total_duplicates += stats.duplicates;
+                    total_errors += stats.errors;
                     current_batch.clear();
                 }
             }
@@ -269,6 +277,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
             .context("project final batch during rebuild")?;
         total_projected += stats.projected;
         total_duplicates += stats.duplicates;
+        total_errors += stats.errors;
     }
 
     // 4b. Rebuild the FTS5 index in bulk now that all items are in place,
@@ -292,6 +301,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     tracing::info!(
         event_count = total_projected,
         duplicates = total_duplicates,
+        errors = total_errors,
         batch_size,
         item_count,
         shard_count,
@@ -301,6 +311,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
 
     Ok(RebuildReport {
         event_count: total_projected,
+        projection_errors: total_errors,
         item_count: usize::try_from(item_count).unwrap_or(0),
         elapsed,
         shard_count,

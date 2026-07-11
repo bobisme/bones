@@ -55,6 +55,7 @@ pub fn run_rebuild(project_root: &Path, _incremental: bool, output: OutputMode) 
         (
             bones_core::db::rebuild::RebuildReport {
                 event_count: apply.events_applied,
+                projection_errors: apply.projection_errors,
                 item_count,
                 elapsed: apply.elapsed,
                 shard_count: apply.shards_scanned,

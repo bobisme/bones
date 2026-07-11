@@ -52,6 +52,10 @@ pub struct EventHash(pub String);
 pub struct ApplyReport {
     /// Number of new events applied.
     pub events_applied: usize,
+    /// Number of events that failed to project and were skipped. Non-zero
+    /// means the projection is incomplete and callers must not clear the
+    /// dirty marker — a later retry (full rebuild) is required to recover.
+    pub projection_errors: usize,
     /// Number of shards scanned.
     pub shards_scanned: usize,
     /// Whether a full rebuild was triggered instead of incremental.
@@ -213,6 +217,7 @@ pub fn incremental_apply(
     if line_iter.peek().is_none() {
         return Ok(ApplyReport {
             events_applied: 0,
+            projection_errors: 0,
             shards_scanned,
             full_rebuild_triggered: false,
             full_rebuild_reason: None,
@@ -306,6 +311,7 @@ pub fn incremental_apply(
 
     Ok(ApplyReport {
         events_applied: total_projected,
+        projection_errors: total_errors,
         shards_scanned,
         full_rebuild_triggered: false,
         full_rebuild_reason: None,
@@ -474,6 +480,7 @@ fn do_full_rebuild(
 
     Ok(ApplyReport {
         events_applied: report.event_count,
+        projection_errors: report.projection_errors,
         shards_scanned: report.shard_count,
         full_rebuild_triggered: true,
         full_rebuild_reason: Some(reason.to_string()),

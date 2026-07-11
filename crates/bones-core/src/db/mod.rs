@@ -78,9 +78,18 @@ pub fn ensure_projection(bones_dir: &Path) -> Result<Option<Connection>> {
 
     if needs_rebuild {
         debug!("projection stale or missing, running incremental rebuild");
-        incremental::incremental_apply(&events_dir, &db_path, false)
+        // When the projection was explicitly marked dirty, a prior projection
+        // error skipped one or more events. Those events sit *behind* the
+        // cursor, so an incremental apply can never reproject them — force a
+        // full rebuild to replay the whole log from scratch.
+        let report = incremental::incremental_apply(&events_dir, &db_path, marker_exists)
             .context("auto-rebuild projection")?;
-        if dirty_marker.exists() {
+        // Only clear the dirty marker if the rebuild fully succeeded. If the
+        // rebuild itself skipped events (e.g. the log was being appended by a
+        // concurrent writer), keep the marker so a later, non-racing
+        // invocation retries the full rebuild instead of silently dropping the
+        // event forever.
+        if dirty_marker.exists() && report.projection_errors == 0 {
             let _ = std::fs::remove_file(&dirty_marker);
         }
     }
@@ -352,6 +361,84 @@ mod tests {
         assert!(
             !marker.exists(),
             "dirty marker should be cleared after successful recovery"
+        );
+    }
+
+    /// Regression for bn-r2zy: a `item.create` event that was skipped mid-batch
+    /// (projection error) must be recovered on the next read, not lost forever.
+    ///
+    /// Reproduces the failure state observed in the field: an item exists in the
+    /// event log but is absent from the projection, the cursor has already
+    /// advanced *past* that event (so an incremental apply sees no new content),
+    /// and the dirty marker is set. Before the fix, `ensure_projection` ran an
+    /// incremental apply (which recovered nothing) and then cleared the marker,
+    /// stranding the item permanently. The fix forces a full rebuild whenever the
+    /// marker is present and keeps the marker if the rebuild still had errors.
+    #[test]
+    fn ensure_projection_recovers_skipped_event_behind_cursor() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+        std::fs::create_dir_all(bones_dir.join("cache")).expect("cache dir");
+
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard");
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+
+        // Two independent create events in the log.
+        for (id, title) in [("bn-keep", "kept item"), ("bn-lost", "skipped item")] {
+            let mut create = make_create(id, title, 1_700_000_000_000_000);
+            let line = writer::write_event(&mut create).expect("serialize create event");
+            shard_mgr
+                .append_raw(year, month, &line)
+                .expect("append create event");
+        }
+
+        // Initial projection: both items land, cursor advances to log end.
+        {
+            let conn = ensure_projection(&bones_dir)
+                .expect("initial ensure projection")
+                .expect("projection connection");
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+                .expect("count items");
+            assert_eq!(count, 2, "precondition: both items projected initially");
+        }
+
+        // Simulate the skip: bn-lost is missing from the projection even though
+        // its create event is in the log and the cursor sits past it. This is
+        // exactly what `project_batch` leaves behind when it counts an error but
+        // `incremental_apply` still advances the cursor.
+        {
+            let conn = open_projection(&bones_dir.join("bones.db")).expect("open projection");
+            conn.execute("DELETE FROM items WHERE item_id = 'bn-lost'", [])
+                .expect("delete skipped item");
+        }
+        mark_projection_dirty(&bones_dir, "simulate skipped item.create").expect("mark dirty");
+        let marker = projection_dirty_marker_path(&bones_dir);
+        assert!(marker.exists(), "precondition: dirty marker set");
+
+        // The read path must recover the skipped item via a full rebuild.
+        let conn = ensure_projection(&bones_dir)
+            .expect("recovery ensure projection")
+            .expect("projection connection");
+        let recovered: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE item_id = 'bn-lost'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count recovered item");
+        assert_eq!(
+            recovered, 1,
+            "skipped item must be recovered by dirty-marker full rebuild"
+        );
+        assert!(
+            !marker.exists(),
+            "marker should be cleared after a clean recovery rebuild"
         );
     }
 
