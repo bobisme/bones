@@ -28,6 +28,7 @@ use bones_core::event::Event;
 use bones_core::event::data::{EventData, MoveData};
 use bones_core::event::types::EventType;
 use bones_core::event::writer;
+use bones_core::model::goal::{GoalPolicy, goal_policy_override_from_labels};
 use bones_core::model::item::State;
 use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
@@ -101,7 +102,9 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 /// Check if completing this item should auto-complete a parent goal.
 ///
 /// Returns the parent item ID if all siblings (including this item, now done)
-/// are in "done" or "archived" state and the parent is a "goal" kind.
+/// are in "done" or "archived" state, the parent is a "goal" kind, and the
+/// parent's goal policy permits auto-close. Goals labeled `goal:manual` (or
+/// `goal:auto-close=off`) are excluded — they never auto-complete.
 fn check_goal_auto_complete(
     conn: &rusqlite::Connection,
     item_id: &str,
@@ -129,6 +132,19 @@ fn check_goal_auto_complete(
 
     // Parent is already done/archived — nothing to do
     if parent.state == "done" || parent.state == "archived" {
+        return Ok(None);
+    }
+
+    // Honor the parent goal's auto-close policy. A goal labeled `goal:manual`
+    // (or `goal:auto-close=off`) opts out of auto-completion entirely, so we
+    // must not close it here even when every child is complete.
+    let parent_labels: Vec<String> = query::get_labels(conn, &parent_id)?
+        .into_iter()
+        .map(|label| label.label)
+        .collect();
+    let policy =
+        GoalPolicy::default().apply_override(goal_policy_override_from_labels(&parent_labels));
+    if !policy.auto_close {
         return Ok(None);
     }
 
@@ -846,6 +862,140 @@ mod tests {
         let conn = db::open_projection(&db_path).unwrap();
         let goal = query::get_item(&conn, &goal_id, false).unwrap().unwrap();
         assert_eq!(goal.state, "open", "goal should NOT be auto-completed");
+    }
+
+    /// Set up a goal carrying the given labels with a single open child.
+    fn setup_labeled_goal_with_child(labels: Vec<String>) -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let bones_dir = root.join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).unwrap();
+        std::fs::create_dir_all(bones_dir.join("cache")).unwrap();
+
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().unwrap();
+
+        let db_path = bones_dir.join("bones.db");
+        let conn = db::open_projection(&db_path).unwrap();
+        let _ = project::ensure_tracking_table(&conn);
+        let projector = project::Projector::new(&conn);
+
+        let goal_id = "bn-goal1";
+        let ts = shard_mgr.next_timestamp().unwrap();
+        let mut goal_event = Event {
+            wall_ts_us: ts,
+            agent: "test-agent".to_string(),
+            itc: "itc:AQ".to_string(),
+            parents: vec![],
+            event_type: EventType::Create,
+            item_id: ItemId::new_unchecked(goal_id),
+            data: EventData::Create(CreateData {
+                title: "Parent goal".to_string(),
+                kind: Kind::Goal,
+                size: None,
+                urgency: Urgency::Default,
+                labels,
+                parent: None,
+                causation: None,
+                description: None,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: String::new(),
+        };
+        let line = writer::write_event(&mut goal_event).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
+        projector.project_event(&goal_event).unwrap();
+
+        let child_id = "bn-child1";
+        let ts = shard_mgr.next_timestamp().unwrap();
+        let mut child_event = Event {
+            wall_ts_us: ts,
+            agent: "test-agent".to_string(),
+            itc: "itc:AQ".to_string(),
+            parents: vec![],
+            event_type: EventType::Create,
+            item_id: ItemId::new_unchecked(child_id),
+            data: EventData::Create(CreateData {
+                title: "Child".to_string(),
+                kind: Kind::Task,
+                size: None,
+                urgency: Urgency::Default,
+                labels: vec![],
+                parent: Some(goal_id.to_string()),
+                causation: None,
+                description: None,
+                extra: BTreeMap::new(),
+            }),
+            event_hash: String::new(),
+        };
+        let line = writer::write_event(&mut child_event).unwrap();
+        shard_mgr
+            .append(&line, false, Duration::from_secs(5))
+            .unwrap();
+        projector.project_event(&child_event).unwrap();
+
+        (dir, goal_id.to_string(), child_id.to_string())
+    }
+
+    #[test]
+    fn done_goal_manual_label_blocks_auto_complete() {
+        // A `goal:manual` parent must NOT auto-complete even when its last
+        // child is closed. Regression test for bn-1at3.
+        let (dir, goal_id, child_id) =
+            setup_labeled_goal_with_child(vec!["goal:manual".to_string()]);
+
+        let args_do = super::super::do_cmd::DoArgs {
+            id: child_id.clone(),
+            ids: vec![],
+        };
+        super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
+            .unwrap();
+
+        let args = DoneArgs {
+            id: child_id,
+            ids: vec![],
+            reason: None,
+        };
+        run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
+
+        let db_path = dir.path().join(".bones/bones.db");
+        let conn = db::open_projection(&db_path).unwrap();
+        let goal = query::get_item(&conn, &goal_id, false).unwrap().unwrap();
+        assert_eq!(
+            goal.state, "open",
+            "goal:manual parent must NOT auto-complete"
+        );
+    }
+
+    #[test]
+    fn done_goal_auto_close_off_label_blocks_auto_complete() {
+        // `goal:auto-close=off` also opts the parent out of auto-completion.
+        let (dir, goal_id, child_id) =
+            setup_labeled_goal_with_child(vec!["goal:auto-close=off".to_string()]);
+
+        let args_do = super::super::do_cmd::DoArgs {
+            id: child_id.clone(),
+            ids: vec![],
+        };
+        super::super::do_cmd::run_do(&args_do, Some("test-agent"), OutputMode::Json, dir.path())
+            .unwrap();
+
+        let args = DoneArgs {
+            id: child_id,
+            ids: vec![],
+            reason: None,
+        };
+        run_done(&args, Some("test-agent"), OutputMode::Json, dir.path()).unwrap();
+
+        let db_path = dir.path().join(".bones/bones.db");
+        let conn = db::open_projection(&db_path).unwrap();
+        let goal = query::get_item(&conn, &goal_id, false).unwrap().unwrap();
+        assert_eq!(
+            goal.state, "open",
+            "goal:auto-close=off parent must NOT auto-complete"
+        );
     }
 
     #[test]
