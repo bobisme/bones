@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.24.7 - 2026-08-07
+
+### Fixed
+
+- **Projection no longer loses events skipped mid-batch.** `incremental_apply`
+  advanced the projection cursor past events that `project_batch` had skipped on
+  error, and `ensure_projection` deleted the dirty marker unconditionally after a
+  rebuild. A transiently-skipped `item.create` was therefore dropped for good and
+  the item stayed unfindable until someone re-created it. A present dirty marker
+  now forces a full rebuild, and the marker is cleared only when that rebuild
+  finished with zero projection errors (counts surfaced via `ApplyReport` and
+  `RebuildReport`).
+- **Manifest integrity survives git merges.** The generated `.bones/.gitattributes`
+  applied `events/** merge=union` to `.manifest` files as well as event logs.
+  Manifests are single coherent snapshots (`event_count` / `byte_len` /
+  `file_hash`); union-merging one duplicates every key and the parser silently
+  keeps the last value, mixing fields from two shard states and breaking
+  `bn verify`. Both `ensure_bones_gitattributes` (which runs on every command)
+  and `bones_core::init()` now emit `events/*.events merge=union` alongside
+  `events/*.manifest -merge`, and migrate the legacy over-broad glob in place so
+  existing projects self-heal on their next `bn` invocation.
+- **`goal:manual` and `goal:auto-close=off` are honored when a child closes.**
+  `check_goal_auto_complete` in `bn done` was a second auto-complete path that
+  ignored goal policy labels, so closing the last child auto-completed a parent
+  that had explicitly opted out of exactly that. It now resolves the parent's
+  `GoalPolicy` through the same `goal_policy_override_from_labels` logic used by
+  `check_auto_close_with_policy`.
+- **Namespaced labels are accepted consistently.** `bn create -l` and
+  `bn list --label` rejected the `:` namespace separator that
+  `bn bone label add` accepted, so a label like `goal:manual` could be added but
+  never created or filtered on. All three paths now share
+  `validate::normalize_label` and normalize identically.
+- **`bn triage graph --format text` no longer panics.** A clap argument
+  collision on `--format` aborted the command instead of rendering the graph.
+
 ## v0.24.6 - 2026-05-06
 
 ### Added
