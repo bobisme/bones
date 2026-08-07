@@ -1,0 +1,3 @@
+# bones event log v1
+# fields: wall_ts_us	agent	itc	parents	type	item_id	data	event_hash
+1786130465244936	bones-dev	itc:v3:AWKSZJkkk5JkmZMxAAAAQatWqrq1bWwAAAE3FQ		item.move	bn-1at3	{"state":"done"}	blake3:VsfYqlUzlv6sKAXYlVoyhWtGu-gaySdETfJpH0t5m7s
