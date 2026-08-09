@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Click-drag text selection in the TUI detail pane.** Because the TUI enables
+  mouse capture, the terminal's own selection is bypassed, and the shift-drag
+  fallback grabs a raw screen rectangle — borders, the list column, and all.
+  Dragging inside the detail pane now selects flowing text, highlights it, and
+  copies it to the clipboard on release (`?` lists it under `drag`). Dragging
+  past the top or bottom edge scrolls. Text selected across a soft wrap rejoins
+  without the viewport's line break, so a wrapped paragraph pastes as a
+  paragraph; hard line breaks are preserved.
+
+### Changed
+
+- **The detail pane wraps its own text instead of using `Paragraph::wrap`.**
+  Wrapping in the app gives a 1:1 mapping from screen row to cached line, which
+  is what makes mouse coordinates resolvable to characters. Two side effects:
+  the scroll extent is now exact rather than a `chars / width` estimate that
+  mismeasured wide characters and word wrapping, and each frame clones only the
+  visible rows instead of the entire detail buffer.
+
 ## v0.24.7 - 2026-08-07
 
 ### Fixed

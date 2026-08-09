@@ -870,6 +870,10 @@ mod tests {
             detail_item: None,
             detail_item_id: None,
             detail_lines_cache: Vec::new(),
+            detail_wrapped_cache: Vec::new(),
+            detail_wrap_width: 0,
+            detail_selection: None,
+            detail_select_active: false,
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
@@ -1117,6 +1121,10 @@ mod tests {
             detail_item: None,
             detail_item_id: None,
             detail_lines_cache: Vec::new(),
+            detail_wrapped_cache: Vec::new(),
+            detail_wrap_width: 0,
+            detail_selection: None,
+            detail_select_active: false,
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
@@ -1343,6 +1351,195 @@ mod tests {
         let max = view.max_detail_scroll();
         view.clamp_detail_scroll();
         assert_eq!(view.detail_scroll, max);
+    }
+
+    /// A view with a detail pane at x=20..32, text area (21, 1, 10, 4),
+    /// holding one line that wraps into three rows of ten cells.
+    fn make_selectable_detail_view() -> ListView {
+        let mut view = make_list_view();
+        view.show_detail = true;
+        view.list_area = Rect::new(0, 0, 20, 6);
+        view.detail_area = Rect::new(20, 0, 12, 6);
+        view.detail_lines_cache = vec![Line::from("the quick brown fox jumps over")];
+        view.ensure_detail_wrap();
+        view
+    }
+
+    fn mouse_at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn detail_wrap_produces_one_entry_per_screen_row() {
+        let view = make_selectable_detail_view();
+        let rows: Vec<String> = view
+            .detail_wrapped_cache
+            .iter()
+            .map(|w| crate::tui::selection::line_text(&w.line))
+            .collect();
+        assert_eq!(rows, vec!["the quick ", "brown fox ", "jumps over"]);
+    }
+
+    #[test]
+    fn click_drag_in_detail_selects_the_dragged_text() {
+        let mut view = make_selectable_detail_view();
+
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 21, 1));
+        assert!(view.detail_select_active);
+        assert_eq!(
+            view.detail_selection.map(|s| s.anchor),
+            Some(Pos { line: 0, col: 0 })
+        );
+
+        view.handle_mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), 25, 2));
+        let selection = view.detail_selection.expect("selection after drag");
+        assert_eq!(selection.cursor, Pos { line: 1, col: 4 });
+
+        // Soft-wrapped rows rejoin without the viewport's line break.
+        assert_eq!(
+            selection_text(&view.detail_wrapped_cache, selection),
+            "the quick brow"
+        );
+    }
+
+    #[test]
+    fn dragging_right_of_the_text_selects_to_end_of_row() {
+        let mut view = make_selectable_detail_view();
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 21, 3));
+        view.handle_mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), 99, 3));
+
+        let selection = view.detail_selection.expect("selection after drag");
+        assert_eq!(
+            selection_text(&view.detail_wrapped_cache, selection),
+            "jumps over"
+        );
+    }
+
+    #[test]
+    fn click_in_detail_does_not_move_the_list_selection() {
+        let mut view = make_selectable_detail_view();
+        let before = view.table_state.selected();
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 24, 2));
+        assert_eq!(view.table_state.selected(), before);
+    }
+
+    #[test]
+    fn dragging_below_the_pane_scrolls_the_detail() {
+        let mut view = make_selectable_detail_view();
+        // Four visible rows, so a taller body is needed to have somewhere to go.
+        view.detail_lines_cache = (0..20).map(|i| Line::from(format!("row {i}"))).collect();
+        view.detail_wrap_width = 0;
+        view.ensure_detail_wrap();
+
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 21, 1));
+        assert_eq!(view.detail_scroll, 0);
+        // Row 5 is one past the bottom of the text area (rows 1..=4).
+        view.handle_mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), 21, 5));
+        assert_eq!(view.detail_scroll, 1);
+    }
+
+    #[test]
+    fn resizing_the_pane_drops_a_stale_selection() {
+        let mut view = make_selectable_detail_view();
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 21, 1));
+        view.handle_mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), 25, 2));
+        assert!(view.detail_selection.is_some());
+
+        view.detail_area = Rect::new(20, 0, 22, 6);
+        view.ensure_detail_wrap();
+        assert!(view.detail_selection.is_none());
+    }
+
+    #[test]
+    fn changing_bone_drops_the_selection() {
+        let mut view = make_selectable_detail_view();
+        view.handle_mouse(mouse_at(MouseEventKind::Down(MouseButton::Left), 21, 1));
+        view.handle_mouse(mouse_at(MouseEventKind::Drag(MouseButton::Left), 25, 2));
+        assert!(view.detail_selection.is_some());
+
+        view.clear_detail_lines_cache();
+        assert!(view.detail_selection.is_none());
+        assert!(view.detail_wrapped_cache.is_empty());
+    }
+
+    #[test]
+    fn detail_scroll_extent_matches_the_wrapped_line_count() {
+        let mut view = make_selectable_detail_view();
+        // Three wrapped rows in a four-row viewport: nothing to scroll.
+        assert_eq!(view.max_detail_scroll(), 0);
+
+        view.detail_lines_cache = (0..10).map(|i| Line::from(format!("row {i}"))).collect();
+        view.detail_wrap_width = 0;
+        view.ensure_detail_wrap();
+        assert_eq!(view.detail_wrapped_cache.len(), 10);
+        assert_eq!(view.max_detail_scroll(), 6);
+    }
+
+    /// Draw the view and return the cells that carry the selection background.
+    fn rendered_selection_text(view: &mut ListView, width: u16, height: u16) -> String {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..height {
+            for x in 0..width {
+                let cell = &buffer[(x, y)];
+                if cell.bg == Color::Blue {
+                    out.push_str(cell.symbol());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn selected_text_is_highlighted_in_the_rendered_buffer() {
+        let mut view = make_list_view();
+        view.show_detail = true;
+        view.detail_item = Some(DetailItem {
+            id: "bn-001".to_string(),
+            title: "First".to_string(),
+            description: None,
+            kind: "task".to_string(),
+            state: "open".to_string(),
+            urgency: "default".to_string(),
+            size: None,
+            parent_id: None,
+            labels: vec![],
+            assignees: vec![],
+            blockers: vec![],
+            blocked: vec![],
+            relationships: vec![],
+            comments: vec![],
+            created_at_us: 0,
+            updated_at_us: 0,
+        });
+        // Draw once so the layout assigns real list/detail geometry.
+        let _ = rendered_selection_text(&mut view, 80, 24);
+
+        view.detail_lines_cache = vec![Line::from("alpha bravo charlie")];
+        view.detail_wrap_width = 0;
+        view.ensure_detail_wrap();
+
+        let inner = view.detail_text_area();
+        assert!(inner.width > 0 && inner.height > 0, "detail pane has no area");
+        view.detail_selection = Some(Selection {
+            anchor: Pos { line: 0, col: 6 },
+            cursor: Pos { line: 0, col: 11 },
+        });
+
+        assert_eq!(rendered_selection_text(&mut view, 80, 24), "bravo");
     }
 
     #[test]

@@ -54,6 +54,7 @@ toml = "0.8"
 pulldown-cmark = "0.12"
 ratatui = "0.29"
 crossterm = "0.28"
+unicode-width = "0.2"
 sqlite-vec = "0.1.7-alpha.10"
 
 [profile.release]

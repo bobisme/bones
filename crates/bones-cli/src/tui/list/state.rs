@@ -1873,6 +1873,14 @@ pub struct ListView {
     detail_item_id: Option<String>,
     /// Cached rendered lines for the detail pane (invalidated when `detail_item` changes).
     detail_lines_cache: Vec<Line<'static>>,
+    /// `detail_lines_cache` wrapped to the pane width; one entry per screen row.
+    detail_wrapped_cache: Vec<WrappedLine>,
+    /// Width `detail_wrapped_cache` was built for, so resizes rewrap.
+    detail_wrap_width: u16,
+    /// Active mouse selection in the detail pane, in wrapped-line coordinates.
+    detail_selection: Option<Selection>,
+    /// Whether the left mouse button is currently dragging out a selection.
+    detail_select_active: bool,
     /// Create-bone modal state when open.
     create_modal: Option<CreateModalState>,
     /// Item being edited in create modal; None means create mode.

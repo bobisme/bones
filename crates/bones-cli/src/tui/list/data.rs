@@ -71,6 +71,10 @@ impl ListView {
             detail_item: None,
             detail_item_id: None,
             detail_lines_cache: Vec::new(),
+            detail_wrapped_cache: Vec::new(),
+            detail_wrap_width: 0,
+            detail_selection: None,
+            detail_select_active: false,
             create_modal: None,
             create_modal_edit_item_id: None,
             note_modal: None,
@@ -99,7 +103,7 @@ impl ListView {
             self.blocker_map.clear();
             self.detail_item = None;
             self.detail_item_id = None;
-            self.detail_lines_cache.clear();
+            self.clear_detail_lines_cache();
             self.detail_scroll = 0;
             self.last_refresh = Instant::now();
             return Ok(());
@@ -282,7 +286,38 @@ impl ListView {
         self.detail_area.height.saturating_sub(2) as usize
     }
 
-    fn max_detail_scroll(&self) -> u16 {
+    /// Width in cells available for detail text, inside the pane border.
+    const fn detail_text_width(&self) -> u16 {
+        let w = self.detail_area.width.saturating_sub(2);
+        if w == 0 { 1 } else { w }
+    }
+
+    /// Rewrap the detail lines if the pane width changed since the last wrap.
+    ///
+    /// Wrapped-line coordinates only mean something at a fixed width, so a
+    /// resize drops any live selection rather than leaving it pointing
+    /// somewhere else.
+    fn ensure_detail_wrap(&mut self) {
+        let width = self.detail_text_width();
+        if self.detail_wrap_width == width && !self.detail_wrapped_cache.is_empty() {
+            return;
+        }
+        if self.detail_lines_cache.is_empty() {
+            self.detail_wrapped_cache.clear();
+            self.detail_wrap_width = width;
+            self.detail_selection = None;
+            self.detail_select_active = false;
+            return;
+        }
+        if self.detail_wrap_width != width {
+            self.detail_selection = None;
+            self.detail_select_active = false;
+        }
+        self.detail_wrapped_cache = wrap_lines(&self.detail_lines_cache, width as usize);
+        self.detail_wrap_width = width;
+    }
+
+    fn max_detail_scroll(&mut self) -> u16 {
         if !self.show_detail || self.detail_lines_cache.is_empty() {
             return 0;
         }
@@ -290,21 +325,10 @@ impl ListView {
         if viewport_h == 0 {
             return 0;
         }
-        let wrap_w = self.detail_area.width.saturating_sub(2).max(1) as usize;
-        let total_lines = self
-            .detail_lines_cache
-            .iter()
-            .map(|line| {
-                let width: usize = line
-                    .spans
-                    .iter()
-                    .map(|span| span.content.chars().count())
-                    .sum();
-                width.max(1).div_ceil(wrap_w)
-            })
-            .sum::<usize>();
+        self.ensure_detail_wrap();
 
-        total_lines
+        self.detail_wrapped_cache
+            .len()
             .saturating_sub(viewport_h)
             .min(u16::MAX as usize) as u16
     }

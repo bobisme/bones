@@ -36,7 +36,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::border,
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -49,6 +49,10 @@ use std::{
 use serde_json::json;
 
 use super::actions;
+use super::selection::{
+    Pos, Selection, WrappedLine, col_from_screen_x, highlight_line, line_char_len,
+    line_selection_range, selection_text, wrap_lines,
+};
 
 include!("state.rs");
 include!("data.rs");

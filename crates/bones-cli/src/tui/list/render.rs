@@ -338,13 +338,31 @@ fn render_detail_panel(frame: &mut ratatui::Frame<'_>, app: &ListView, area: Rec
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if app.detail_item.is_some() && !app.detail_lines_cache.is_empty() {
-        frame.render_widget(
-            Paragraph::new(app.detail_lines_cache.clone())
-                .scroll((app.detail_scroll, 0))
-                .wrap(Wrap { trim: false }),
-            inner,
-        );
+    if app.detail_item.is_some() && !app.detail_wrapped_cache.is_empty() {
+        // Lines are pre-wrapped to `inner.width`, so no `Wrap` here: one cached
+        // line is exactly one screen row, which is what lets mouse coordinates
+        // map back to characters.
+        let first = app.detail_scroll as usize;
+        let last = first.saturating_add(inner.height as usize);
+        let visible: Vec<Line<'static>> = app
+            .detail_wrapped_cache
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(last.saturating_sub(first))
+            .map(|(idx, wrapped)| match app.detail_selection {
+                Some(selection) => {
+                    let len = line_char_len(&wrapped.line);
+                    line_selection_range(selection, idx, len).map_or_else(
+                        || wrapped.line.clone(),
+                        |(from, to)| highlight_line(&wrapped.line, from, to),
+                    )
+                }
+                None => wrapped.line.clone(),
+            })
+            .collect();
+
+        frame.render_widget(Paragraph::new(visible), inner);
     } else {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
@@ -953,6 +971,7 @@ fn help_hotkeys() -> Vec<(&'static str, &'static str, &'static str)> {
         ("E", "detail", "edit/remove links"),
         ("x", "detail", "done/reopen with note"),
         ("y", "global", "copy bone ID to clipboard"),
+        ("drag", "detail", "select text; copies to clipboard on release"),
         ("Tab", "create", "next field"),
         ("Shift+Tab", "create", "previous field"),
         ("Ctrl+S", "create", "save/create bone"),
@@ -1077,6 +1096,7 @@ fn render_into(frame: &mut ratatui::Frame<'_>, app: &mut ListView, area: Rect) {
     let detail_area = content_chunks[1];
     app.list_area = table_area;
     app.detail_area = detail_area;
+    app.ensure_detail_wrap();
     app.clamp_detail_scroll();
 
     let body_width = table_area.width.saturating_sub(4).max(10);

@@ -1120,16 +1120,32 @@ impl ListView {
         self.detail_scroll = 0;
         self.detail_item = None;
         self.detail_item_id = None;
-        self.detail_lines_cache.clear();
+        self.clear_detail_lines_cache();
     }
 
     /// Rebuild the cached detail lines from the current `detail_item`.
     fn rebuild_detail_lines_cache(&mut self) {
         if let Some(ref detail) = self.detail_item {
             self.detail_lines_cache = detail_lines(detail);
+            self.invalidate_detail_wrap();
         } else {
-            self.detail_lines_cache.clear();
+            self.clear_detail_lines_cache();
         }
+    }
+
+    /// Drop both detail line caches and any live selection.
+    fn clear_detail_lines_cache(&mut self) {
+        self.detail_lines_cache.clear();
+        self.invalidate_detail_wrap();
+    }
+
+    /// Force the next render to rewrap. The content changed underneath the
+    /// selection, so it is dropped rather than left pointing at stale offsets.
+    fn invalidate_detail_wrap(&mut self) {
+        self.detail_wrap_width = 0;
+        self.detail_wrapped_cache.clear();
+        self.detail_selection = None;
+        self.detail_select_active = false;
     }
 
     fn refresh_selected_detail(&mut self) {
@@ -1140,7 +1156,7 @@ impl ListView {
         let Some(selected_id) = self.selected_item().map(|item| item.item_id.clone()) else {
             self.detail_item = None;
             self.detail_item_id = None;
-            self.detail_lines_cache.clear();
+            self.clear_detail_lines_cache();
             return;
         };
 
@@ -1175,7 +1191,7 @@ impl ListView {
             Err(err) => {
                 self.detail_item = None;
                 self.detail_item_id = None;
-                self.detail_lines_cache.clear();
+                self.clear_detail_lines_cache();
                 self.set_status(format!("detail load error: {err}"));
             }
         }
@@ -1309,6 +1325,12 @@ impl ListView {
 
                 self.split_resize_active = false;
 
+                if self.show_detail && self.detail_text_area().contains((x, y).into()) {
+                    self.begin_detail_selection(x, y);
+                    return;
+                }
+                self.detail_selection = None;
+
                 if self.list_area.contains((x, y).into()) {
                     let row_y = y.saturating_sub(self.list_area.y.saturating_add(1));
                     let table_idx = row_y as usize;
@@ -1323,8 +1345,15 @@ impl ListView {
             MouseEventKind::Drag(MouseButton::Left) if self.split_resize_active => {
                 self.update_split_from_mouse(mouse.column);
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.detail_select_active => {
+                self.extend_detail_selection(mouse.column, mouse.row);
+            }
             MouseEventKind::Up(_) => {
                 self.split_resize_active = false;
+                if self.detail_select_active {
+                    self.detail_select_active = false;
+                    self.finish_detail_selection();
+                }
             }
             MouseEventKind::ScrollDown => {
                 if self.show_detail {
@@ -1341,6 +1370,102 @@ impl ListView {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Rect covering the detail pane's text, excluding its border.
+    const fn detail_text_area(&self) -> Rect {
+        let area = self.detail_area;
+        if area.width < 3 || area.height < 3 {
+            return Rect::new(area.x, area.y, 0, 0);
+        }
+        Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
+    }
+
+    /// Translate a mouse cell into a position in the wrapped detail buffer.
+    ///
+    /// Coordinates outside the pane clamp to its edges so that dragging past a
+    /// border keeps extending the selection instead of snapping back.
+    fn pos_from_mouse(&self, x: u16, y: u16) -> Pos {
+        let inner = self.detail_text_area();
+        if self.detail_wrapped_cache.is_empty() || inner.height == 0 {
+            return Pos { line: 0, col: 0 };
+        }
+
+        let rel_y = y
+            .saturating_sub(inner.y)
+            .min(inner.height.saturating_sub(1));
+        let last = self.detail_wrapped_cache.len().saturating_sub(1);
+        let line = (self.detail_scroll as usize)
+            .saturating_add(rel_y as usize)
+            .min(last);
+
+        let col = self.detail_wrapped_cache.get(line).map_or(0, |wrapped| {
+            if x < inner.x {
+                0
+            } else {
+                col_from_screen_x(&wrapped.line, (x - inner.x) as usize)
+            }
+        });
+
+        Pos { line, col }
+    }
+
+    /// Start a click-drag selection in the detail pane.
+    fn begin_detail_selection(&mut self, x: u16, y: u16) {
+        self.ensure_detail_wrap();
+        if self.detail_wrapped_cache.is_empty() {
+            self.detail_selection = None;
+            self.detail_select_active = false;
+            return;
+        }
+        let pos = self.pos_from_mouse(x, y);
+        self.detail_selection = Some(Selection::new(pos));
+        self.detail_select_active = true;
+    }
+
+    /// Extend the in-progress selection, scrolling when dragged past an edge.
+    fn extend_detail_selection(&mut self, x: u16, y: u16) {
+        let inner = self.detail_text_area();
+        if inner.height == 0 || self.detail_wrapped_cache.is_empty() {
+            return;
+        }
+
+        if y < inner.y {
+            self.scroll_detail_by(-1);
+        } else if y >= inner.y.saturating_add(inner.height) {
+            self.scroll_detail_by(1);
+        }
+
+        let pos = self.pos_from_mouse(x, y);
+        if let Some(selection) = self.detail_selection.as_mut() {
+            selection.cursor = pos;
+        }
+    }
+
+    /// Copy the selection to the clipboard when the drag ends.
+    ///
+    /// A click without a drag selects nothing, so it just clears any previous
+    /// highlight instead of clobbering the clipboard.
+    fn finish_detail_selection(&mut self) {
+        let Some(selection) = self.detail_selection else {
+            return;
+        };
+        if selection.is_empty() {
+            self.detail_selection = None;
+            return;
+        }
+
+        let text = selection_text(&self.detail_wrapped_cache, selection);
+        if text.is_empty() {
+            self.detail_selection = None;
+            return;
+        }
+
+        let chars = text.chars().count();
+        match copy_to_clipboard(&text) {
+            Ok(()) => self.set_status(format!("Copied {chars} chars")),
+            Err(err) => self.set_status(format!("Copy failed: {err}")),
         }
     }
 
