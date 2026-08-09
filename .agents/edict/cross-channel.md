@@ -37,7 +37,7 @@ rite send --agent $AGENT <project> "Getting error X when running seal inbox. Is 
 
 For **bugs or feature requests**, create a bone in their repo first:
 ```bash
-cd <repo-path> && maw exec default -- bn create \
+cd <repo-path> && bn create \
   --title "<clear bug/feature title>" \
   --description "<repro steps, context, your use case>" \
   --tag bug \
@@ -54,7 +54,7 @@ rite send --agent $AGENT <project> "Filed <bone-id>: <summary>. @<project>-dev" 
 **Always** create a tracking bone in your own project so you remember to check back:
 
 ```bash
-maw exec default -- bn create \
+bn create \
   --title "[tracking] <summary of what you posted>" \
   --tag tracking \
   --description "Posted to #<channel>: <what you asked/reported>. Check rite history <channel> --from <project>-dev for response." \

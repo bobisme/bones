@@ -32,7 +32,7 @@ Run this when:
    - Be specific — reference docs, compiler output, or design intent
 
    **Defer** (good idea, but out of scope for this change):
-   - Create a tracking bone: `maw exec default -- bn create --title "<title>" --tag deferred --kind task`
+   - Create a tracking bone: `bn create --title "<title>" --tag deferred --kind task`
    - Reply: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "Deferred to <bone-id> for follow-up"`
 
 3. After handling all threads:
@@ -42,7 +42,7 @@ Run this when:
       - `maw exec $WS -- git commit -m "fix: address review feedback on <review-id>"`
    c. Re-request review: `maw exec $WS -- seal reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
    d. Announce (include workspace name so the reviewer can find the fixed code):
-       `rite send --agent $AGENT $EDICT_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (ws/$WS/)" -L review-response`
+       `rite send --agent $AGENT $EDICT_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (.maw/workspaces/$WS/)" -L review-response`
 
 ## After LGTM
 

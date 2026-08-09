@@ -82,55 +82,62 @@ See `docs/contributor-guide.md` for:
 
 ### How to Make Changes
 
-1. **Create a bone** to track your work: `maw exec default -- bn create --title "..." --description "..."`
-2. **Create a workspace** for your changes: `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as workspace name; this gives you `ws/<bone-id>/`
-3. **Edit files in your workspace** (`ws/<name>/`), never in `ws/default/`
+1. **Create a bone** to track your work: `bn create --title "..." --description "..."`
+2. **Create a workspace** for your changes: `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as workspace name; this gives you `.maw/workspaces/<bone-id>/`
+3. **Edit files in your workspace** (`.maw/workspaces/<name>/`), never in the trunk at the repo root
 4. **Merge when done**: `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` (use conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when merging back into a tracked change)
-5. **Close the bone**: `maw exec default -- bn done <id>`
+5. **Close the bone**: `bn done <id>`
 
 Do not create git branches manually — `maw ws create` handles branching for you. See [worker-loop.md](.agents/edict/worker-loop.md) for the full triage → start → work → finish cycle.
 
 **All tools have `--help`** with usage examples. When unsure, run `<tool> --help` or `<tool> <command> --help`.
 
-### Directory Structure (maw v2)
+### Conflicts Are Data, Not Errors
 
-This project uses a **bare repo** layout. Source files live in workspaces under `ws/`, not at the project root.
+`maw ws sync` rebases committed-ahead workspaces onto the latest epoch by default. On conflict it does not abort — it commits labeled conflict markers and leaves the workspace `lifecycle:conflicted` (visible in `maw ws list`). Treat a conflicted workspace as a normal state, not a failure.
+
+- `maw ws resolve <ws> --list` shows conflicts; `--keep epoch|<ws>|both|union` (or `--keep PATH=NAME`) resolves them.
+- `maw ws merge` auto-syncs stale sources and accepts `--resolve cf-id=<ws>` / `--resolve-all=<ws>` to resolve inline.
+- `maw ws conflicts <ws>` inspects conflict details.
+- The one hard gate: merge refuses a source whose HEAD still has unresolved conflict markers (bypass with `--force` only for legitimate marker-like content).
+
+### Directory Structure
+
+This project uses the **root** layout. The project root is the trunk working copy — source files, `.bones/`, config, and `AGENTS.md` live there. Extra agent workspaces live under `.maw/workspaces/`.
 
 ```
-project-root/          ← bare repo (no source files here)
-├── ws/
-│   ├── default/       ← main working copy (AGENTS.md, .bones/, src/, etc.)
-│   ├── bn-1abc/       ← agent workspace (named after bone ID)
-│   └── bn-2def/       ← another agent workspace
-├── .manifold/         ← maw metadata/artifacts
-├── .git/              ← git data (core.bare=true)
-└── AGENTS.md          ← stub redirecting to ws/default/AGENTS.md
+project-root/              ← trunk working copy (AGENTS.md, .bones/, src/, etc.)
+├── src/, AGENTS.md, …     ← your project files, edited here directly
+├── .maw/
+│   ├── workspaces/
+│   │   ├── bn-1abc/       ← agent workspace (named after bone ID)
+│   │   └── bn-2def/       ← another agent workspace
+│   └── manifold/          ← maw metadata/artifacts
+└── .git/                  ← git data
 ```
 
 **Key rules:**
-- `ws/default/` is the main workspace — bones, config, and project files live here
-- **Never merge or destroy the default workspace.** It is where other branches merge INTO, not something you merge.
-- Agent workspaces (`ws/<name>/`) are isolated Git worktrees managed by maw
-- Use `maw exec <ws> -- <command>` to run commands in a workspace context
-- Use `maw exec default -- bn ...` for bones commands (always in default workspace)
+- The project root is the trunk — bones, config, and project files live here, and you edit them directly
+- **Never merge or destroy the `default` workspace.** `default` names the trunk (the repo root); other workspaces merge INTO it, not the other way around.
+- Agent workspaces (`.maw/workspaces/<name>/`) are isolated Git worktrees managed by maw
+- Use `maw exec <ws> -- <command>` to run commands in a non-default workspace context
+- Run `bn ...` directly at the repo root for bones commands (no `maw exec` prefix needed — they always target the trunk)
 - Use `maw exec <ws> -- seal ...` for review commands (always in the review's workspace)
-- Never run `bn` or `seal` directly — always go through `maw exec`
-- Do not run `jj`; this workflow is Git + maw.
 
 ### Bones Quick Reference
 
 | Operation | Command |
 |-----------|---------|
-| Triage (scores) | `maw exec default -- bn triage` |
-| Next bone | `maw exec default -- bn next` |
-| Next N bones | `maw exec default -- bn next N` (e.g., `bn next 4` for dispatch) |
-| Show bone | `maw exec default -- bn show <id>` |
-| Create | `maw exec default -- bn create --title "..." --description "..."` |
-| Start work | `maw exec default -- bn do <id>` |
-| Add comment | `maw exec default -- bn bone comment add <id> "message"` |
-| Close | `maw exec default -- bn done <id>` |
-| Add dependency | `maw exec default -- bn triage dep add <blocker> --blocks <blocked>` |
-| Search | `maw exec default -- bn search <query>` |
+| Triage (scores) | `bn triage` |
+| Next bone | `bn next` |
+| Next N bones | `bn next N` (e.g., `bn next 4` for dispatch) |
+| Show bone | `bn show <id>` |
+| Create | `bn create --title "..." --description "..."` |
+| Start work | `bn do <id>` |
+| Add comment | `bn bone comment add <id> "message"` |
+| Close | `bn done <id>` |
+| Add dependency | `bn triage dep add <blocker> --blocks <blocked>` |
+| Search | `bn search <query>` |
 
 Identity resolved from `$AGENT` env. No flags needed in agent loops.
 
@@ -155,7 +162,7 @@ Identity resolved from `$AGENT` env. No flags needed in agent loops.
 | Search recovery snapshots | `maw ws recover --search <pattern>` |
 | Show file from snapshot | `maw ws recover <name> --show <path>` |
 
-**Inspecting a workspace (use git, not jj):**
+**Inspecting a workspace:**
 ```bash
 maw exec <name> -- git status             # what changed (unstaged)
 maw exec <name> -- git log --oneline -5   # recent commits
@@ -241,11 +248,11 @@ Agents communicate via rite channels. You don't need to be expert on everything 
 |-----------|---------|
 | Send message | `rite send --agent $AGENT <channel> "message" [-L label]` |
 | Check inbox | `rite inbox --agent $AGENT --channels <ch> [--mark-read]` |
-| Wait for reply | `rite wait -c <channel> --mention -t 120` |
+| Wait for reply | `rite wait --mentions --from <agent> -t 120` |
 | Browse history | `rite history <channel> -n 20` |
 | Search messages | `rite search "query" -c <channel>` |
 
-**Conversations**: After sending a question, use `rite wait -c <channel> --mention -t <seconds>` to block until the other agent replies. This enables back-and-forth conversations across channels.
+**Conversations**: After sending a question, use `rite wait --mentions --from <agent> -t <seconds>` to block until that agent replies. This enables back-and-forth conversations across channels.
 
 **Project experts**: Each `<project>-dev` is the expert on their project. When stuck on a companion tool (rite, maw, seal, vessel, bn), post a question to its project channel instead of guessing.
 
@@ -258,10 +265,57 @@ Agents communicate via rite channels. You don't need to be expert on everything 
 3. For bugs, create bones in their repo first
 4. **Always create a local tracking bone** so you check back later:
    ```bash
-   maw exec default -- bn create --title "[tracking] <summary>" --tag tracking --kind task
+   bn create --title "[tracking] <summary>" --tag tracking --kind task
    ```
 
 See [cross-channel.md](.agents/edict/cross-channel.md) for the full workflow.
+
+### Communication
+
+Use ASD-STE100 Simplified Technical English for prose. Strict compliance is not the goal. Aim for terse, unambiguous language.
+
+Do not apply STE to code, identifiers, commands, marketing copy, essays, or voice-driven writing.
+
+#### Language
+
+- Limit sentences to 20 words.
+- Replace semicolons and contractions.
+- Use active voice when the actor is known.
+- Use plain verbs. Avoid nominalization, phrasal verbs, and "-ing" main verbs.
+- Use one consistent name for each thing.
+
+#### rite messages
+
+Keep a channel message to one or two lines. Lead with the subject of the label. The label and the bone ID already carry the context, so do not add status blocks, numbered steps, or closing actions.
+
+- `[task-claim] Working on <bone-id>: <title>`
+- `[review-request] Review requested: <review-id> for <bone-id> @<reviewer>`
+- `[task-blocked] Blocked on <thing>: <what unblocks it>`
+
+#### Replies to a human
+
+1. Start with a concrete action. Put commands, paths, or snippets first.
+2. Number multistep tasks. Give each step one bounded action.
+3. Limit lists to five items. Split longer lists by priority.
+4. State the current step, what is complete, what remains, and what it waits on.
+5. End with the next action, or state what you wait on.
+
+Finish the current issue before you present another. State errors as evidence, cause, and fix.
+
+Do not use preambles, recaps, pleasantries, tangents, emotional error language, or empty hedges.
+
+Never state a time estimate you cannot support. You do not know how long a build, a test run, or another agent takes. Name what you wait on instead.
+
+#### Exceptions
+
+- Explain fully when the user asks for an explanation or a walkthrough.
+- Confirm before destructive actions.
+- After three failed fixes, state the uncertain assumption and ask one diagnostic question.
+- Ask one short question when real ambiguity makes a guess risky.
+
+Before you send, remove announcements, repeated summaries, sidebars, and empty closing questions.
+
+The first line must give the action. The last line must give the result or the next action.
 
 ### Session Search (optional)
 

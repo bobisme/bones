@@ -14,7 +14,7 @@ Your identity is `$AGENT`. All rite commands must include `--agent $AGENT`. Run 
 3. For each review, gather context before commenting. Use `maw exec $WS --` for all seal commands targeting a workspace review:
    a. Read the review and diff: `maw exec $WS -- seal review <id>` and `maw exec $WS -- seal diff <id>`
       - `maw exec $WS -- seal review <id> --format=json` includes workspace info for reading source files
-   b. Read the full source files changed in the diff from the **workspace path** (e.g., `ws/$WS/src/file.rs`), not project root
+   b. Read the full source files changed in the diff from the **workspace path** (e.g., `.maw/workspaces/$WS/src/file.rs`), not project root
    c. Read project config (e.g., `Cargo.toml`) for edition and dependency versions
    d. Run static analysis in the workspace: `maw exec $WS -- cargo clippy 2>&1` — cite warnings in your comments
    e. If unsure about framework or library behavior, use web search to verify before commenting
@@ -39,7 +39,7 @@ Focus on security and correctness. Ground findings in evidence — compiler outp
 When re-review is requested after a block, the author's fixes live in their **workspace**, not on the main branch. The main branch still has the pre-fix code until merge.
 
 1. Identify the workspace from `maw exec $WS -- seal review <id> --format=json` (workspace info is auto-detected from the change_id).
-2. Read source files from the **workspace path** (e.g., `ws/$WS/src/main.rs`), not from the project root.
+2. Read source files from the **workspace path** (e.g., `.maw/workspaces/$WS/src/main.rs`), not from the project root.
 3. Run static analysis in the workspace: `maw exec $WS -- cargo clippy 2>&1`
 4. Verify each fix against the original issue — read actual code, don't just trust thread replies.
 5. If all issues are resolved: `maw exec $WS -- seal lgtm <id>`. If issues remain: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "..."` explaining what's still wrong.

@@ -18,7 +18,7 @@ For simpler work: level 2 (single bone, sequential) or level 3 (parallel dispatc
 Create a bone with the `mission` tag and a structured description:
 
 ```bash
-maw exec default -- bn create \
+bn create \
   --title "Add OAuth login support" \
   --tag mission \
   --kind task \
@@ -40,17 +40,17 @@ Create child bones for each unit of work. Each child gets a `mission:<mission-id
 
 ```bash
 # Create child bone
-maw exec default -- bn create \
+bn create \
   --title "Add OAuth callback handler" \
   --tag "mission:bd-abc" \
   --kind task \
   --description "Handle OAuth provider callbacks, exchange code for token. Acceptance: callback endpoint returns 200 with valid session."
 
 # Wire parent dependency
-maw exec default -- bn triage dep add <mission-id> --blocks <child-id>
+bn triage dep add <mission-id> --blocks <child-id>
 
 # Wire inter-child dependencies if needed
-maw exec default -- bn triage dep add <earlier-child> --blocks <later-child>
+bn triage dep add <earlier-child> --blocks <later-child>
 ```
 
 **Rules:**
@@ -63,7 +63,7 @@ maw exec default -- bn triage dep add <earlier-child> --blocks <later-child>
 Verify the dependency graph:
 
 ```bash
-maw exec default -- bn triage graph
+bn triage graph
 ```
 
 Announce the plan:
@@ -86,7 +86,7 @@ rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<child-id>" -m "<child-i
 rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/<child-id>" -m "<child-id>"
 
 # Add mission context comment to child bone
-maw exec default -- bn bone comment add <child-id> \
+bn bone comment add <child-id> \
   "Mission context: <mission-id> — <outcome>. Siblings: <sibling-ids>. Workspace: <child-id>"
 
 # Spawn worker with mission env vars
@@ -110,7 +110,7 @@ Each checkpoint:
 
 1. **Count children by state:**
    ```bash
-   maw exec default -- bn list --tag "mission:<mission-id>" --format json
+   bn list --tag "mission:<mission-id>" --format json
    ```
    Tally: N open, M doing, K done.
 
@@ -147,7 +147,7 @@ Exit the checkpoint loop when all children are done, or no workers are alive and
 
 2. Worker dies again (`RETRY:1` marker already exists):
    - Comment: `"Worker died again after retry. Marking done with failure."`
-   - Destroy workspace if it exists: `maw ws destroy <ws>`
+   - Destroy workspace if it exists: preview first with `maw ws destroy <ws> --dry-run` (a dead worker's workspace normally has unmerged commits, which a plain `maw ws destroy` refuses), then `maw ws destroy <ws> --force` — `--force` pins a full recovery snapshot before destroying, so the work stays recoverable via `maw ws recover <ws>`
    - Release claims: `rite claims release --agent $AGENT "bone://$EDICT_PROJECT/<child-id>"`
    - Announce: `rite send --agent $AGENT $EDICT_PROJECT "Bone <child-id> failed: worker died twice" -L task-blocked`
 
@@ -155,17 +155,17 @@ Exit the checkpoint loop when all children are done, or no workers are alive and
 
 When all children are done:
 
-1. **Verify:** `maw exec default -- bn list --tag "mission:<mission-id>"` — all should be done.
+1. **Verify:** `bn list --tag "mission:<mission-id>"` — all should be done.
 
 2. **Write synthesis log** as a bone comment:
    ```bash
-   maw exec default -- bn bone comment add <mission-id> \
+   bn bone comment add <mission-id> \
      "Mission complete.\n\nChildren: N total, all done.\nKey decisions: <what changed during execution>\nWhat worked: <patterns that succeeded>\nWhat to avoid: <patterns that failed>\nKey artifacts: <files/modules created or modified>"
    ```
 
 3. **Close the mission bone:**
    ```bash
-   maw exec default -- bn done <mission-id> --reason "All children completed"
+   bn done <mission-id> --reason "All children completed"
    ```
 
 4. **Announce:**

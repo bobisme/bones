@@ -19,7 +19,7 @@ If the task is already small and clear (one reviewable change), skip planning an
    - Sequential dependencies (A must happen before B)
    - Parallel opportunities (C and D can happen simultaneously)
 4. **Create bones.** For each unit:
-   - `maw exec default -- bn create --title "..." --description "..." --kind task`
+   - `bn create --title "..." --description "..." --kind task`
    - Title: imperative, specific (e.g., "Add OAuth callback handler", not "OAuth stuff")
    - Description: what, why, acceptance criteria, testing strategy
 5. **Assign risk tags** to each bone based on:
@@ -34,16 +34,16 @@ If the task is already small and clear (one reviewable change), skip planning an
    - `risk:high` — Security-sensitive, data integrity, user-visible behavior changes. Security review + failure-mode checklist required.
    - `risk:critical` — Irreversible actions, migrations, regulated changes. Human approval required before merge.
 
-   Apply tags: `maw exec default -- bn bone tag <bone-id> risk:<level>`
+   Apply tags: `bn bone tag <bone-id> risk:<level>`
 
    Only add tags for `risk:low`, `risk:high`, or `risk:critical`. Default is `risk:medium` (no tag needed).
 
    Risk can be escalated upward by any agent. Downgrades require lead approval with justification comment.
 6. **Wire dependencies.** If order matters:
-   - `maw exec default -- bn triage dep add <earlier> --blocks <later>`
-   - Parent bones (epics) get children via `maw exec default -- bn triage dep add <parent> --blocks <child>`
+   - `bn triage dep add <earlier> --blocks <later>`
+   - Parent bones (epics) get children via `bn triage dep add <parent> --blocks <child>`
    - **Phased plans**: When a plan has phases (Phase I, II, III...), always wire phase goal bones sequentially so earlier phases block later ones: `bn triage dep add <phase-1-goal> --blocks <phase-2-goal>`. Without this, triage treats all phases as equal priority, defeating the purpose of phased planning.
-7. **Verify the graph.** `maw exec default -- bn triage graph` — check that:
+7. **Verify the graph.** `bn triage graph` — check that:
    - Parallel work is actually parallel (not chained when it doesn't need to be)
    - Dependencies reflect reality (you can't test without implementing)
    - **Phase ordering is present**: If the plan has phases, verify phase goals have dependency edges between them. If all phases have identical triage scores, the phase ordering is likely missing.
@@ -106,7 +106,7 @@ If the task is small enough for one bone, skip missions entirely.
 Create a mission bone with the `mission` tag and a structured description:
 
 ```bash
-maw exec default -- bn create \
+bn create \
   --title "Add OAuth login support" \
   --tag mission \
   --kind task \
@@ -128,17 +128,17 @@ When creating child bones under a mission:
 
 1. **Wire the dependency** to connect child to mission:
    ```bash
-   maw exec default -- bn triage dep add <mission-id> --blocks <child-id>
+   bn triage dep add <mission-id> --blocks <child-id>
    ```
 
 2. **Tag for querying** with `mission:<mission-id>` so siblings can be discovered:
    ```bash
-   maw exec default -- bn bone tag <child-id> "mission:<mission-id>"
+   bn bone tag <child-id> "mission:<mission-id>"
    ```
 
 3. **Query siblings** to see all children of a mission:
    ```bash
-   maw exec default -- bn list --tag "mission:bd-xxx"
+   bn list --tag "mission:bd-xxx"
    ```
 
 ### Mission Invariants

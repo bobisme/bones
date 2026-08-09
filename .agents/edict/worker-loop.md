@@ -17,7 +17,7 @@ If spawned by `edict run worker-loop`, your identity is provided as `$AGENT` (a 
 
 Your project channel is `$EDICT_PROJECT`. All rite commands must include `--agent $AGENT`. All announcements go to `$EDICT_PROJECT` with appropriate labels (e.g., `-L task-claim`, `-L review-request`).
 
-**Important:** Run all `bn` commands via `maw exec default --` (e.g., `maw exec default -- bn do ...`). This ensures they always run in the default workspace context. Run `seal` commands via `maw exec $WS --` to target the correct workspace.
+**Important:** Run `bn` commands directly (e.g., `bn do ...`) — they operate on the trunk at the repo root. Run `seal` commands via `maw exec $WS --` to target the correct workspace.
 
 ## Loop
 
@@ -27,9 +27,9 @@ Before triaging new work, check if you have unfinished work from a previous sess
 
 **First, check for doing bones owned by you:**
 
-- `maw exec default -- bn list --state doing --format json` — shows all bones in doing state
+- `bn list --state doing --format json` — shows all bones in doing state
 - If any bones are found that you own, you have unfinished work. For each bone:
-  1. Read the bone and its comments: `maw exec default -- bn show <bone-id>`
+  1. Read the bone and its comments: `bn show <bone-id>`
   2. Check if you still hold claims: `rite claims list --agent $AGENT --mine`
   3. Determine the state:
      - **If "Review requested: <review-id>" comment exists:**
@@ -55,39 +55,38 @@ Before triaging new work, check if you have unfinished work from a previous sess
 
 ### 1. Triage — find and groom work, then pick one small task (always run this, even if you already know what to work on)
 
-- **Mission context**: If a bone has a `mission:bd-xxx` label, you are working as part of a mission. Check the mission bone (`maw exec default -- bn show <mission-id>`) for shared outcome, constraints, and sibling context before starting work.
+- **Mission context**: If a bone has a `mission:bd-xxx` label, you are working as part of a mission. Check the mission bone (`bn show <mission-id>`) for shared outcome, constraints, and sibling context before starting work.
 - Check inbox: `rite inbox --agent $AGENT --channels $EDICT_PROJECT --mark-read`
-- For messages that request work, create bones: `maw exec default -- bn create --title "..." --description "..." --kind task`
+- For messages that request work, create bones: `bn create --title "..." --description "..." --kind task`
 - For questions or status checks, reply directly: `rite send --agent $AGENT <channel> "<reply>" -L triage-reply`
-- Check next work: `maw exec default -- bn next`
+- Check next work: `bn next`
 - If no work available and no new bones from inbox, stop with message "No work available."
-- **Groom each ready bone** (`maw exec default -- bn show <id>`): ensure it has a clear title, description with acceptance criteria and testing strategy, appropriate urgency, and tags. Fix anything missing and comment what you changed.
-- Pick one task: `maw exec default -- bn next` — parse the output to get the bone ID.
+- **Groom each ready bone** (`bn show <id>`): ensure it has a clear title, description with acceptance criteria and testing strategy, appropriate urgency, and tags. Fix anything missing and comment what you changed.
+- Pick one task: `bn next` — parse the output to get the bone ID.
 - If the task is large (epic or multi-step), decompose it:
   1. **Groom the parent** first — add tags, refine acceptance criteria, note any discrepancies between the description and the actual project state. Comment your findings on the parent bone.
-  2. **Create child bones** with `maw exec default -- bn create --title "..." --kind task` — each one a resumable unit of work. Titles in imperative form. Descriptions must include acceptance criteria (what "done" looks like).
+  2. **Create child bones** with `bn create --title "..." --kind task` — each one a resumable unit of work. Titles in imperative form. Descriptions must include acceptance criteria (what "done" looks like).
   3. **Set urgency** that reflects execution order — foundation subtasks get higher urgency than downstream features, tests get lowest.
-  4. **Wire dependencies** with `maw exec default -- bn triage dep add <earlier> --blocks <later>`. Look for parallelism — tasks that share a prerequisite but don't depend on each other should not be chained linearly.
+  4. **Wire dependencies** with `bn triage dep add <earlier> --blocks <later>`. Look for parallelism — tasks that share a prerequisite but don't depend on each other should not be chained linearly.
   5. **Comment your decomposition plan** on the parent bone: what you created, why, and any decisions you made.
-  6. **Verify** with `maw exec default -- bn triage graph` — the graph should have at least one point where multiple tasks are unblocked simultaneously.
-  7. Run `maw exec default -- bn next` again. Repeat until you have exactly one small, atomic task.
+  6. **Verify** with `bn triage graph` — the graph should have at least one point where multiple tasks are unblocked simultaneously.
+  7. Run `bn next` again. Repeat until you have exactly one small, atomic task.
 - If the bone is claimed by another agent (`rite claims check --agent $AGENT "bone://$EDICT_PROJECT/<id>"`), skip it and pick the next recommendation. If all are claimed, stop with "No work available."
 
 ### 2. Start — claim and set up
 
-- `maw exec default -- bn do <bone-id>`
+- `bn do <bone-id>`
 - `rite claims stake --agent $AGENT "bone://$EDICT_PROJECT/<bone-id>" -m "<bone-id>"`
 - `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as the workspace name. Store as `$WS`. Use `--change <change-id>` instead of `--from main` when continuing change-bound work.
-- **All file operations must use the workspace path** `ws/$WS/`. Use absolute paths for Read, Write, and Edit (e.g., `$PROJECT_ROOT/ws/$WS/src/file.rs`). For commands: `maw exec $WS -- <command>`.
-- **No `jj`**: this workflow is Git + maw. Keep workspace operations in `maw` and run `git` only via `maw exec $WS -- ...`.
+- **All file operations must use the workspace path** `.maw/workspaces/$WS/`. Use absolute paths for Read, Write, and Edit (e.g., `$PROJECT_ROOT/.maw/workspaces/$WS/src/file.rs`). For commands: `maw exec $WS -- <command>`.
 - `rite claims stake --agent $AGENT "workspace://$EDICT_PROJECT/$WS" -m "<bone-id>"`
 - `rite send --agent $AGENT $EDICT_PROJECT "Working on <bone-id>: <bone-title>" -L task-claim`
 
 ### 3. Work — implement the task
 
-- Read the bone details: `maw exec default -- bn show <bone-id>`
+- Read the bone details: `bn show <bone-id>`
 - Do the work using the tools available in the workspace.
-- **You must add at least one progress comment** during work: `maw exec default -- bn bone comment add <bone-id> "Progress: ..."`
+- **You must add at least one progress comment** during work: `bn bone comment add <bone-id> "Progress: ..."`
   - Post when you've made meaningful progress or hit a milestone
   - This is required before you can close the bone — do not skip it
   - Essential for visibility and debugging if something goes wrong
@@ -97,11 +96,11 @@ Before triaging new work, check if you have unfinished work from a previous sess
 You are stuck if: you attempted the same approach twice without progress, you cannot find needed information or files, or a tool command fails repeatedly.
 
 If stuck:
-- Add a detailed comment with what you tried and where you got blocked: `maw exec default -- bn bone comment add <bone-id> "Blocked: ..."`
+- Add a detailed comment with what you tried and where you got blocked: `bn bone comment add <bone-id> "Blocked: ..."`
 - Post in the project channel: `rite send --agent $AGENT $EDICT_PROJECT "Stuck on <bone-id>: <summary>" -L task-blocked`
 - **If a tool behaved unexpectedly**, ask the responsible project for help (see [cross-channel](cross-channel.md)):
   1. Post to their channel: `rite send --agent $AGENT <tool-project> "Getting <error> when running <command>. Context: <details>. @<project>-dev" -L feedback`
-  2. Create a local tracking bone: `maw exec default -- bn create --title "[tracking] Asked #<project> about <issue>" --tag tracking --kind task`
+  2. Create a local tracking bone: `bn create --title "[tracking] Asked #<project> about <issue>" --tag tracking --kind task`
 - Move on to triage again (go to step 1).
 
 **Tip**: Before declaring stuck, try `cass search "your error or problem"` to find how similar issues were solved in past sessions.
@@ -115,7 +114,7 @@ After completing the implementation:
   - `maw exec $WS -- git add -A`
   - `maw exec $WS -- git commit -m "<bone-id>: <summary>"`
 - **Check the bone's risk label** to determine review routing:
-  - Get bone details: `maw exec default -- bn show <bone-id>`
+  - Get bone details: `bn show <bone-id>`
   - Look for `risk:low`, `risk:high`, or `risk:critical` in tags
   - No risk tag = `risk:medium` (standard review)
 
@@ -123,7 +122,7 @@ After completing the implementation:
 
 **risk:low** — Skip review entirely:
 - Do NOT create a seal review
-- Add self-review comment: `maw exec default -- bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
+- Add self-review comment: `bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
 - Proceed directly to step 6 (Finish)
 
 **risk:medium** (default) — Standard review:
@@ -132,7 +131,7 @@ After completing the implementation:
   - Running via `maw exec $WS --` ensures seal knows which workspace contains the changes
   - Always include the bone ID in the description so reviewers have context
   - Explain what changed and why, not just a summary
-- Add a comment to the bone: `maw exec default -- bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (ws/$WS/)"`
+- Add a comment to the bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
 - **If requesting a specialist reviewer** (e.g., security):
   - Announce with @mention to trigger spawn: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, @<reviewer>" -L review-request`
   - The @mention triggers auto-spawn hooks
@@ -143,13 +142,13 @@ After completing the implementation:
 
 **risk:high** — Security review with failure-mode checklist:
 - Create seal review with security reviewer: `maw exec $WS -- seal reviews create --agent $AGENT --title "<bone-title>" --description "For <bone-id>: <summary>. risk:high — failure-mode checklist required. Please answer: 1) What failure modes exist? 2) What edge cases need validation? 3) How can we roll back if this breaks? 4) What monitoring/alerts should we add? 5) What input validation is needed?" --reviewers $EDICT_PROJECT-security`
-- Add comment to bone: `maw exec default -- bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (ws/$WS/)"`
+- Add comment to bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
 - Announce with @mention: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, @$EDICT_PROJECT-security" -L review-request`
 - **STOP this iteration.**
 
 **risk:critical** — Security review + human approval:
 - Create seal review with security reviewer: `maw exec $WS -- seal reviews create --agent $AGENT --title "<bone-title>" --description "For <bone-id>: <summary>. risk:critical — requires human approval before merge." --reviewers $EDICT_PROJECT-security`
-- Add comment to bone: `maw exec default -- bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (ws/$WS/)"`
+- Add comment to bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
 - Post to rite requesting human approval: `rite send --agent $AGENT $EDICT_PROJECT "risk:critical review for <bone-id>: requires human approval before merge. Review: <review-id> @<approver>" -L review-request`
   - List of approvers from `.edict.toml` → `project.criticalApprovers`
   - If no `criticalApprovers` configured, use project lead: `@$EDICT_PROJECT-lead`
@@ -164,10 +163,10 @@ If a review was conducted:
 - Mark review as merged: `maw exec $WS -- seal reviews mark-merged <review-id> --agent $AGENT`
 
 Then proceed with teardown:
-- `maw exec default -- bn bone comment add <bone-id> "Completed by $AGENT"`
-- `maw exec default -- bn done <bone-id> --reason "Completed"`
+- `bn bone comment add <bone-id> "Completed by $AGENT"`
+- `bn done <bone-id> --reason "Completed"`
 - `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when the workspace is change-bound; if merge conflict, preserve workspace and announce)
-- `maw push` (if pushMain enabled in `.edict.toml`; maw v0.24.0+ handles bookmark and push)
+- `maw push` (if pushMain enabled in `.edict.toml`; pushes the configured branch. Use `maw push --advance` after direct commits.)
 - `rite claims release --agent $AGENT --all`
 - `rite send --agent $AGENT $EDICT_PROJECT "Completed <bone-id>: <bone-title>" -L task-done`
 

@@ -61,7 +61,7 @@ High-level breakdown of work (becomes child bones if accepted):
 
 ## Creating a Proposal
 
-1. Create bone: `maw exec default -- bn create --title "Proposal: <title>" --tag proposal --kind task`
+1. Create bone: `bn create --title "Proposal: <title>" --tag proposal --kind task`
 2. Create doc at `./notes/proposals/<slug>.md` using template above
 3. Update bone description to reference the doc
 
@@ -70,20 +70,20 @@ High-level breakdown of work (becomes child bones if accepted):
 1. Change status header in doc to `**Status**: VALIDATING`
 2. Investigate open questions (explore code, prototype, discuss)
 3. Move answered questions from "Open Questions" to "Answered Questions" section
-4. Add comment to bone with findings: `maw exec default -- bn bone comment add <id> "Validated X, answer is Y"`
+4. Add comment to bone with findings: `bn bone comment add <id> "Validated X, answer is Y"`
 
 ## Accepting a Proposal
 
 1. Change status header in doc to `**Status**: ACCEPTED`
 2. Create implementation bones using the "Implementation Plan" section
-3. Wire dependencies: `maw exec default -- bn triage dep add <proposal-id> --blocks <child-id>`
-4. Close proposal bone: `maw exec default -- bn done <id> --reason "Accepted - implementation bones created"`
+3. Wire dependencies: `bn triage dep add <proposal-id> --blocks <child-id>`
+4. Close proposal bone: `bn done <id> --reason "Accepted - implementation bones created"`
 
 ## Rejecting a Proposal
 
 1. Change status header in doc to `**Status**: REJECTED`
 2. Add "## Rejection Reason" section explaining why
-3. Close proposal bone: `maw exec default -- bn done <id> --reason "Rejected - <brief reason>"`
+3. Close proposal bone: `bn done <id> --reason "Rejected - <brief reason>"`
 
 ## Lifecycle Summary
 
@@ -98,8 +98,8 @@ High-level breakdown of work (becomes child bones if accepted):
 
 ```bash
 # List all open proposals
-maw exec default -- bn list --tag proposal
+bn list --tag proposal
 
 # Show a specific proposal bone
-maw exec default -- bn show <id>
+bn show <id>
 ```

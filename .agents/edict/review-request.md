@@ -22,7 +22,7 @@ The rite hook system watches for @mentions. When you send a message containing `
 1. Resolve agent identity: use `--agent` argument if provided, otherwise `$AGENT` env var. If neither is set, stop and instruct the user. Run `rite whoami --agent $AGENT` first to confirm; if it returns a name, use it.
 
 2. **Check the bone's risk tag** to determine review routing:
-   - Get bone details: `maw exec default -- bn show <bone-id>`
+   - Get bone details: `bn show <bone-id>`
    - Look for `risk:low`, `risk:high`, or `risk:critical` in tags
    - No risk tag = `risk:medium` (standard review)
 
@@ -30,7 +30,7 @@ The rite hook system watches for @mentions. When you send a message containing `
 
    **risk:low** — Skip review entirely:
    - Do NOT create a seal review
-   - Add self-review comment: `maw exec default -- bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
+   - Add self-review comment: `bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
    - Proceed directly to finish (skip remaining steps)
 
    **risk:medium** (default) — Standard review:
@@ -66,7 +66,7 @@ The rite hook system watches for @mentions. When you send a message containing `
 
 5. **Post review details to the bone** for crash recovery:
    ```bash
-   maw exec default -- bn bone comment add <bone-id> "Review created: <review-id> in workspace <ws-name> (ws/<ws-name>)"
+   bn bone comment add <bone-id> "Review created: <review-id> in workspace <ws-name> (.maw/workspaces/<ws-name>)"
    ```
    Include: review ID and workspace name. This lets another agent find the review and workspace if the session crashes.
 
