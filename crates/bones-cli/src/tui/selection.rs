@@ -296,9 +296,21 @@ pub fn selection_text(lines: &[WrappedLine], selection: Selection) -> String {
     out
 }
 
+/// Background for selected cells.
+///
+/// A fixed mid-blue from the 256-color cube rather than `Color::Blue`. The
+/// first sixteen ANSI slots are remapped by the terminal's theme, and dark
+/// themes typically render slot 4 as a near-black navy that white text
+/// disappears into. Indices 16 and up are not remapped, so this holds roughly
+/// 6.5:1 against white whatever theme is loaded.
+pub const SELECTION_BG: Color = Color::Indexed(25);
+
+/// Foreground for selected cells.
+pub const SELECTION_FG: Color = Color::White;
+
 /// Style applied to selected cells.
 fn selection_style() -> Style {
-    Style::default().bg(Color::Blue).fg(Color::White)
+    Style::default().bg(SELECTION_BG).fg(SELECTION_FG)
 }
 
 /// Return `line` with characters in `[from, to)` restyled as selected.

@@ -1495,7 +1495,7 @@ mod tests {
         for y in 0..height {
             for x in 0..width {
                 let cell = &buffer[(x, y)];
-                if cell.bg == Color::Blue {
+                if cell.bg == crate::tui::selection::SELECTION_BG {
                     out.push_str(cell.symbol());
                 }
             }
