@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.25.0 - 2026-08-09
 
 ### Added
 
@@ -21,6 +21,13 @@
   the scroll extent is now exact rather than a `chars / width` estimate that
   mismeasured wide characters and word wrapping, and each frame clones only the
   visible rows instead of the entire detail buffer.
+
+- **The selection highlight uses a theme-stable mid-blue.** It was
+  `Color::Blue`, i.e. ANSI slot 4, which the terminal theme remaps; dark themes
+  typically render it as a near-black navy that the white selected text
+  disappeared into. Indices 16 and up in the 256-color cube are not remapped, so
+  `Indexed(25)` (`#005faf`) holds roughly 6.5:1 against white whatever theme is
+  loaded. Exposed as `SELECTION_BG` / `SELECTION_FG`.
 
 ## v0.24.7 - 2026-08-07
 
