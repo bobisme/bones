@@ -9,6 +9,9 @@ Your identity is `$AGENT`. All rite commands must include `--agent $AGENT`. Run 
 1. Read new review requests:
    - `rite inbox --agent $AGENT --channels $EDICT_PROJECT --mark-read`
    - `rite wait --agent $AGENT -L review-request -t 5` (optional)
+   - Note `$RITE_MESSAGE_ID` — the request that spawned you. It is the anchor for your
+     verdict. For a lease batch, the anchor is the LAST id in `$RITE_BATCH_MESSAGE_IDS`.
+   - Read what led to the request with `rite history --thread "$RITE_MESSAGE_ID"`.
 2. Find open reviews by iterating workspaces: `maw ws list --format json`, then `maw exec $WS -- seal inbox --agent $AGENT --format=json` per workspace
    - The reviewer-loop script handles this iteration automatically
 3. For each review, gather context before commenting. Use `maw exec $WS --` for all seal commands targeting a workspace review:
@@ -30,7 +33,12 @@ Your identity is `$AGENT`. All rite commands must include `--agent $AGENT`. Run 
 5. Vote:
    - `maw exec $WS -- seal block <id> --reason "..."` if any CRITICAL or HIGH issues exist
    - `maw exec $WS -- seal lgtm <id>` if no CRITICAL or HIGH issues
-6. Post a summary in the project channel and tag the author: `rite send --agent $AGENT $EDICT_PROJECT "..." -L review-done`
+6. Post the verdict as a **reply to the request**, tagging the author:
+   `rite send --agent $AGENT $EDICT_PROJECT "Review complete: <review-id> — <LGTM|BLOCKED> @<author>" -L review-done --reply-to "$RITE_MESSAGE_ID"`
+
+   The author blocks on `rite wait --reply-to <that id>`. A top-level verdict does not
+   satisfy the wait, so the author sits until timeout and then escalates. Post the reply as
+   soon as you vote, even when you plan to add more detail afterwards.
 
 Focus on security and correctness. Ground findings in evidence — compiler output, documentation, or source code — not assumptions about API behavior.
 
@@ -43,3 +51,5 @@ When re-review is requested after a block, the author's fixes live in their **wo
 3. Run static analysis in the workspace: `maw exec $WS -- cargo clippy 2>&1`
 4. Verify each fix against the original issue — read actual code, don't just trust thread replies.
 5. If all issues are resolved: `maw exec $WS -- seal lgtm <id>`. If issues remain: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "..."` explaining what's still wrong.
+6. Post the new verdict as a reply to the re-request message that woke you — its id is the
+   current `$RITE_MESSAGE_ID`, not the id of the first request.

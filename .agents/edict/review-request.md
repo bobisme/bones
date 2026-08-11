@@ -53,9 +53,26 @@ The rite hook system watches for @mentions. When you send a message containing `
    # Step 1: Create review with reviewer assignment (one command)
    maw exec $WS -- seal reviews create --agent $AGENT --title "<title>" --description "<summary>" --reviewers $EDICT_PROJECT-security
 
-   # Step 2: Announce with @mention (TRIGGERS THE SPAWN)
-   rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> @$EDICT_PROJECT-security" -L review-request
+   # Step 2: Announce with @mention (TRIGGERS THE SPAWN) and keep the message id
+   req=$(rite send --agent $AGENT $EDICT_PROJECT \
+     "Review requested: <review-id> @$EDICT_PROJECT-security" \
+     -L review-request --format json | jq -r .id)
+
+   # Step 3: Record the anchor, then block on the verdict
+   bn bone comment add <bone-id> "Review anchor: $req for <review-id>"
+   rite wait --agent $AGENT --reply-to "$req" -t 300 --format json
    ```
+
+   Act on the exit code:
+
+   | Exit | Meaning | What to do |
+   |------|---------|------------|
+   | 0 | The reviewer answered | Confirm with `maw exec $WS -- seal review <review-id>`. LGTM: finish now. BLOCKED: fix the threads now, then re-request with a NEW anchor. |
+   | 1 | No verdict inside the timeout | Post one `-L task-blocked` message naming the anchor and STOP the iteration. **Do not request the review again.** The next iteration reads review state from seal. |
+   | 2 | The anchor is not a known id | Re-read it: `rite history $EDICT_PROJECT --from $AGENT -n 1 --format json` returns `last_id`. Do not request the review again. |
+
+   The @mention spawns the reviewer, and the reviewer replies to this request message. That
+   reply is what satisfies the wait — the requester never has to poll or re-ask.
 
    If the review already exists (re-request after fixes), use `seal reviews request` instead:
    ```bash
@@ -80,6 +97,10 @@ The reviewer-loop finds open reviews via `seal reviews list` and processes them 
 
 - Using `--reviewer security` or `--reviewers security-reviewer` — these generic names don't match any hooks
 - Forgetting the @mention in the rite message — without it, no reviewer spawns
+- Sending the request again after exit 1 — a second request does not make a reviewer answer
+  faster, and the duplicate anchors split the thread
+- Throwing away the id from `rite send --format json` — without it there is nothing to wait
+  on and nothing to record on the bone
 - Using the wrong project prefix — reviewer must be `<project>-<role>` where `<project>` matches the channel
 
 ## Assumptions

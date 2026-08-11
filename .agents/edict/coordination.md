@@ -19,7 +19,23 @@ When dispatched as part of a mission, your prompt includes:
 - **Sibling bones**: Other bones in the mission with their owners and status
 - **File ownership hints**: Advisory list of which files other workers are likely editing
 
-**Respect file ownership**: If a sibling is working on a file, avoid editing it. If you must, post a `coord:interface` message first and wait for acknowledgment.
+**Respect file ownership**: If a sibling is working on a file, avoid editing it. If you must,
+announce the change and block on the acknowledgment — do not assume silence means consent:
+
+```bash
+id=$(rite send --agent $AGENT $PROJECT "Editing <file> for <bone-id>: <what changes> @<sibling>" \
+  -L coord:interface -L "mission:<mission-id>" --format json | jq -r .id)
+
+rite wait --agent $AGENT --reply-to "$id" -t 120 --format json
+```
+
+- Exit 0: the sibling answered. Follow what they said.
+- Exit 1: nobody answered. Post one `coord:blocker` naming the anchor and let the lead
+  decide. Do not announce again, and do not silently edit the file.
+- Exit 2: the anchor is wrong. Re-read it from history.
+
+Acknowledge a sibling the same way: `rite send ... --reply-to <their-message-id>`. A
+top-level "ok" does not release their wait.
 
 ## Checkpoint Protocol
 
@@ -34,6 +50,8 @@ Workers don't need to do anything special for checkpoints — just keep working 
 ## When to Use Coordination
 
 - **Interface changes**: Always post `coord:interface` when you define or change a public API, type, or contract that other bones might consume
-- **Blocking on siblings**: Post `coord:blocker` rather than silently waiting. The lead dev can reassign or reprioritize
+- **Blocking on siblings**: Post `coord:blocker` rather than silently waiting. Anchor it and
+  wait on the reply. On timeout, escalate once to the lead — never re-post the same request.
+  The lead can reassign or reprioritize
 - **Handoffs**: Use `coord:handoff` when you've done partial work that another worker should continue
 - **Completion**: Always use `task-done` label with `mission:<id>` so checkpoints detect it

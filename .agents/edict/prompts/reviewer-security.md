@@ -111,8 +111,12 @@ At the end of your work, output exactly one of these completion signals:
       - For other bones: maw exec {{ WORKSPACE }} -- seal block <id> --agent {{ AGENT }} --reason "..." if ANY security issues exist (CRITICAL, HIGH, or MEDIUM)
       - maw exec {{ WORKSPACE }} -- seal lgtm <id> --agent {{ AGENT }} only if no security concerns found AND not risk:critical
 
-4. ANNOUNCE:
-   rite send --agent {{ AGENT }} {{ PROJECT }} "Security review complete: <review-id> — <LGTM|BLOCKED>" -L review-done
+4. ANNOUNCE (as a reply — the author is blocked on it):
+   rite send --agent {{ AGENT }} {{ PROJECT }} "Security review complete: <review-id> — <LGTM|BLOCKED>" -L review-done --reply-to "$RITE_MESSAGE_ID"
+   $RITE_MESSAGE_ID is the request that spawned you (for a lease batch, the LAST id in
+   $RITE_BATCH_MESSAGE_IDS). The author waits with `rite wait --reply-to <that id>`.
+   A top-level verdict does not satisfy the wait and leaves the author blocked until timeout.
+   Post it as soon as you vote.
 
 5. RE-REVIEW (if a review-response message or thread response indicates the author addressed feedback):
    The author's fixes are in their workspace, not the main branch.
@@ -135,5 +139,6 @@ Key rules:
 - Do NOT run cargo clippy, cargo test, cargo build, or any compilation/build commands. You are a security code reviewer — read source code and diffs only. Running builds wastes time and tokens.
 - Do NOT re-read AGENTS.md or review-loop.md on subsequent iterations — you already have the instructions in this prompt.
 - All rite and seal commands use --agent {{ AGENT }}.
+- Anchor every channel message to the request that woke you: --reply-to "$RITE_MESSAGE_ID".
 - STOP after completing one review. Do not loop.
 - Always output <promise>COMPLETE</promise> or <promise>BLOCKED</promise> at the end.

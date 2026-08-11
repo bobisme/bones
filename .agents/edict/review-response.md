@@ -41,8 +41,19 @@ Run this when:
       - `maw exec $WS -- git add -A`
       - `maw exec $WS -- git commit -m "fix: address review feedback on <review-id>"`
    c. Re-request review: `maw exec $WS -- seal reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
-   d. Announce (include workspace name so the reviewer can find the fixed code):
-       `rite send --agent $AGENT $EDICT_PROJECT "Review feedback addressed: <review-id>, fixes in workspace $WS (.maw/workspaces/$WS/)" -L review-response`
+   d. Announce with a NEW anchor (include workspace name so the reviewer can find the fixed
+      code), then block on the re-review:
+      ```bash
+      req=$(rite send --agent $AGENT $EDICT_PROJECT \
+        "Review feedback addressed: <review-id>, fixes in workspace $WS (.maw/workspaces/$WS/) @<reviewer>" \
+        -L review-response --format json | jq -r .id)
+
+      rite wait --agent $AGENT --reply-to "$req" -t 300 --format json
+      ```
+      Exit 0: read the new verdict. Exit 1: post one `-L task-blocked` naming the anchor and
+      stop — do NOT announce again. Exit 2: re-read the id from history, do NOT announce again.
+
+      Each round of fixes gets its own anchor. Never wait on the anchor of the previous round.
 
 ## After LGTM
 
