@@ -48,6 +48,17 @@ The rite hook system watches for @mentions. When you send a message containing `
    - List of approvers from `.edict.toml` → `project.criticalApprovers`
    - If no `criticalApprovers` configured, use project lead or fallback: `@$EDICT_PROJECT-lead`
 
+### What the review covers
+
+`seal reviews create` discovers the fork point of your branch or workspace, so the
+review covers every commit of the feature — not just the last one. It prints the
+resolved range and its commit count. Check that count matches the work you did.
+
+- `--base <rev>` sets the start of the range (exclusive): the review covers
+  `<rev>..<current commit>`.
+- `--base <target>~1` reviews only the tip commit.
+- The base is persisted, so later commits extend the range instead of shifting it.
+
 4. If requesting a **specialist reviewer** (e.g., security):
    ```bash
    # Step 1: Create review with reviewer assignment (one command)

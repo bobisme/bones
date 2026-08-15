@@ -71,7 +71,9 @@ At the end of your work, output exactly one of these completion signals:
    e. For each thread:
       - If properly fixed: no action needed (author already resolved it)
       - If NOT fixed or partially fixed: maw exec {{ WORKSPACE }} -- seal reply <thread-id> --agent {{ AGENT }} "Still an issue: <what's wrong>"
-   f. Vote:
+   f. Vote — your repeat LGTM is what unblocks the merge. An approval records the commit it
+      covered, so the author's fix commits are NOT covered by your first vote, and
+      `seal reviews mark-merged` refuses until you vote again. Never leave a re-review unvoted.
       - All issues resolved: maw exec {{ WORKSPACE }} -- seal lgtm <review-id> --agent {{ AGENT }} -m "Fixes verified"
       - Issues remain: maw exec {{ WORKSPACE }} -- seal block <review-id> --agent {{ AGENT }} --reason "N threads still unresolved"
 

@@ -65,6 +65,31 @@ When the reviewer approves:
 
 The actual code merge is handled by `maw ws merge` in the finish step — do not run manual squash commands.
 
+### Commit nothing after the LGTM
+
+An approval records the commit it applied to. Any commit you add afterwards —
+a lint fix, a conflict resolution, a last "small" change — puts the approval
+behind the code, and `seal reviews mark-merged` exits 1:
+
+```
+Error: Cannot merge <review-id>: the approval does not cover the current code.
+  Approved at:  <commit>
+  Target now:   <commit> (N commits)
+```
+
+This is not a glitch to work around. Fix it in this order:
+
+1. **Ask for a fresh LGTM.** Re-request the reviewer as in step 3 above. A repeat
+   LGTM moves the approval onto the new commit and clears the block. This is the
+   normal path and the only one that keeps the merge honest.
+2. `--allow-stale-approval` merges past the check. Use it only when you can say
+   why the new commits are outside what was reviewed, and record that reason in a
+   bone comment.
+
+Check coverage before you try to merge:
+`maw exec $WS -- seal diff <review-id> --format json` reports `approval_stale`,
+`approved_commit` and `uncovered_commits`.
+
 ## Assumptions
 
 - `EDICT_PROJECT` env var contains the project channel name.

@@ -16,6 +16,7 @@ Your identity is `$AGENT`. All rite commands must include `--agent $AGENT`. Run 
    - The reviewer-loop script handles this iteration automatically
 3. For each review, gather context before commenting. Use `maw exec $WS --` for all seal commands targeting a workspace review:
    a. Read the review and diff: `maw exec $WS -- seal review <id>` and `maw exec $WS -- seal diff <id>`
+      - The diff covers the whole range the review was created over, not one commit. Review all of it.
       - `maw exec $WS -- seal review <id> --format=json` includes workspace info for reading source files
    b. Read the full source files changed in the diff from the **workspace path** (e.g., `.maw/workspaces/$WS/src/file.rs`), not project root
    c. Read project config (e.g., `Cargo.toml`) for edition and dependency versions
@@ -51,5 +52,14 @@ When re-review is requested after a block, the author's fixes live in their **wo
 3. Run static analysis in the workspace: `maw exec $WS -- cargo clippy 2>&1`
 4. Verify each fix against the original issue — read actual code, don't just trust thread replies.
 5. If all issues are resolved: `maw exec $WS -- seal lgtm <id>`. If issues remain: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "..."` explaining what's still wrong.
+
+**Your repeat LGTM is what unblocks the merge.** An approval records the commit it
+covered. Once the author commits a fix, the earlier approval no longer covers the code
+and `seal reviews mark-merged` refuses it. Voting again moves the approval onto the new
+commit. An author waiting on a re-review is blocked until you vote — do not leave it.
+
+Read what you are approving before you vote again: the range now includes the fix
+commits. `maw exec $WS -- seal diff <id> --format json` reports `approved_commit` and
+`uncovered_commits`.
 6. Post the new verdict as a reply to the re-request message that woke you — its id is the
    current `$RITE_MESSAGE_ID`, not the id of the first request.

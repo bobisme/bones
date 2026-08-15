@@ -251,6 +251,26 @@ rite wait --agent $AGENT --reply-to "$req" -t 300 --format json
 (`--reply-to "$RITE_MESSAGE_ID"`, `-L review-done`). A top-level verdict leaves the author
 blocked until timeout.
 
+#### What a review covers
+
+`seal reviews create` finds the fork point of your branch or workspace, so the review
+covers every commit of the feature. It prints the range and commit count — check it.
+`--base <rev>` sets the range explicitly; `--base <target>~1` reviews the tip commit only.
+The base is persisted, so later commits extend the range instead of shifting it.
+
+#### Do not commit after the LGTM
+
+An approval records the commit it covered. Commit anything afterwards and
+`seal reviews mark-merged` exits 1: "the approval does not cover the current code".
+
+- **Fix**: get a fresh LGTM. A repeat vote moves the approval onto the new commit.
+  Reviewers — that repeat LGTM is what unblocks the merge, so never leave a re-review
+  unvoted.
+- `--allow-stale-approval` merges past the check. Use it only when the new commits are
+  provably outside what was reviewed, and say why in a bone comment.
+- Check first: `maw exec $WS -- seal diff <review-id> --format json` reports
+  `approval_stale`, `approved_commit` and `uncovered_commits`.
+
 ### Bus Communication
 
 Agents communicate via rite channels. You don't need to be expert on everything — ask the right project.

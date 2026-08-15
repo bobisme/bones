@@ -131,6 +131,9 @@ After completing the implementation:
   - Running via `maw exec $WS --` ensures seal knows which workspace contains the changes
   - Always include the bone ID in the description so reviewers have context
   - Explain what changed and why, not just a summary
+  - seal reviews the whole feature: it finds your workspace fork point and covers every
+    commit on it. Check the printed commit count. Pass `--base <rev>` to set the range
+    yourself, or `--base <target>~1` for the tip commit only
 - Add a comment to the bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
 - **If requesting a specialist reviewer** (e.g., security):
   - Announce with @mention to trigger spawn: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, @<reviewer>" -L review-request`
@@ -161,6 +164,8 @@ See [review-request](review-request.md) for full details.
 If a review was conducted:
 - Verify approval: `maw exec $WS -- seal review <review-id>` — confirm LGTM, no blocks
 - Mark review as merged: `maw exec $WS -- seal reviews mark-merged <review-id> --agent $AGENT`
+  - Exits 1 if you committed anything after the LGTM. Ask for a fresh LGTM instead of
+    forcing the merge — see [review-response.md](review-response.md).
 
 Then proceed with teardown:
 - `bn bone comment add <bone-id> "Completed by $AGENT"`

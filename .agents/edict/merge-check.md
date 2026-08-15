@@ -25,6 +25,9 @@ If any check fails, the output explains why and what to do.
 
 1. `maw ws merge <workspace> --into default --destroy --message "feat: <bone-title>"` — merge and clean up (use conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when needed)
 2. `maw exec $WS -- seal reviews mark-merged <review-id>` — mark review as merged (if review exists)
+   - Exits 1 when commits landed after the approval. Get a fresh LGTM rather than
+     forcing it; `--allow-stale-approval` is the deliberate override. See
+     [review-response.md](review-response.md).
 3. `maw push` — push to remote (if `pushMain` is enabled)
 4. `rite send` — announce merge on project channel
 
