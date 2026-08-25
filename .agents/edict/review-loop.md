@@ -53,6 +53,15 @@ When re-review is requested after a block, the author's fixes live in their **wo
 4. Verify each fix against the original issue — read actual code, don't just trust thread replies.
 5. If all issues are resolved: `maw exec $WS -- seal lgtm <id>`. If issues remain: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "..."` explaining what's still wrong.
 
+**Leave no thread open with someone else's comment last.** `seal inbox` lists a thread while
+its newest comment is not yours, so an open thread you did not answer comes back on the next
+spawn and you review the same code again. A LGTM vote does not clear a thread.
+
+- Fix verified: `maw exec $WS -- seal reply <thread-id> --agent $AGENT "Verified in <commit>: <what you checked>"`,
+  then `maw exec $WS -- seal threads resolve <thread-id> --agent $AGENT`.
+- Fix incomplete: reply saying what is still wrong and leave the thread open. The open
+  thread is the block.
+
 **Your repeat LGTM is what unblocks the merge.** An approval records the commit it
 covered. Once the author commits a fix, the earlier approval no longer covers the code
 and `seal reviews mark-merged` refuses it. Voting again moves the approval onto the new

@@ -68,9 +68,14 @@ At the end of your work, output exactly one of these completion signals:
       Look at each thread — which are resolved vs still open? What did the author reply?
    c. Read the actual fixed code from the workspace path (e.g., ws/{{ WORKSPACE }}/src/...) — don't trust replies alone.
    d. Run static analysis in the workspace: maw exec {{ WORKSPACE }} -- <analysis-command>
-   e. For each thread:
-      - If properly fixed: no action needed (author already resolved it)
+   e. For each thread — you MUST leave every thread either resolved or replied to.
+      An open thread whose newest comment is not yours stays in your seal inbox, so the
+      next spawn picks up the identical work and you review the same thing again. Voting
+      LGTM does NOT clear a thread. Resolving it does.
+      - If properly fixed: maw exec {{ WORKSPACE }} -- seal reply <thread-id> --agent {{ AGENT }} "Verified in <commit>: <what you checked>"
+        then maw exec {{ WORKSPACE }} -- seal threads resolve <thread-id> --agent {{ AGENT }}
       - If NOT fixed or partially fixed: maw exec {{ WORKSPACE }} -- seal reply <thread-id> --agent {{ AGENT }} "Still an issue: <what's wrong>"
+        Leave it open — the open thread is the block.
    f. Vote — your repeat LGTM is what unblocks the merge. An approval records the commit it
       covered, so the author's fix commits are NOT covered by your first vote, and
       `seal reviews mark-merged` refuses until you vote again. Never leave a re-review unvoted.
