@@ -48,7 +48,8 @@ Immediately follow [security-review](security-review.md)'s **Launch contract**
 with these variables. It creates a uniquely named and labelled Vessel Codex
 session using `gpt-daybreak-blue-latest`, assigns
 `review://$EDICT_PROJECT/$review_id`, waits with Agentbus, verifies the Seal
-vote, and releases the claim.
+vote, reports the anchored Rite verdict, terminates the dedicated Vessel
+session, and only then releases the claim.
 
 For a re-review after fixes, keep the same Seal review, run:
 
@@ -69,8 +70,10 @@ workspace `head`. Never start a second review for ordinary feedback fixes.
 - Agentbus `done` is only evidence that the session answered; inspect
   `maw exec "$WS" -- seal review "$review_id" --format json` before moving on.
 - If Agentbus is unresolved, blocked, unavailable, or times out, post one
-  anchored `task-blocked` message, record it on the bone, release the review
-  claim, and stop. Do not fall back to an @mention or a workspace scan.
+  anchored `task-blocked` message, record it on the bone, snapshot and
+  terminate the dedicated Vessel session, release the review claim, and stop.
+  If termination fails, keep the review claim held and report the operational
+  blocker. Do not fall back to an @mention or a workspace scan.
 - If the Seal vote blocks, use [review-response](review-response.md), then
   re-request and launch the same review with a new anchor.
 - Do not close the bone, merge the workspace, or release the work claim until
