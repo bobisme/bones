@@ -1,119 +1,77 @@
 # Review Request
 
-Request a review using seal and announce it in the project channel.
+Create a Seal review against the exact workspace, then explicitly launch the
+reviewer that owns that exact review. A `--reviewers` assignment is a Seal gate;
+it is not an agent-discovery mechanism and it does not create a Rite hook.
 
 ## Arguments
 
-- `$AGENT` = agent identity (required)
-- `<review-id>` = review to request (required)
-- `<reviewer>` = reviewer agent name (optional)
-  - Specialist reviewers follow the pattern: `<project>-<role>`
-  - Example: `myproject-security`
-  - Common role: `security`
+- `$AGENT` — author identity;
+- `$WS` — workspace containing the change;
+- `<review-id>` — exact Seal review id; and
+- `<bone-id>` — tracked work item.
 
-## How Reviewer Spawning Works
+All Seal commands run through `maw exec $WS --`. The reviewer identity remains
+`$EDICT_PROJECT-security` so that Seal's approval gate is stable, but never
+mention `@$EDICT_PROJECT-security`: the ambient mention hook is retired.
 
-**Important**: Creating a review with `--reviewers` assigns the reviewer in seal (metadata), but does NOT spawn them. You still need an @mention in a rite message to trigger the spawn hook.
+## Risk routing
 
-The rite hook system watches for @mentions. When you send a message containing `@myproject-security`, the hook spawns the security reviewer agent.
+- **risk:low** — do not create a review; record the self-review on the bone.
+- **risk:medium** — create the configured Seal review. For its security role,
+  use the dedicated Daybreak launch below.
+- **risk:high** — create the security review with the five failure-mode
+  questions in its description and use the dedicated Daybreak launch.
+- **risk:critical** — do the same as high risk and request the separately
+  required human approval. The Daybreak LGTM does not replace that gate.
 
-## Steps
+## Create and launch an exact security review
 
-1. Resolve agent identity: use `--agent` argument if provided, otherwise `$AGENT` env var. If neither is set, stop and instruct the user. Run `rite whoami --agent $AGENT` first to confirm; if it returns a name, use it.
+```bash
+maw exec "$WS" -- seal reviews create --agent "$AGENT" \
+  --title "<bone-id>: <title>" --description "<summary>" \
+  --reviewers "$EDICT_PROJECT-security"
 
-2. **Check the bone's risk tag** to determine review routing:
-   - Get bone details: `bn show <bone-id>`
-   - Look for `risk:low`, `risk:high`, or `risk:critical` in tags
-   - No risk tag = `risk:medium` (standard review)
+# Copy the printed review id into review_id, then retain crash-recovery data.
+bn bone comment add <bone-id> \
+  "Review created: $review_id in workspace $WS (.maw/workspaces/$WS)"
 
-3. **Risk-based review routing**:
+request_anchor=$(rite send --agent "$AGENT" "$EDICT_PROJECT" \
+  "Dedicated security review requested: $review_id for <bone-id> in $WS" \
+  -L review-request --format json | jq -r .id)
+bn bone comment add <bone-id> "Review anchor: $request_anchor for $review_id"
 
-   **risk:low** — Skip review entirely:
-   - Do NOT create a seal review
-   - Add self-review comment: `bn bone comment add <bone-id> "Self-review: <brief what I verified>"`
-   - Proceed directly to finish (skip remaining steps)
+kind=review-request
+```
 
-   **risk:medium** (default) — Standard review:
-   - Follow existing review process (step 4 for specialist or step 5 for general review)
+Immediately follow [security-review](security-review.md)'s **Launch contract**
+with these variables. It creates a uniquely named and labelled Vessel Codex
+session using `gpt-daybreak-blue-latest`, assigns
+`review://$EDICT_PROJECT/$review_id`, waits with Agentbus, verifies the Seal
+vote, and releases the claim.
 
-   **risk:high** — Security review with failure-mode checklist:
-   - MUST request security reviewer
-   - Create seal review with note in description: "risk:high — failure-mode checklist required. Please answer: 1) What failure modes exist? 2) What edge cases need validation? 3) How can we roll back if this breaks? 4) What monitoring/alerts should we add? 5) What input validation is needed?"
-   - Request security reviewer (see step 4)
+For a re-review after fixes, keep the same Seal review, run:
 
-   **risk:critical** — Security review + human approval:
-   - MUST request security reviewer
-   - Create seal review (see step 4)
-   - Post to rite requesting human approval: `rite send --agent $AGENT $EDICT_PROJECT "risk:critical review for <bone-id>: requires human approval before merge. Review: <review-id> @<approver>" -L review-request`
-   - List of approvers from `.edict.toml` → `project.criticalApprovers`
-   - If no `criticalApprovers` configured, use project lead or fallback: `@$EDICT_PROJECT-lead`
+```bash
+maw exec "$WS" -- seal reviews request "$review_id" \
+  --reviewers "$EDICT_PROJECT-security" --agent "$AGENT"
+request_anchor=$(rite send --agent "$AGENT" "$EDICT_PROJECT" \
+  "Dedicated security re-review requested: $review_id in $WS" \
+  -L review-response --format json | jq -r .id)
+kind=review-response
+```
 
-### What the review covers
+Then run the same direct launch with the fresh `request_anchor` and current
+workspace `head`. Never start a second review for ordinary feedback fixes.
 
-`seal reviews create` discovers the fork point of your branch or workspace, so the
-review covers every commit of the feature — not just the last one. It prints the
-resolved range and its commit count. Check that count matches the work you did.
+## Terminal rules
 
-- `--base <rev>` sets the start of the range (exclusive): the review covers
-  `<rev>..<current commit>`.
-- `--base <target>~1` reviews only the tip commit.
-- The base is persisted, so later commits extend the range instead of shifting it.
-
-4. If requesting a **specialist reviewer** (e.g., security):
-   ```bash
-   # Step 1: Create review with reviewer assignment (one command)
-   maw exec $WS -- seal reviews create --agent $AGENT --title "<title>" --description "<summary>" --reviewers $EDICT_PROJECT-security
-
-   # Step 2: Announce with @mention (TRIGGERS THE SPAWN) and keep the message id
-   req=$(rite send --agent $AGENT $EDICT_PROJECT \
-     "Review requested: <review-id> @$EDICT_PROJECT-security" \
-     -L review-request --format json | jq -r .id)
-
-   # Step 3: Record the anchor, then block on the verdict
-   bn bone comment add <bone-id> "Review anchor: $req for <review-id>"
-   rite wait --agent $AGENT --reply-to "$req" -t 300 --format json
-   ```
-
-   Act on the exit code:
-
-   | Exit | Meaning | What to do |
-   |------|---------|------------|
-   | 0 | The reviewer answered | Confirm with `maw exec $WS -- seal review <review-id>`. LGTM: finish now. BLOCKED: fix the threads now, then re-request with a NEW anchor. |
-   | 1 | No verdict inside the timeout | Post one `-L task-blocked` message naming the anchor and STOP the iteration. **Do not request the review again.** The next iteration reads review state from seal. |
-   | 2 | The anchor is not a known id | Re-read it: `rite history $EDICT_PROJECT --from $AGENT -n 1 --format json` returns `last_id`. Do not request the review again. |
-
-   The @mention spawns the reviewer, and the reviewer replies to this request message. That
-   reply is what satisfies the wait — the requester never has to poll or re-ask.
-
-   If the review already exists (re-request after fixes), use `seal reviews request` instead:
-   ```bash
-   maw exec $WS -- seal reviews request <review-id> --reviewers $EDICT_PROJECT-security --agent $AGENT
-   ```
-
-   The reviewer name MUST match the project pattern: `<project>-<role>` (e.g., `myproject-security`, `rite-security`). Do NOT use generic names like `security-reviewer` — those won't match any hooks.
-
-5. **Post review details to the bone** for crash recovery:
-   ```bash
-   bn bone comment add <bone-id> "Review created: <review-id> in workspace <ws-name> (.maw/workspaces/<ws-name>)"
-   ```
-   Include: review ID and workspace name. This lets another agent find the review and workspace if the session crashes.
-
-6. If requesting a **general code review** (no specific specialist):
-   - Spawn a subagent to perform the code review
-   - Announce: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id>, spawned subagent for review" -L review-request`
-
-The reviewer-loop finds open reviews via `seal reviews list` and processes them automatically.
-
-## Common Mistakes
-
-- Using `--reviewer security` or `--reviewers security-reviewer` — these generic names don't match any hooks
-- Forgetting the @mention in the rite message — without it, no reviewer spawns
-- Sending the request again after exit 1 — a second request does not make a reviewer answer
-  faster, and the duplicate anchors split the thread
-- Throwing away the id from `rite send --format json` — without it there is nothing to wait
-  on and nothing to record on the bone
-- Using the wrong project prefix — reviewer must be `<project>-<role>` where `<project>` matches the channel
-
-## Assumptions
-
-- `EDICT_PROJECT` env var contains the project channel name.
+- Agentbus `done` is only evidence that the session answered; inspect
+  `maw exec "$WS" -- seal review "$review_id" --format json` before moving on.
+- If Agentbus is unresolved, blocked, unavailable, or times out, post one
+  anchored `task-blocked` message, record it on the bone, release the review
+  claim, and stop. Do not fall back to an @mention or a workspace scan.
+- If the Seal vote blocks, use [review-response](review-response.md), then
+  re-request and launch the same review with a new anchor.
+- Do not close the bone, merge the workspace, or release the work claim until
+  Seal records the required current approval.

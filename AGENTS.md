@@ -231,25 +231,29 @@ rite claims release --agent $AGENT --all  # when done
 
 ### Reviews
 
-Use `@<project>-<role>` mentions to request reviews. The @mention triggers the auto-spawn
-hook for the reviewer. Capture the request id and block on the verdict:
+`--reviewers` assigns the approval-gate identity in Seal. It does not spawn a
+reviewer. For security review, create a Rite request anchor and explicitly
+launch the one-review Daybreak session in
+[security-review.md](.agents/edict/security-review.md). Never use an
+`@<project>-security` mention: the ambient hook is retired.
 
 ```bash
 maw exec $WS -- seal reviews request <review-id> --reviewers $PROJECT-security --agent $AGENT
-req=$(rite send --agent $AGENT $PROJECT "Review requested: <review-id> @$PROJECT-security" -L review-request --format json | jq -r .id)
+req=$(rite send --agent $AGENT $PROJECT "Dedicated security re-review requested: <review-id> in $WS" -L review-response --format json | jq -r .id)
 bn bone comment add <bone-id> "Review anchor: $req for <review-id>"
-rite wait --agent $AGENT --reply-to "$req" -t 300 --format json
+# Set review_id=<review-id>, ws=$WS, request_anchor=$req, kind=review-response.
+# Follow .agents/edict/security-review.md's Launch contract exactly.
 ```
 
-- Exit 0: confirm the verdict with `maw exec $WS -- seal review <review-id>`, then finish
-  or fix in the same turn.
-- Exit 1: do NOT request the review again. Post one `-L task-blocked` message naming the
-  anchor and stop. The next turn reads review state from seal, not from a new request.
-- Exit 2: the anchor is wrong. Re-read it from history. Do NOT request the review again.
+- Agentbus completion is not approval. Confirm the verdict with
+  `maw exec $WS -- seal review <review-id> --format json` before proceeding.
+- Agentbus unresolved, blocked, unavailable, or timeout: post one anchored
+  `task-blocked` message, release the review claim, and stop. Do not retry by
+  mention or scan another review.
 
-**Reviewers**: post the verdict as a reply to the request that woke you
-(`--reply-to "$RITE_MESSAGE_ID"`, `-L review-done`). A top-level verdict leaves the author
-blocked until timeout.
+**Dedicated reviewers** reply to the supplied request anchor with
+`--reply-to "$request_anchor"` and `-L review-done`. A top-level verdict is not
+an anchored result.
 
 #### What a review covers
 
@@ -365,7 +369,7 @@ Do not apply STE to code, identifiers, commands, marketing copy, essays, or voic
 Keep a channel message to one or two lines. Lead with the subject of the label. The label and the bone ID already carry the context, so do not add status blocks, numbered steps, or closing actions.
 
 - `[task-claim] Working on <bone-id>: <title>`
-- `[review-request] Review requested: <review-id> for <bone-id> @<reviewer>`
+- `[review-request] Dedicated security review requested: <review-id> for <bone-id>`
 - `[task-blocked] Blocked on <thing>: <what unblocks it>`
 
 Anchor an answer with `--reply-to` instead of quoting the message you answer. The anchor
@@ -431,7 +435,7 @@ Use `cass search "error or problem"` to find how similar issues were solved in p
 
 - [Handle reviewer feedback (fix/address/defer)](.agents/edict/review-response.md)
 
-- [Reviewer agent loop](.agents/edict/review-loop.md)
+- [Launch one exact Daybreak security review](.agents/edict/security-review.md)
 
 - [Merge a worker workspace (protocol merge + conflict recovery)](.agents/edict/merge-check.md)
 

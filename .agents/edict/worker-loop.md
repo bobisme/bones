@@ -135,9 +135,10 @@ After completing the implementation:
     commit on it. Check the printed commit count. Pass `--base <rev>` to set the range
     yourself, or `--base <target>~1` for the tip commit only
 - Add a comment to the bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
-- **If requesting a specialist reviewer** (e.g., security):
-  - Announce with @mention to trigger spawn: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, @<reviewer>" -L review-request`
-  - The @mention triggers auto-spawn hooks
+- **If requesting the security reviewer**:
+  - Create a Rite request anchor without an @mention, then immediately follow
+    [security-review](security-review.md)'s direct Daybreak launch contract for
+    this exact `<review-id>` and `$WS`.
 - **If requesting a general code review**:
   - Spawn a subagent to perform the review
   - Announce: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, spawned subagent for review" -L review-request`
@@ -146,7 +147,8 @@ After completing the implementation:
 **risk:high** — Security review with failure-mode checklist:
 - Create seal review with security reviewer: `maw exec $WS -- seal reviews create --agent $AGENT --title "<bone-title>" --description "For <bone-id>: <summary>. risk:high — failure-mode checklist required. Please answer: 1) What failure modes exist? 2) What edge cases need validation? 3) How can we roll back if this breaks? 4) What monitoring/alerts should we add? 5) What input validation is needed?" --reviewers $EDICT_PROJECT-security`
 - Add comment to bone: `bn bone comment add <bone-id> "Review requested: <review-id>, workspace: $WS (.maw/workspaces/$WS/)"`
-- Announce with @mention: `rite send --agent $AGENT $EDICT_PROJECT "Review requested: <review-id> for <bone-id>, @$EDICT_PROJECT-security" -L review-request`
+- Create a Rite request anchor without an @mention, then run the exact direct
+  Daybreak launch from [security-review](security-review.md).
 - **STOP this iteration.**
 
 **risk:critical** — Security review + human approval:
