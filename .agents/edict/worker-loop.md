@@ -163,16 +163,23 @@ See [review-request](review-request.md) for full details.
 
 ### 6. Finish — mandatory teardown (never skip)
 
-If a review was conducted:
+If a review was conducted, record it in the workspace before the merge destroys it:
 - Verify approval: `maw exec $WS -- seal review <review-id>` — confirm LGTM, no blocks
+- Check for unreviewed changes: `maw exec $WS -- git status --porcelain --untracked-files=all` must list nothing outside
+  `.seal/reviews/<review-id>/`. The merge also takes uncommitted files, which no reviewer saw.
 - Mark review as merged: `maw exec $WS -- seal reviews mark-merged <review-id> --agent $AGENT`
-  - Exits 1 if you committed anything after the LGTM. Ask for a fresh LGTM instead of
+  - Exits 1 if you committed code after the LGTM. Ask for a fresh LGTM instead of
     forcing the merge — see [review-response.md](review-response.md).
+- Commit the review log: `maw exec $WS -- git add .seal/reviews/<review-id>` then
+  `maw exec $WS -- git commit -m "chore: seal review <review-id>" -- .seal/reviews/<review-id>`.
+  This is the only commit allowed after the LGTM. The merge carries it to `default`.
 
 Then proceed with teardown:
 - `bn bone comment add <bone-id> "Completed by $AGENT"`
 - `bn done <bone-id> --reason "Completed"`
-- `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when the workspace is change-bound; if merge conflict, preserve workspace and announce)
+- Merge. With a review, the merge command carries the clean check, so nothing lands between the
+  check and the merge: `{ out=$(maw exec $WS -- git status --porcelain --untracked-files=all -- . ':(exclude).seal/reviews/<review-id>') && test -z "$out" || { echo "unreviewed changes: stop" >&2; false; }; } && maw ws merge $WS --into default --destroy --message "feat: <bone-title>"`.
+  Without a review: `maw ws merge $WS --into default --destroy --message "feat: <bone-title>"` (use a conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when the workspace is change-bound; if merge conflict, preserve workspace and announce)
 - `maw push` (if pushMain enabled in `.edict.toml`; pushes the configured branch. Use `maw push --advance` after direct commits.)
 - `rite claims release --agent $AGENT --all`
 - `rite send --agent $AGENT $EDICT_PROJECT "Completed <bone-id>: <bone-title>" -L task-done`

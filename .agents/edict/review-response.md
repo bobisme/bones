@@ -62,14 +62,20 @@ Run this when:
 When the reviewer approves:
 
 1. Verify approval: `maw exec $WS -- seal review <review-id>` — confirm LGTM vote, no blocks
-2. Mark review as merged: `maw exec $WS -- seal reviews mark-merged <review-id> --agent $AGENT`
-3. Continue with [finish](finish.md) to close the bone and merge the workspace
+2. Continue with [finish](finish.md). Its "Record the review" step marks the review merged
+   and commits `.seal/reviews/<review-id>/` in the workspace, then the merge carries it to
+   `default`. If the lead merges your workspace, leave both to the lead: a review marked
+   merged early fails the lead's merge gate.
 
 The actual code merge is handled by `maw ws merge` in the finish step — do not run manual squash commands.
 
-### Commit nothing after the LGTM
+### Commit no code after the LGTM
 
-An approval records the commit it applied to. Any commit you add afterwards —
+The one commit allowed after the LGTM is the review log itself, made by the
+"Record the review" step in [finish](finish.md). It runs `mark-merged` first, while HEAD
+is still the approved commit, and then commits only `.seal/reviews/<review-id>/`.
+
+An approval records the commit it applied to. Any other commit you add afterwards —
 a lint fix, a conflict resolution, a last "small" change — puts the approval
 behind the code, and `seal reviews mark-merged` exits 1:
 

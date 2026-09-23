@@ -85,7 +85,7 @@ See `docs/contributor-guide.md` for:
 1. **Create a bone** to track your work: `bn create --title "..." --description "..."`
 2. **Create a workspace** for your changes: `maw ws create <bone-id> --from main --description "<bone-title>"` — use the bone ID as workspace name; this gives you `.maw/workspaces/<bone-id>/`
 3. **Edit files in your workspace** (`.maw/workspaces/<name>/`), never in the trunk at the repo root
-4. **Merge when done**: `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` (use conventional commit prefix: `feat:`, `fix:`, `chore:`, etc.; swap `default` for a change id when merging back into a tracked change)
+4. **Merge when done**: `edict protocol merge <name> --message "feat: <bone-title>" --agent $AGENT`, then run the steps it prints in order. They record the Seal review, check for uncommitted changes in the same command as the merge, and block `risk:critical` work until a human approves. Run a bare `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` only for work with no review. Use a conventional commit prefix (`feat:`, `fix:`, `chore:`, etc.); swap `default` for a change id when merging back into a tracked change.
 5. **Close the bone**: `bn done <id>`
 
 Do not create git branches manually — `maw ws create` handles branching for you. See [worker-loop.md](.agents/edict/worker-loop.md) for the full triage → start → work → finish cycle.
@@ -148,7 +148,7 @@ Identity resolved from `$AGENT` env. No flags needed in agent loops.
 | Create workspace | `maw ws create <bone-id> --from main --description "<title>"` |
 | List workspaces | `maw ws list` |
 | Check merge readiness | `maw ws merge <name> --into default --check` |
-| Merge to main | `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` |
+| Merge to main | `edict protocol merge <name> --message "feat: <bone-title>" --agent $AGENT`, then run its steps (bare `maw ws merge <name> --into default --destroy` only for work with no review) |
 | Destroy (no merge) | `maw ws destroy <name>` |
 | Run command in workspace | `maw exec <name> -- <command>` |
 | Diff workspace vs epoch | `maw ws diff <name>` |
@@ -171,13 +171,13 @@ maw ws diff <name>                        # diff vs epoch (maw-native)
 
 **Lead agent merge workflow** — after a worker finishes a bone:
 1. `maw ws list` — look for `active (+N to merge)` entries
-2. `maw ws merge <name> --into default --check` — verify no conflicts
-3. `maw ws merge <name> --into default --destroy --message "feat: <bone-title>"` — merge and clean up (use conventional commit prefix)
+2. `edict protocol merge <name> --message "feat: <bone-title>" --agent $AGENT` — checks the bone, the review gate, `risk:critical`, and conflicts (use conventional commit prefix)
+3. Run the steps it prints, in order. With a review they record it (`mark-merged`, commit `.seal/reviews/<review-id>`) and then merge with the clean check in the same command. Do not replace them with a bare `maw ws merge`: that skips the review log, the check, and the `risk:critical` gate. See [merge-check.md](.agents/edict/merge-check.md).
 
 **Workspace safety:**
 - Never merge or destroy `default`.
 - Always `maw ws merge <name> --into default --check` before `--destroy`.
-- Commit workspace changes with `maw exec <name> -- git add -A && maw exec <name> -- git commit -m "..."`.
+- Commit workspace changes with `maw exec <name> -- git add -A && maw exec <name> -- git commit -m "..."` before you request review. After the LGTM, commit only the review log.
 - **No work is ever lost in maw.** Recovery snapshots are created automatically on every destroy. If a workspace was destroyed and you suspect code is missing, ALWAYS run `maw ws recover` before concluding work was lost. Never reopen a bone or start over without checking recovery first.
 
 ### Protocol Quick Reference
@@ -262,9 +262,9 @@ covers every commit of the feature. It prints the range and commit count — che
 `--base <rev>` sets the range explicitly; `--base <target>~1` reviews the tip commit only.
 The base is persisted, so later commits extend the range instead of shifting it.
 
-#### Do not commit after the LGTM
+#### Do not commit code after the LGTM
 
-An approval records the commit it covered. Commit anything afterwards and
+An approval records the commit it covered. Commit code afterwards and
 `seal reviews mark-merged` exits 1: "the approval does not cover the current code".
 
 - **Fix**: get a fresh LGTM. A repeat vote moves the approval onto the new commit.
@@ -274,6 +274,23 @@ An approval records the commit it covered. Commit anything afterwards and
   provably outside what was reviewed, and say why in a bone comment.
 - Check first: `maw exec $WS -- seal diff <review-id> --format json` reports
   `approval_stale`, `approved_commit` and `uncovered_commits`.
+
+The review log is the one exception. Seal keeps it in `.seal/reviews/<review-id>/` in the
+workspace, and the merge destroys the workspace. So, right before the merge:
+
+```bash
+maw exec $WS -- git status --porcelain --untracked-files=all          # nothing outside .seal/reviews/<review-id>/
+maw exec $WS -- seal reviews mark-merged <review-id> --agent $AGENT   # HEAD is still the approved commit
+maw exec $WS -- git add .seal/reviews/<review-id>
+maw exec $WS -- git commit -m "chore: seal review <review-id>" -- .seal/reviews/<review-id>
+{ out=$(maw exec $WS -- git status --porcelain --untracked-files=all -- . ':(exclude).seal/reviews/<review-id>') \
+    && test -z "$out" || { echo "unreviewed changes: stop" >&2; false; }; } \
+  && maw ws merge $WS --into default --destroy --message "feat: <bone-title>"   # check again, same command
+```
+
+`maw ws merge` also merges uncommitted additions and deletions, which no reviewer saw. If the
+status check lists anything else, commit it and get a fresh LGTM. Whoever runs the merge runs these steps. Never run `mark-merged` after the merge, and never
+move or delete `.seal/reviews/` to get past `maw ws sync`.
 
 ### Bus Communication
 
