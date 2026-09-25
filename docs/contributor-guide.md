@@ -77,6 +77,17 @@ Metrics can live in triage/search crates depending on scope.
 3. Add regression tests with small hand-verified fixtures.
 4. Document tradeoffs and thresholds in code comments or ADRs when behavior is non-obvious.
 
+## Kani Proofs
+
+`crates/bones-core/src/cache/codec.rs` has Kani harnesses in `mod kani_proofs` (`#[cfg(kani)]`). They prove the varint, zigzag, timestamp-delta and RLE codecs for all inputs, or for a bound stated on each harness.
+
+- Install once: `cargo install --locked kani-verifier && cargo kani setup`.
+- Run: `just kani` (all harnesses) or `just kani varint_round_trips`.
+- Always run through `just kani`. It runs one harness at a time in a systemd scope with a memory cap (`KANI_MEM`, default 12G). A bad harness once used 72 GB and took down the host.
+- Keep slice lengths fixed in harnesses, and never loop over a symbolic count. Both make CBMC's memory use explode.
+- Before trusting a new harness, break the code it covers and confirm the harness fails.
+- `just kani` is not part of `just check`.
+
 ## Conventions and Style
 
 - Prefer small, composable modules and pure functions where practical.

@@ -60,24 +60,35 @@ pub(crate) fn encode_varint(value: u64, buf: &mut Vec<u8>) {
 /// Decode a LEB128-encoded unsigned varint from `data`, returning the value
 /// and bytes consumed.
 ///
+/// Accepts only the canonical encoding that [`encode_varint`] produces, so
+/// every value has exactly one accepted byte form.
+///
 /// # Errors
 ///
-/// Returns [`CacheError::UnexpectedEof`] if the data is truncated.
+/// Returns [`CacheError::UnexpectedEof`] if the data is truncated, and
+/// [`CacheError::DataCorrupted`] for an overlong encoding (a zero final
+/// group after the first byte) or a 10th byte that overflows a `u64`.
 pub(crate) fn decode_varint(data: &[u8]) -> Result<(u64, usize), CacheError> {
     let mut value: u64 = 0;
     let mut shift = 0u32;
     for (i, &byte) in data.iter().enumerate() {
         let low = u64::from(byte & 0x7F);
+        // The 10th group holds only bit 63; anything more overflows a u64.
+        if shift == 63 && byte > 1 {
+            return Err(CacheError::DataCorrupted(
+                "varint overflow: 10th byte exceeds u64".into(),
+            ));
+        }
         value |= low << shift;
         if byte & 0x80 == 0 {
+            if byte == 0 && i > 0 {
+                return Err(CacheError::DataCorrupted(
+                    "varint overlong: trailing zero group".into(),
+                ));
+            }
             return Ok((value, i + 1));
         }
         shift += 7;
-        if shift >= 64 {
-            return Err(CacheError::DataCorrupted(
-                "varint overflow: more than 9 bytes".into(),
-            ));
-        }
     }
     Err(CacheError::UnexpectedEof)
 }
@@ -117,7 +128,8 @@ impl ColumnCodec for TimestampCodec {
         // Subsequent values: zigzag delta varints
         let mut prev = items[0];
         for &ts in &items[1..] {
-            let delta = ts - prev;
+            // Wrapping keeps any i64 pair representable; decode wraps back.
+            let delta = ts.wrapping_sub(prev);
             encode_varint(zigzag_encode(delta), buf);
             prev = ts;
         }
@@ -143,7 +155,7 @@ impl ColumnCodec for TimestampCodec {
             }
             let (zz, consumed) = decode_varint(&data[pos..])?;
             let delta = zigzag_decode(zz);
-            let ts = prev + delta;
+            let ts = prev.wrapping_add(delta);
             result.push(ts);
             prev = ts;
             pos += consumed;
@@ -757,6 +769,152 @@ fn rle_encode_u32(items: &[u32]) -> Vec<(u16, u32)> {
 }
 
 // ---------------------------------------------------------------------------
+// Kani proofs
+// ---------------------------------------------------------------------------
+
+/// Bounded model-checking harnesses for the codec primitives.
+///
+/// Run with `just kani`. Varint and zigzag harnesses cover the full input
+/// domain: a `u64` needs at most `ceil(64 / 7) = 10` LEB128 groups, so
+/// `unwind(11)` is a complete bound, not an approximation. Column codec
+/// harnesses bound the item count (stated per harness); their per-item logic
+/// has no cross-item state beyond the running delta / packing position, so
+/// small counts exercise every branch.
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Longest valid varint: 10 groups for a `u64`.
+    const MAX_VARINT: usize = 10;
+
+    /// `decode_varint(encode_varint(v)) == (v, len)` for every `u64`, and the
+    /// encoding never exceeds 10 bytes.
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn varint_round_trips() {
+        let v: u64 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint(v, &mut buf);
+        assert!(buf.len() <= MAX_VARINT);
+        assert!(matches!(decode_varint(&buf), Ok((d, n)) if d == v && n == buf.len()));
+    }
+
+    /// For any input of up to 11 bytes, `decode_varint` does not panic, and
+    /// accepts only the canonical encoding: when it returns `(v, n)`, the
+    /// first `n` bytes are exactly `encode_varint(v)`. This makes decode
+    /// injective, so corrupted bytes cannot silently alias a valid value.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn varint_decode_accepts_only_canonical() {
+        let data: [u8; MAX_VARINT + 1] = kani::any();
+        let len: usize = kani::any_where(|&l| l <= data.len());
+        if let Ok((v, n)) = decode_varint(&data[..len]) {
+            assert!(n <= len);
+            let mut canonical = Vec::new();
+            encode_varint(v, &mut canonical);
+            assert!(canonical.len() == n);
+            assert!(canonical[..] == data[..n]);
+        }
+    }
+
+    /// Zigzag is a bijection between `i64` and `u64`.
+    #[kani::proof]
+    fn zigzag_is_bijective() {
+        let n: i64 = kani::any();
+        assert!(zigzag_decode(zigzag_encode(n)) == n);
+        let u: u64 = kani::any();
+        assert!(zigzag_encode(zigzag_decode(u)) == u);
+    }
+
+    /// Timestamp columns round-trip for any two `i64` values, including
+    /// pairs whose difference overflows `i64`. Bound: each later item is
+    /// encoded from its predecessor alone, so one delta covers the per-item
+    /// logic and longer columns follow by induction on the item index.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn timestamp_codec_round_trips() {
+        let items: [i64; 2] = kani::any();
+        let mut buf = Vec::new();
+        assert!(TimestampCodec::encode(&items, &mut buf).is_ok());
+        let decoded = TimestampCodec::decode(&buf, items.len());
+        // Element-wise: slice equality lowers to a byte memcmp loop.
+        assert!(matches!(decoded, Ok((d, n))
+            if d.len() == 2 && d[0] == items[0] && d[1] == items[1] && n == buf.len()));
+    }
+
+    /// Decoding arbitrary bytes as a timestamp column never panics.
+    /// Bound: header plus two maximal varints, up to 3 items.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn timestamp_codec_decode_never_panics() {
+        let data: [u8; 8 + 2 * MAX_VARINT] = kani::any();
+        let len: usize = kani::any_where(|&l| l <= data.len());
+        let count: usize = kani::any_where(|&c| c <= 3);
+        if let Ok((d, n)) = TimestampCodec::decode(&data[..len], count) {
+            assert!(d.len() == count);
+            assert!(n <= len);
+        }
+    }
+
+    // Event type codec: no Kani harness. Fixed-length round trips exceeded
+    // 12 GB and the decode harness exceeded 600 s. The domain is small, so
+    // the unit test `event_type_codec_exhaustive_round_trip` enumerates it,
+    // and `event_type_codec_decode_arbitrary_bytes` samples decode inputs.
+
+    /// Assert that `runs` is an exact run-length encoding of `items`: every
+    /// run is non-empty, runs tile `items` in order, and every item in a run
+    /// equals the run's value. Loops only over `items` and `runs`, never over
+    /// a run length, so the unwind bound stays at the item count.
+    fn assert_runs_encode<L: Copy + Into<usize>, T: Copy + PartialEq>(
+        runs: &[(L, T)],
+        items: &[T],
+    ) {
+        let mut start = 0;
+        for &(run_len, value) in runs {
+            let run_len: usize = run_len.into();
+            assert!(run_len > 0);
+            assert!(start + run_len <= items.len());
+            for (k, item) in items.iter().enumerate() {
+                if k >= start && k < start + run_len {
+                    assert!(*item == value);
+                }
+            }
+            start += run_len;
+        }
+        assert!(start == items.len());
+    }
+
+    // RLE bound: exactly 4 items. The encoder has no state beyond the current
+    // run, so 4 items reach every branch except `count == MAX` run splitting,
+    // which the unit test `rle_splits_runs_at_counter_max` covers. Symbolic slice lengths made CBMC exceed
+    // 16 GB, so the length is fixed.
+
+    /// `rle_encode_u8` is lossless for 4 items.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn rle_encode_u8_is_lossless() {
+        let items: [u8; 4] = kani::any();
+        assert_runs_encode(&rle_encode_u8(&items), &items);
+    }
+
+    /// `rle_encode_u16` is lossless for 4 items.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn rle_encode_u16_is_lossless() {
+        let items: [u16; 4] = kani::any();
+        assert_runs_encode(&rle_encode_u16(&items), &items);
+    }
+
+    /// `rle_encode_u32` is lossless for 4 items.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn rle_encode_u32_is_lossless() {
+        let items: [u32; 4] = kani::any();
+        assert_runs_encode(&rle_encode_u32(&items), &items);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -786,6 +944,119 @@ mod tests {
             decode_varint(truncated),
             Err(CacheError::UnexpectedEof)
         ));
+    }
+
+    #[test]
+    fn varint_rejects_tenth_byte_overflow() {
+        // Nine 0xFF groups fill bits 0..63; the 10th byte may only set bit 63.
+        let mut max = vec![0xFFu8; 9];
+        max.push(0x01);
+        assert!(matches!(decode_varint(&max), Ok((u64::MAX, 10))));
+
+        let mut overflow = vec![0xFFu8; 9];
+        overflow.push(0x02);
+        assert!(matches!(
+            decode_varint(&overflow),
+            Err(CacheError::DataCorrupted(_))
+        ));
+    }
+
+    #[test]
+    fn varint_rejects_overlong_encoding() {
+        // 0 encoded in two bytes instead of one.
+        assert!(matches!(
+            decode_varint(&[0x80, 0x00]),
+            Err(CacheError::DataCorrupted(_))
+        ));
+        assert!(matches!(decode_varint(&[0x00]), Ok((0, 1))));
+    }
+
+    #[test]
+    fn timestamp_codec_handles_overflowing_deltas() {
+        let items = [i64::MIN, i64::MAX, i64::MIN, 0];
+        let mut buf = Vec::new();
+        TimestampCodec::encode(&items, &mut buf).expect("encode");
+        let (decoded, consumed) = TimestampCodec::decode(&buf, items.len()).expect("decode");
+        assert_eq!(decoded, items);
+        assert_eq!(consumed, buf.len());
+    }
+
+    #[test]
+    fn timestamp_codec_decode_does_not_panic_on_overflow() {
+        // First value i64::MAX, then a delta of +1 (zigzag 2).
+        let mut data = i64::MAX.to_le_bytes().to_vec();
+        data.push(0x02);
+        let (decoded, _) = TimestampCodec::decode(&data, 2).expect("decode");
+        assert_eq!(decoded, vec![i64::MAX, i64::MIN]);
+    }
+
+    const ALL_EVENT_TYPES: [EventType; 11] = [
+        EventType::Create,
+        EventType::Update,
+        EventType::Move,
+        EventType::Assign,
+        EventType::Comment,
+        EventType::Link,
+        EventType::Unlink,
+        EventType::Delete,
+        EventType::Compact,
+        EventType::Snapshot,
+        EventType::Redact,
+    ];
+
+    /// Every sequence of 0 to 4 event types (16,105 sequences) round-trips.
+    /// Four items reach every branch: full bytes, a padded last byte, and
+    /// RLE runs over repeated packed bytes.
+    #[test]
+    fn event_type_codec_exhaustive_round_trip() {
+        let mut sequences: Vec<Vec<EventType>> = vec![vec![]];
+        let mut frontier: Vec<Vec<EventType>> = vec![vec![]];
+        for _ in 0..4 {
+            frontier = frontier
+                .iter()
+                .flat_map(|seq| {
+                    ALL_EVENT_TYPES.iter().map(move |&et| {
+                        let mut next = seq.clone();
+                        next.push(et);
+                        next
+                    })
+                })
+                .collect();
+            sequences.extend(frontier.iter().cloned());
+        }
+        assert_eq!(sequences.len(), 1 + 11 + 121 + 1331 + 14641);
+        for items in sequences {
+            let mut buf = Vec::new();
+            EventTypeCodec::encode(&items, &mut buf).expect("encode");
+            let (decoded, consumed) = EventTypeCodec::decode(&buf, items.len()).expect("decode");
+            assert_eq!(decoded, items);
+            assert_eq!(consumed, buf.len());
+        }
+    }
+
+    proptest::proptest! {
+        /// Decoding arbitrary bytes as an event type column never panics,
+        /// and a success yields exactly `count` items.
+        #[test]
+        fn event_type_codec_decode_arbitrary_bytes(
+            data in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..24),
+            count in 0usize..8,
+        ) {
+            if let Ok((decoded, consumed)) = EventTypeCodec::decode(&data, count) {
+                proptest::prop_assert_eq!(decoded.len(), count);
+                proptest::prop_assert!(consumed <= data.len());
+            }
+        }
+    }
+
+    #[test]
+    fn rle_splits_runs_at_counter_max() {
+        let items = vec![7u8; 300];
+        assert_eq!(rle_encode_u8(&items), vec![(255, 7), (45, 7)]);
+        let items = vec![9u16; 70_000];
+        assert_eq!(rle_encode_u16(&items), vec![(65_535, 9), (4_465, 9)]);
+        let items = vec![3u32; 70_000];
+        assert_eq!(rle_encode_u32(&items), vec![(65_535, 3), (4_465, 3)]);
     }
 
     #[test]

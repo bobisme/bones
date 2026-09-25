@@ -9,6 +9,10 @@ check:
     rtk cargo clippy --workspace -- -D warnings
     rtk cargo test --workspace
 
+# Kani proofs, one harness at a time under a memory cap (not part of check)
+kani *harnesses:
+    scripts/kani.sh {{harnesses}}
+
 install:
     rtk cargo install --locked --path crates/bones-cli
 
