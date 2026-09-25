@@ -176,9 +176,40 @@ proptest! {
         prop_assert_eq!(ma, a);
     }
 
+    // LwwRegister tests (causal histories with independent wall clocks)
+    #[test]
+    fn lww_register_commutative([a, b, _] in arb_lww_register_triple()) {
+        let mut ab = a.clone();
+        ab.merge(&b);
+        let mut ba = b.clone();
+        ba.merge(&a);
+        prop_assert_eq!(ab, ba);
+    }
+
+    #[test]
+    fn lww_register_associative([a, b, c] in arb_lww_register_triple()) {
+        let mut ab_c = a.clone();
+        ab_c.merge(&b);
+        ab_c.merge(&c);
+
+        let mut bc = b.clone();
+        bc.merge(&c);
+        let mut a_bc = a.clone();
+        a_bc.merge(&bc);
+
+        prop_assert_eq!(ab_c, a_bc);
+    }
+
+    #[test]
+    fn lww_register_idempotent([a, _, _] in arb_lww_register_triple()) {
+        let mut aa = a.clone();
+        aa.merge(&a);
+        prop_assert_eq!(aa, a);
+    }
+
     // WorkItemState aggregate tests
     #[test]
-    fn work_item_state_commutative(a in arb_work_item_state(), b in arb_work_item_state()) {
+    fn work_item_state_commutative((a, b, _) in arb_work_item_state_triple()) {
         let mut ab = a.clone();
         ab.merge(&b);
 
@@ -189,11 +220,7 @@ proptest! {
     }
 
     #[test]
-    fn work_item_state_associative(
-        a in arb_work_item_state(),
-        b in arb_work_item_state(),
-        c in arb_work_item_state()
-    ) {
+    fn work_item_state_associative((a, b, c) in arb_work_item_state_triple()) {
         let mut ab_c = a.clone();
         ab_c.merge(&b);
         ab_c.merge(&c);
@@ -208,7 +235,7 @@ proptest! {
     }
 
     #[test]
-    fn work_item_state_idempotent(a in arb_work_item_state()) {
+    fn work_item_state_idempotent((a, _, _) in arb_work_item_state_triple()) {
         let before = a.clone();
         let mut merged = a.clone();
         merged.merge(&a);

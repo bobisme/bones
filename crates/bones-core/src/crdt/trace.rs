@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 /// Tie-break stage that produced a strict LWW winner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TieBreakStep {
-    ItcCausal,
     WallTimestamp,
     AgentId,
     EventHash,

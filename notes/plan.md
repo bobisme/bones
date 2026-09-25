@@ -428,17 +428,17 @@ Replace vector clocks with **Interval Tree Clocks** (Almeida et al. 2008). Clock
 
 | Field | CRDT Type | Merge Semantics |
 |-------|-----------|-----------------|
-| `title` | LWW Register | Last-writer-wins by ITC |
-| `description` | LWW Register | Last-writer-wins by ITC |
-| `kind` | LWW Register | Last-writer-wins by ITC |
+| `title` | LWW Register | Last-writer-wins by `(wall_ts, agent, hash)` |
+| `description` | LWW Register | Last-writer-wins by `(wall_ts, agent, hash)` |
+| `kind` | LWW Register | Last-writer-wins by `(wall_ts, agent, hash)` |
 | `state` | LWW Register with state machine validation | LWW, invalid transitions rejected |
-| `size` | LWW Register | Last-writer-wins by ITC |
-| `urgency` | LWW Register | Last-writer-wins by ITC |
+| `size` | LWW Register | Last-writer-wins by `(wall_ts, agent, hash)` |
+| `urgency` | LWW Register | Last-writer-wins by `(wall_ts, agent, hash)` |
 | `assignees` | OR-Set (via DAG replay) | Add/remove converge without conflicts |
 | `labels` | OR-Set (via DAG replay) | Add/remove converge without conflicts |
 | `blocked_by` | OR-Set of item IDs | Add/remove converge without conflicts |
 | `related_to` | OR-Set of item IDs | Add/remove converge without conflicts |
-| `parent` | LWW Register (nullable) | Last-writer-wins by ITC |
+| `parent` | LWW Register (nullable) | Last-writer-wins by `(wall_ts, agent, hash)` |
 | `comments` | G-Set (Grow-only Set) | Comments never deleted, only appended |
 
 ### Redaction
@@ -449,10 +449,11 @@ Replace vector clocks with **Interval Tree Clocks** (Almeida et al. 2008). Clock
 
 To guarantee bit-identical convergence across replicas and implementations, all LWW fields must use this exact total order:
 
-1. Compare ITC causal dominance.
-2. If concurrent, compare `wall_ts_us`.
-3. If equal, compare `agent_id` lexicographically.
-4. If equal, compare `event_hash` lexicographically.
+1. Compare `wall_ts_us`.
+2. If equal, compare `agent_id` lexicographically.
+3. If equal, compare `event_hash` lexicographically.
+
+ITC causal dominance is deliberately not part of this order: as a partial order placed ahead of the wall clock, it makes the chain non-transitive under clock skew (see ADR-006 amendment).
 
 Any implementation that diverges from this order is non-conformant.
 
@@ -487,7 +488,7 @@ These three operations interact subtly with CRDTs and must have explicit, determ
 
 Snapshots are **lattice elements**, not regular updates. A snapshot event must carry, for every field, the winning clock+value pair (for LWW fields) or the full set state (for OR-Sets/G-Sets). Applying a snapshot means `state = join(state, snapshot_state)` — field-wise lattice join — **not** "overwrite with snapshot event's clock."
 
-This ensures compaction is semantics-preserving: concurrent events not observed at compaction time are not silently dominated. The snapshot's per-field clocks participate in the normal LWW tie-breaking chain, so a concurrent update with a higher clock still wins.
+This ensures compaction is semantics-preserving: concurrent events not observed at compaction time are not silently dominated. The snapshot's per-field clocks participate in the normal LWW tie-breaking chain, so a concurrent update with a higher `wall_ts` still wins.
 
 **`item.delete` (soft-delete):**
 

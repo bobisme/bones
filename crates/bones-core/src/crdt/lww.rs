@@ -1,21 +1,30 @@
 //! Last-Writer-Wins (LWW) Register CRDT.
 //!
 //! LWW Register is the CRDT for scalar fields: title, description, kind,
-//! size, urgency, parent. The merge uses a deterministic 4-step tie-breaking
-//! chain that guarantees bit-identical convergence across all replicas.
+//! size, urgency, parent. The merge keeps the greater of two writes under a
+//! strict total order, which guarantees bit-identical convergence across all
+//! replicas regardless of merge order.
 //!
-//! # Tie-Breaking Chain
+//! # Ordering
 //!
-//! Given two `LwwRegister<T>` values `a` and `b`:
+//! Given two `LwwRegister<T>` values `a` and `b`, compare lexicographically:
 //!
-//! 1. **ITC causal dominance**: If `a.stamp.leq(&b.stamp)` and they are
-//!    not concurrent, the causally later one wins.
-//! 2. **Wall-clock timestamp**: If concurrent, higher `wall_ts` wins.
-//! 3. **Agent ID**: If wall clocks are equal, lexicographically greater
+//! 1. **Wall-clock timestamp**: higher `wall_ts` wins.
+//! 2. **Agent ID**: if wall clocks are equal, lexicographically greater
 //!    `agent_id` wins.
-//! 4. **Event hash**: If agent IDs are equal (same agent, concurrent writes),
-//!    lexicographically greater `event_hash` wins. This step guarantees
-//!    uniqueness — no ties are possible.
+//! 3. **Event hash**: if agent IDs are equal, lexicographically greater
+//!    `event_hash` wins. Event hashes are unique per event, so no two
+//!    distinct writes tie.
+//!
+//! This is the same `(wall_ts, agent, event_hash)` order that the event
+//! merge driver and replay use to sort events.
+//!
+//! The ITC stamp is deliberately not part of the order. Causality is a
+//! partial order: putting it ahead of the wall clock makes the chain
+//! non-transitive under clock skew (a causally later write with a lower wall
+//! clock beats an earlier write, which beats a concurrent write, which beats
+//! the later write), and merge then depends on merge order. A causally later
+//! write therefore wins only when its wall clock is also later.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -69,11 +78,8 @@ impl<T> LwwRegister<T> {
 impl<T: Clone> LwwRegister<T> {
     /// Merge another register into this one, keeping the "winning" value.
     ///
-    /// The 4-step tie-breaking chain:
-    /// 1. ITC causal dominance (non-concurrent: later wins)
-    /// 2. Wall-clock timestamp (concurrent: higher wins)
-    /// 3. Agent ID (lexicographic: greater wins)
-    /// 4. Event hash (lexicographic: greater wins — guaranteed unique)
+    /// The winner is the greater write under `(wall_ts, agent_id,
+    /// event_hash)`; see the module docs for why the ITC stamp is not used.
     ///
     /// After merge, `self` contains the winning value.
     pub fn merge(&mut self, other: &Self) {
@@ -145,40 +151,21 @@ impl<T: Clone> LwwRegister<T> {
     }
 
     fn compare(&self, other: &Self) -> (bool, TieBreakStep) {
-        // Step 1: ITC causal dominance
-        let self_leq_other = self.stamp.leq(&other.stamp);
-        let other_leq_self = other.stamp.leq(&self.stamp);
-
-        match (self_leq_other, other_leq_self) {
-            (true, false) => {
-                // other causally dominates self → other wins
-                return (false, TieBreakStep::ItcCausal);
-            }
-            (false, true) => {
-                // self causally dominates other → self wins
-                return (true, TieBreakStep::ItcCausal);
-            }
-            (true, true) | (false, false) => {
-                // Either equal (both leq each other) or concurrent.
-                // Fall through to tie-breaking to ensure convergence.
-            }
-        }
-
-        // Step 2: Wall-clock timestamp (higher wins)
+        // Step 1: Wall-clock timestamp (higher wins)
         match self.wall_ts.cmp(&other.wall_ts) {
             std::cmp::Ordering::Greater => return (true, TieBreakStep::WallTimestamp),
             std::cmp::Ordering::Less => return (false, TieBreakStep::WallTimestamp),
             std::cmp::Ordering::Equal => {}
         }
 
-        // Step 3: Agent ID (lexicographically greater wins)
+        // Step 2: Agent ID (lexicographically greater wins)
         match self.agent_id.cmp(&other.agent_id) {
             std::cmp::Ordering::Greater => return (true, TieBreakStep::AgentId),
             std::cmp::Ordering::Less => return (false, TieBreakStep::AgentId),
             std::cmp::Ordering::Equal => {}
         }
 
-        // Step 4: Event hash (lexicographically greater wins — guaranteed unique)
+        // Step 3: Event hash (lexicographically greater wins — unique per event)
         (self.event_hash >= other.event_hash, TieBreakStep::EventHash)
     }
 }
@@ -236,10 +223,10 @@ mod tests {
         )
     }
 
-    // === Step 1: ITC causal dominance ===
+    // === Causality does not override the wall clock ===
 
     #[test]
-    fn causal_later_wins() {
+    fn causal_later_with_later_wall_ts_wins() {
         let s1 = make_stamp(1);
         let s2 = make_stamp(2);
         // s1 is causally before s2 (same lineage, s2 has more events)
@@ -247,20 +234,56 @@ mod tests {
         assert!(!s2.leq(&s1));
 
         let mut a = reg("old", s1, 100, "alice", "aaa");
-        let b = reg("new", s2, 100, "alice", "aaa");
+        let b = reg("new", s2, 200, "alice", "bbb");
         a.merge(&b);
         assert_eq!(a.value, "new");
     }
 
     #[test]
-    fn causal_earlier_loses() {
+    fn causal_later_with_earlier_wall_ts_loses() {
         let s1 = make_stamp(1);
         let s2 = make_stamp(2);
 
-        let mut a = reg("new", s2, 100, "alice", "aaa");
-        let b = reg("old", s1, 100, "alice", "aaa");
+        // Clock skew: the causally later write carries a lower wall clock.
+        let mut a = reg("new", s2, 100, "alice", "bbb");
+        let b = reg("old", s1, 200, "alice", "aaa");
         a.merge(&b);
-        assert_eq!(a.value, "new"); // a (later) wins
+        assert_eq!(a.value, "old");
+    }
+
+    /// Regression: with causality ahead of the wall clock, these three writes
+    /// formed a cycle (a beats b, b beats c, c beats a) and each merge order
+    /// produced a different winner.
+    #[test]
+    fn causal_skew_cycle_converges_in_every_order() {
+        let (mut x, mut y) = Stamp::seed().fork();
+        x.event();
+        let stamp_a = x.clone();
+        x.event();
+        let stamp_c = x.clone();
+        y.event();
+        let stamp_b = y.clone();
+        assert!(stamp_a.leq(&stamp_c) && !stamp_c.leq(&stamp_a));
+        assert!(stamp_b.concurrent(&stamp_a) && stamp_b.concurrent(&stamp_c));
+
+        let a = reg("a", stamp_a, 3, "agent-a", "blake3:a");
+        let b = reg("b", stamp_b, 2, "agent-b", "blake3:b");
+        let c = reg("c", stamp_c, 1, "agent-c", "blake3:c");
+
+        let orders = [
+            [&a, &b, &c],
+            [&a, &c, &b],
+            [&b, &a, &c],
+            [&b, &c, &a],
+            [&c, &a, &b],
+            [&c, &b, &a],
+        ];
+        for order in orders {
+            let mut merged = order[0].clone();
+            merged.merge(order[1]);
+            merged.merge(order[2]);
+            assert_eq!(merged.value, "a", "order {order:?}");
+        }
     }
 
     // === Step 2: Concurrent, wall_ts tie-break ===
