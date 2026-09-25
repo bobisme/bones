@@ -322,10 +322,14 @@ impl<'conn> Projector<'conn> {
             anyhow::bail!("expected Create data for item.create event");
         };
 
+        // A redaction that arrives first must give the same result as one
+        // that arrives later and rewrites the fields this event owns (see
+        // project_redact): text fields read "[redacted]" and labels are
+        // absent, with the keys still claimed.
         let is_redacted = self.is_event_redacted(&event.event_hash)?;
-        let title = if is_redacted { "" } else { &data.title };
+        let title = if is_redacted { REDACTED } else { &data.title };
         let description = if is_redacted {
-            None
+            Some(REDACTED)
         } else {
             data.description.as_deref()
         };
@@ -342,14 +346,12 @@ impl<'conn> Projector<'conn> {
         self.set_field("size", data.size.map(|s| s.to_string()), event)?;
         self.set_field("parent_id", data.parent.as_deref(), event)?;
 
-        if !is_redacted {
-            for label in &data.labels {
-                if self.claim_member(LABELS, label, event)? {
-                    self.set_label(event, label, true)?;
-                }
+        for label in &data.labels {
+            if self.claim_member(LABELS, label, event)? {
+                self.set_label(event, label, !is_redacted)?;
             }
-            self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
         }
+        self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
 
         Ok(())
     }
@@ -367,7 +369,7 @@ impl<'conn> Projector<'conn> {
         match data.field.as_str() {
             "title" => {
                 let value = if is_redacted {
-                    "[redacted]"
+                    REDACTED
                 } else {
                     data.value.as_str().unwrap_or_default()
                 };
@@ -375,7 +377,7 @@ impl<'conn> Projector<'conn> {
             }
             "description" => {
                 let value = if is_redacted {
-                    Some("[redacted]".to_string())
+                    Some(REDACTED.to_string())
                 } else {
                     data.value.as_str().map(String::from)
                 };
@@ -394,13 +396,16 @@ impl<'conn> Projector<'conn> {
                 self.set_field("parent_id", data.value.as_str().map(String::from), event)?;
             }
             "labels" => {
+                // A redacted label update still claims its members but
+                // leaves them absent, as project_redact does after the fact.
+                //
                 // Labels update: supports both legacy array replacement
                 // and new add/remove action format (CRDT-friendly).
                 if let Some(labels) = data.value.as_array() {
                     // Legacy: replace the entire label set.
                     let wanted: Vec<&str> = labels.iter().filter_map(|l| l.as_str()).collect();
                     for (label, present) in self.claim_reset(LABELS, &wanted, event)? {
-                        self.set_label(event, &label, present)?;
+                        self.set_label(event, &label, present && !is_redacted)?;
                     }
                 } else if let Some(obj) = data.value.as_object() {
                     // New: add/remove single label
@@ -415,7 +420,7 @@ impl<'conn> Projector<'conn> {
                         && !label.is_empty()
                         && self.claim_member(LABELS, label, event)?
                     {
-                        self.set_label(event, label, present)?;
+                        self.set_label(event, label, present && !is_redacted)?;
                     }
                 }
                 self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
@@ -609,12 +614,28 @@ impl<'conn> Projector<'conn> {
             anyhow::bail!("expected Redact data for item.redact event");
         };
 
+        // Like every other event, a redaction counts toward the item's
+        // created/updated bounds, so those do not depend on whether it
+        // arrives before or after the item's other events.
+        self.ensure_item_exists(event)?;
+        self.touch(event)?;
+
         // Insert redaction record
         self.conn
             .execute(
-                "INSERT OR IGNORE INTO event_redactions \
+                // Several redactions of one target: keep the lowest
+                // (redacted_at, redacted_by, reason), whatever the arrival order.
+                "INSERT INTO event_redactions \
                  (target_event_hash, item_id, reason, redacted_by, redacted_at_us) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(target_event_hash) DO UPDATE SET \
+                     item_id = excluded.item_id, \
+                     reason = excluded.reason, \
+                     redacted_by = excluded.redacted_by, \
+                     redacted_at_us = excluded.redacted_at_us \
+                 WHERE (excluded.redacted_at_us, excluded.redacted_by, excluded.reason) \
+                     < (event_redactions.redacted_at_us, event_redactions.redacted_by, \
+                        event_redactions.reason)",
                 params![
                     data.target_hash,
                     event.item_id.as_str(),
@@ -637,6 +658,49 @@ impl<'conn> Projector<'conn> {
                 params![data.target_hash],
             )
             .context("redact comment body")?;
+
+        // Rewrite whatever the target still owns, to match what its handler
+        // writes when the redaction is already known (bn-2gl2). Fields that a
+        // newer event owns show that event in either order, so they stay.
+        // Look up by hash alone: handlers check redaction by hash on any
+        // item, so the target may belong to another item than this event.
+        let owned: Vec<(String, String)> = {
+            let mut stmt = self
+                .conn
+                .prepare_cached("SELECT item_id, field FROM field_clocks WHERE event_hash = ?1")?;
+            stmt.query_map(params![data.target_hash], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?
+        };
+        let mut labels_changed = std::collections::BTreeSet::new();
+        for (item_id, field) in &owned {
+            let item_id = item_id.as_str();
+            match field.as_str() {
+                "title" | "description" | "compact_summary" => {
+                    self.conn
+                        .execute(
+                            &format!("UPDATE items SET {field} = ?1 WHERE item_id = ?2"),
+                            params![REDACTED, item_id],
+                        )
+                        .with_context(|| format!("redact {field} of {item_id}"))?;
+                }
+                _ => {
+                    if let Some(label) = field.strip_prefix(&member_field(LABELS, "")) {
+                        self.conn.execute(
+                            "DELETE FROM item_labels WHERE item_id = ?1 AND label = ?2",
+                            params![item_id, label],
+                        )?;
+                        labels_changed.insert(item_id);
+                    }
+                }
+            }
+        }
+        for item_id in labels_changed {
+            // i64::MIN: leave updated_at alone. Only the redaction's own item
+            // folded in its timestamp, the same in either order.
+            self.refresh_search_labels(item_id, i64::MIN)?;
+        }
 
         Ok(())
     }
@@ -874,6 +938,9 @@ impl<'conn> Projector<'conn> {
         Ok(())
     }
 }
+
+/// Text that replaces redacted content in the projection.
+const REDACTED: &str = "[redacted]";
 
 /// Set group of an item's labels in `field_clocks`.
 const LABELS: &str = "label";

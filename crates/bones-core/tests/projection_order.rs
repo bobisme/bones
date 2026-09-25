@@ -16,7 +16,7 @@ use bones_core::db::rebuild::rebuild;
 use bones_core::event::Event;
 use bones_core::event::data::{
     AssignAction, AssignData, CommentData, CreateData, DeleteData, EventData, LinkData, MoveData,
-    UnlinkData, UpdateData,
+    RedactData, UnlinkData, UpdateData,
 };
 use bones_core::event::types::EventType;
 use bones_core::event::writer::write_event;
@@ -76,6 +76,9 @@ enum Op {
     },
     Comment(u8),
     Delete,
+    /// Redact an earlier event of the same branch or the base (index mod
+    /// the number of earlier events).
+    Redact(u8),
 }
 
 fn arb_op() -> impl Strategy<Value = Op> {
@@ -104,6 +107,7 @@ fn arb_op() -> impl Strategy<Value = Op> {
         }),
         (0u8..4).prop_map(Op::Comment),
         Just(Op::Delete),
+        (0u8..8).prop_map(Op::Redact),
     ]
 }
 
@@ -137,7 +141,36 @@ fn update(field: &str, value: serde_json::Value) -> (EventType, EventData) {
     )
 }
 
-fn build_event(write: &Write, agent: &str) -> Event {
+/// Build a branch's events in order, assigning each hash as it goes so a
+/// redaction can name an earlier event of the branch or the base.
+fn build_branch(writes: &[Write], agent: &str, base: &[Event]) -> Vec<Event> {
+    let mut prior: Vec<Event> = base.to_vec();
+    let mut out = Vec::with_capacity(writes.len());
+    for write in writes {
+        let mut e = build_event(write, agent, &prior);
+        write_event(&mut e).expect("serialize event");
+        prior.push(e.clone());
+        out.push(e);
+    }
+    out
+}
+
+fn build_event(write: &Write, agent: &str, prior: &[Event]) -> Event {
+    if let Op::Redact(n) = write.op {
+        let target = &prior[usize::from(n) % prior.len()];
+        return event(
+            EventType::Redact,
+            // Any item: a redaction may sit on another item than its target.
+            ITEMS[write.item],
+            EventData::Redact(RedactData {
+                target_hash: target.event_hash.clone(),
+                reason: "secret".to_string(),
+                extra: BTreeMap::new(),
+            }),
+            write.wall_ts,
+            agent,
+        );
+    }
     let item = ITEMS[write.item];
     let other = ITEMS[1 - write.item];
     let (event_type, data) = match &write.op {
@@ -218,6 +251,7 @@ fn build_event(write: &Write, agent: &str) -> Event {
                 extra: BTreeMap::new(),
             }),
         ),
+        Op::Redact(_) => unreachable!("handled above"),
     };
     event(event_type, item, data, write.wall_ts, agent)
 }
@@ -239,7 +273,10 @@ fn event(event_type: EventType, item: &str, data: EventData, wall_ts: i64, agent
     }
 }
 
-fn base_events() -> Vec<Event> {
+/// The base creates. Their timestamps overlap the branches' range, so the
+/// canonical order can put a branch's update or redaction before the create
+/// of the item it touches.
+fn base_events(create_ts: [i64; 2]) -> Vec<Event> {
     ITEMS
         .iter()
         .enumerate()
@@ -258,7 +295,7 @@ fn base_events() -> Vec<Event> {
                     description: Some("base".to_string()),
                     extra: BTreeMap::new(),
                 }),
-                10 + i64::try_from(i).expect("small index"),
+                create_ts[i],
                 "agent-base",
             )
         })
@@ -365,6 +402,11 @@ fn snapshot(db_path: &Path) -> Snapshot {
             "SELECT item_id, event_hash, author, body, created_at_us FROM item_comments \
              ORDER BY event_hash",
         ),
+        (
+            "redactions",
+            "SELECT target_event_hash, item_id, reason, redacted_by, redacted_at_us \
+             FROM event_redactions ORDER BY target_event_hash",
+        ),
     ] {
         out.extend(rows(&conn, sql).into_iter().map(|r| format!("{name}: {r}")));
     }
@@ -382,11 +424,15 @@ proptest! {
     /// each other and with the canonical-order projection, through a full
     /// rebuild and through an incremental apply of the other branch.
     #[test]
-    fn projection_is_independent_of_log_order(a in arb_branch(), b in arb_branch()) {
-        let mut base = base_events();
-        let mut branch_a: Vec<Event> = a.iter().map(|w| build_event(w, "agent-a")).collect();
-        let mut branch_b: Vec<Event> = b.iter().map(|w| build_event(w, "agent-b")).collect();
+    fn projection_is_independent_of_log_order(
+        a in arb_branch(),
+        b in arb_branch(),
+        create_ts in [95i64..110, 95i64..110],
+    ) {
+        let mut base = base_events(create_ts);
         let base_lines = lines(&mut base);
+        let mut branch_a = build_branch(&a, "agent-a", &base);
+        let mut branch_b = build_branch(&b, "agent-b", &base);
         let a_lines = lines(&mut branch_a);
         let b_lines = lines(&mut branch_b);
 
