@@ -172,6 +172,31 @@ SET schema_version = 2
 WHERE id = 1;
 ";
 
+/// Migration v3: per-field winner keys that make projection independent of
+/// event log order (bn-1ugh).
+///
+/// Each row records the `(wall_ts_us, agent, event_hash)` of the event that
+/// currently owns one field of one item. A write applies only when its key is
+/// greater, so replicas that hold the same events in different log orders
+/// converge. Rows projected before this migration have no keys, so the
+/// migration clears the cursor, which forces a full rebuild on next use.
+pub const MIGRATION_V3_SQL: &str = r"
+CREATE TABLE IF NOT EXISTS field_clocks (
+    item_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    wall_ts_us INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    event_hash TEXT NOT NULL,
+    PRIMARY KEY (item_id, field)
+) WITHOUT ROWID;
+
+UPDATE projection_meta
+SET schema_version = 3,
+    last_event_offset = 0,
+    last_event_hash = NULL
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

@@ -4,9 +4,18 @@ use super::schema;
 use rusqlite::{Connection, types::Type};
 
 /// Latest schema version understood by this binary.
-pub const LATEST_SCHEMA_VERSION: u32 = 2;
+pub const LATEST_SCHEMA_VERSION: u32 = 3;
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, schema::MIGRATION_V1_SQL), (2, schema::MIGRATION_V2_SQL)];
+/// A projection created before this schema version must be rebuilt from the
+/// event log after migration: v3 adds per-field winner keys that only a
+/// replay can fill in.
+pub const REBUILD_REQUIRED_BELOW: u32 = 3;
+
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, schema::MIGRATION_V1_SQL),
+    (2, schema::MIGRATION_V2_SQL),
+    (3, schema::MIGRATION_V3_SQL),
+];
 
 /// Read `PRAGMA user_version` and convert it to a Rust `u32`.
 ///
@@ -173,6 +182,36 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(projected_version, i64::from(LATEST_SCHEMA_VERSION));
+
+        Ok(())
+    }
+
+    /// Rows projected before v3 have no field keys, so the upgrade must
+    /// clear the cursor, which makes the next incremental apply rebuild.
+    #[test]
+    fn migrate_to_v3_clears_cursor_to_force_rebuild() -> rusqlite::Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch(schema::MIGRATION_V1_SQL)?;
+        conn.execute_batch(schema::MIGRATION_V2_SQL)?;
+        conn.pragma_update(None, "user_version", 2_i64)?;
+        conn.execute(
+            "UPDATE projection_meta SET last_event_offset = 4096, last_event_hash = 'blake3:abc'
+             WHERE id = 1",
+            [],
+        )?;
+
+        assert_eq!(migrate(&mut conn)?, LATEST_SCHEMA_VERSION);
+
+        let (offset, hash): (i64, Option<String>) = conn.query_row(
+            "SELECT last_event_offset, last_event_hash FROM projection_meta WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!((offset, hash), (0, None));
+
+        let clocks: i64 =
+            conn.query_row("SELECT COUNT(*) FROM field_clocks", [], |row| row.get(0))?;
+        assert_eq!(clocks, 0);
 
         Ok(())
     }

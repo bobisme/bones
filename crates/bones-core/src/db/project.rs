@@ -132,7 +132,22 @@ impl<'conn> Projector<'conn> {
     ///
     /// Returns an error if the projection fails.
     pub fn project_event(&self, event: &Event) -> Result<bool> {
-        let projected = match self.project_event_inner(event) {
+        // One savepoint per event: a crash mid-event must not leave some of
+        // its field keys claimed without the event recorded as projected.
+        self.conn
+            .execute_batch("SAVEPOINT project_event")
+            .context("begin project_event savepoint")?;
+        let result = self.project_event_inner(event);
+        let end = if result.is_ok() {
+            "RELEASE project_event"
+        } else {
+            "ROLLBACK TO project_event; RELEASE project_event"
+        };
+        self.conn
+            .execute_batch(end)
+            .context("end project_event savepoint")?;
+
+        let projected = match result {
             Ok(ProjectResult::Projected) => true,
             Ok(ProjectResult::Duplicate) => false,
             Err(err) => {
@@ -314,70 +329,24 @@ impl<'conn> Projector<'conn> {
         } else {
             data.description.as_deref()
         };
-        let labels_str = if is_redacted {
-            String::new()
-        } else {
-            data.labels.join(" ")
-        };
 
-        self.conn
-            .execute(
-                "INSERT INTO items (
-                    item_id, title, description, kind, state, urgency,
-                    size, parent_id, is_deleted, search_labels,
-                    created_at_us, updated_at_us
-                ) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, 0, ?8, ?9, ?10)
-                ON CONFLICT(item_id) DO UPDATE SET
-                    title = CASE
-                        WHEN items.title = '' THEN excluded.title
-                        ELSE items.title
-                    END,
-                    description = COALESCE(items.description, excluded.description),
-                    kind = CASE
-                        WHEN items.kind = 'task' THEN excluded.kind
-                        ELSE items.kind
-                    END,
-                    urgency = CASE
-                        WHEN items.urgency = 'default' THEN excluded.urgency
-                        ELSE items.urgency
-                    END,
-                    size = COALESCE(items.size, excluded.size),
-                    parent_id = COALESCE(items.parent_id, excluded.parent_id),
-                    created_at_us = MIN(items.created_at_us, excluded.created_at_us),
-                    search_labels = CASE
-                        WHEN items.search_labels = '' THEN excluded.search_labels
-                        ELSE items.search_labels
-                    END,
-                    updated_at_us = MAX(items.updated_at_us, excluded.updated_at_us)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM projected_events
-                    WHERE item_id = excluded.item_id AND event_type = 'item.create'
-                )",
-                params![
-                    event.item_id.as_str(),
-                    title,
-                    description,
-                    data.kind.to_string(),
-                    data.urgency.to_string(),
-                    data.size.map(|s| s.to_string()),
-                    data.parent.as_deref(),
-                    labels_str,
-                    event.wall_ts_us,
-                    event.wall_ts_us,
-                ],
-            )
-            .with_context(|| format!("project create for {}", event.item_id))?;
+        self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
-        // Insert initial labels
+        // A create is an ordinary write of each field it sets, so a later
+        // update wins over it and an earlier one loses, in any log order.
+        self.set_field("title", title, event)?;
+        self.set_field("description", description, event)?;
+        self.set_field("kind", data.kind.to_string(), event)?;
+        self.set_field("urgency", data.urgency.to_string(), event)?;
+        self.set_field("size", data.size.map(|s| s.to_string()), event)?;
+        self.set_field("parent_id", data.parent.as_deref(), event)?;
+
         if !is_redacted {
             for label in &data.labels {
-                self.conn
-                    .execute(
-                        "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
-                         VALUES (?1, ?2, ?3)",
-                        params![event.item_id.as_str(), label, event.wall_ts_us],
-                    )
-                    .with_context(|| format!("insert label '{label}' for {}", event.item_id))?;
+                if self.claim_member(LABELS, label, event)? {
+                    self.set_label(event, label, true)?;
+                }
             }
             self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
         }
@@ -385,13 +354,13 @@ impl<'conn> Projector<'conn> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
     fn project_update(&self, event: &Event) -> Result<()> {
         let EventData::Update(ref data) = event.data else {
             anyhow::bail!("expected Update data for item.update event");
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
         let is_redacted = self.is_event_redacted(&event.event_hash)?;
 
@@ -402,10 +371,7 @@ impl<'conn> Projector<'conn> {
                 } else {
                     data.value.as_str().unwrap_or_default()
                 };
-                self.conn.execute(
-                    "UPDATE items SET title = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("title", value, event)?;
             }
             "description" => {
                 let value = if is_redacted {
@@ -413,103 +379,54 @@ impl<'conn> Projector<'conn> {
                 } else {
                     data.value.as_str().map(String::from)
                 };
-                self.conn.execute(
-                    "UPDATE items SET description = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("description", value, event)?;
             }
             "kind" => {
-                let value = data.value.as_str().unwrap_or("task");
-                self.conn.execute(
-                    "UPDATE items SET kind = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("kind", data.value.as_str().unwrap_or("task"), event)?;
             }
             "size" => {
-                let value = data.value.as_str().map(String::from);
-                self.conn.execute(
-                    "UPDATE items SET size = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("size", data.value.as_str().map(String::from), event)?;
             }
             "urgency" => {
-                let value = data.value.as_str().unwrap_or("default");
-                self.conn.execute(
-                    "UPDATE items SET urgency = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("urgency", data.value.as_str().unwrap_or("default"), event)?;
             }
             "parent" => {
-                let value = data.value.as_str().map(String::from);
-                self.conn.execute(
-                    "UPDATE items SET parent_id = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                    params![value, event.wall_ts_us, event.item_id.as_str()],
-                )?;
+                self.set_field("parent_id", data.value.as_str().map(String::from), event)?;
             }
             "labels" => {
                 // Labels update: supports both legacy array replacement
                 // and new add/remove action format (CRDT-friendly).
-                let mut changed = false;
-
                 if let Some(labels) = data.value.as_array() {
-                    // Legacy: replace entire label set
-                    self.conn.execute(
-                        "DELETE FROM item_labels WHERE item_id = ?1",
-                        params![event.item_id.as_str()],
-                    )?;
-
-                    for label_val in labels {
-                        if let Some(label) = label_val.as_str() {
-                            self.conn.execute(
-                                "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
-                                 VALUES (?1, ?2, ?3)",
-                                params![event.item_id.as_str(), label, event.wall_ts_us],
-                            )?;
-                        }
+                    // Legacy: replace the entire label set.
+                    let wanted: Vec<&str> = labels.iter().filter_map(|l| l.as_str()).collect();
+                    for (label, present) in self.claim_reset(LABELS, &wanted, event)? {
+                        self.set_label(event, &label, present)?;
                     }
-                    changed = true;
                 } else if let Some(obj) = data.value.as_object() {
                     // New: add/remove single label
                     let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("");
                     let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or("");
-
-                    if !label.is_empty() {
-                        match action {
-                            "add" => {
-                                self.conn.execute(
-                                    "INSERT OR IGNORE INTO item_labels (item_id, label, created_at_us)
-                                     VALUES (?1, ?2, ?3)",
-                                    params![event.item_id.as_str(), label, event.wall_ts_us],
-                                )?;
-                                changed = true;
-                            }
-                            "remove" => {
-                                self.conn.execute(
-                                    "DELETE FROM item_labels WHERE item_id = ?1 AND label = ?2",
-                                    params![event.item_id.as_str(), label],
-                                )?;
-                                changed = true;
-                            }
-                            _ => {}
-                        }
+                    let present = match action {
+                        "add" => Some(true),
+                        "remove" => Some(false),
+                        _ => None,
+                    };
+                    if let Some(present) = present
+                        && !label.is_empty()
+                        && self.claim_member(LABELS, label, event)?
+                    {
+                        self.set_label(event, label, present)?;
                     }
                 }
-
-                if changed {
-                    self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
-                }
+                self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
             }
             _ => {
-                // Unknown field — just bump updated_at
+                // Unknown field: touch() already folded in the timestamp.
                 tracing::debug!(
                     field = %data.field,
                     item_id = %event.item_id,
                     "ignoring update for unknown field"
                 );
-                self.conn.execute(
-                    "UPDATE items SET updated_at_us = ?1 WHERE item_id = ?2",
-                    params![event.wall_ts_us, event.item_id.as_str()],
-                )?;
             }
         }
 
@@ -522,19 +439,9 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
-
-        self.conn
-            .execute(
-                "UPDATE items SET state = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                params![
-                    data.state.to_string(),
-                    event.wall_ts_us,
-                    event.item_id.as_str(),
-                ],
-            )
-            .with_context(|| format!("project move for {}", event.item_id))?;
-
-        Ok(())
+        self.touch(event)?;
+        self.set_field("state", data.state.to_string(), event)
+            .with_context(|| format!("project move for {}", event.item_id))
     }
 
     fn project_assign(&self, event: &Event) -> Result<()> {
@@ -543,14 +450,19 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
+        if !self.claim_member(ASSIGNEES, &data.agent, event)? {
+            return Ok(());
+        }
+        let item_id = event.item_id.as_str();
         match data.action {
             AssignAction::Assign => {
                 self.conn
                     .execute(
-                        "INSERT OR IGNORE INTO item_assignees (item_id, agent, created_at_us)
+                        "INSERT OR REPLACE INTO item_assignees (item_id, agent, created_at_us)
                          VALUES (?1, ?2, ?3)",
-                        params![event.item_id.as_str(), data.agent, event.wall_ts_us],
+                        params![item_id, data.agent, event.wall_ts_us],
                     )
                     .with_context(|| format!("assign {} to {}", data.agent, event.item_id))?;
             }
@@ -558,17 +470,11 @@ impl<'conn> Projector<'conn> {
                 self.conn
                     .execute(
                         "DELETE FROM item_assignees WHERE item_id = ?1 AND agent = ?2",
-                        params![event.item_id.as_str(), data.agent],
+                        params![item_id, data.agent],
                     )
                     .with_context(|| format!("unassign {} from {}", data.agent, event.item_id))?;
             }
         }
-
-        // Bump updated_at
-        self.conn.execute(
-            "UPDATE items SET updated_at_us = ?1 WHERE item_id = ?2",
-            params![event.wall_ts_us, event.item_id.as_str()],
-        )?;
 
         Ok(())
     }
@@ -601,11 +507,7 @@ impl<'conn> Projector<'conn> {
             )
             .with_context(|| format!("project comment for {}", event.item_id))?;
 
-        // Bump updated_at
-        self.conn.execute(
-            "UPDATE items SET updated_at_us = ?1 WHERE item_id = ?2",
-            params![event.wall_ts_us, event.item_id.as_str()],
-        )?;
+        self.touch(event)?;
 
         Ok(())
     }
@@ -616,27 +518,12 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
-        self.conn
-            .execute(
-                "INSERT OR IGNORE INTO item_dependencies (item_id, depends_on_item_id, link_type, created_at_us)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    event.item_id.as_str(),
-                    data.target,
-                    data.link_type,
-                    event.wall_ts_us,
-                ],
-            )
-            .with_context(|| {
-                format!("project link {} -> {}", event.item_id, data.target)
-            })?;
-
-        // Bump updated_at
-        self.conn.execute(
-            "UPDATE items SET updated_at_us = ?1 WHERE item_id = ?2",
-            params![event.wall_ts_us, event.item_id.as_str()],
-        )?;
+        if self.claim_member(&links_group(&data.target), &data.link_type, event)? {
+            self.set_link(event, &data.target, &data.link_type, true)
+                .with_context(|| format!("project link {} -> {}", event.item_id, data.target))?;
+        }
 
         Ok(())
     }
@@ -647,45 +534,40 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
+        let group = links_group(&data.target);
         if let Some(ref link_type) = data.link_type {
-            self.conn
-                .execute(
-                    "DELETE FROM item_dependencies \
-                     WHERE item_id = ?1 AND depends_on_item_id = ?2 AND link_type = ?3",
-                    params![event.item_id.as_str(), data.target, link_type],
-                )
-                .with_context(|| format!("unlink {} -/-> {}", event.item_id, data.target))?;
+            if self.claim_member(&group, link_type, event)? {
+                self.set_link(event, &data.target, link_type, false)
+                    .with_context(|| format!("unlink {} -/-> {}", event.item_id, data.target))?;
+            }
         } else {
-            // No link_type: remove all links to target
-            self.conn
-                .execute(
-                    "DELETE FROM item_dependencies \
-                     WHERE item_id = ?1 AND depends_on_item_id = ?2",
-                    params![event.item_id.as_str(), data.target],
-                )
-                .with_context(|| format!("unlink all {} -/-> {}", event.item_id, data.target))?;
+            // No link_type: remove all links to target, as a reset of the
+            // target's link set to empty.
+            for (link_type, present) in self.claim_reset(&group, &[], event)? {
+                self.set_link(event, &data.target, &link_type, present)
+                    .with_context(|| {
+                        format!("unlink all {} -/-> {}", event.item_id, data.target)
+                    })?;
+            }
         }
-
-        // Bump updated_at
-        self.conn.execute(
-            "UPDATE items SET updated_at_us = ?1 WHERE item_id = ?2",
-            params![event.wall_ts_us, event.item_id.as_str()],
-        )?;
 
         Ok(())
     }
 
     fn project_delete(&self, event: &Event) -> Result<()> {
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
-        self.conn
-            .execute(
-                "UPDATE items SET is_deleted = 1, deleted_at_us = ?1, updated_at_us = ?1 \
-                 WHERE item_id = ?2",
-                params![event.wall_ts_us, event.item_id.as_str()],
-            )
-            .with_context(|| format!("project delete for {}", event.item_id))?;
+        if self.claim("deleted", event)? {
+            self.conn
+                .execute(
+                    "UPDATE items SET is_deleted = 1, deleted_at_us = ?1 WHERE item_id = ?2",
+                    params![event.wall_ts_us, event.item_id.as_str()],
+                )
+                .with_context(|| format!("project delete for {}", event.item_id))?;
+        }
 
         Ok(())
     }
@@ -696,6 +578,7 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
         let is_redacted = self.is_event_redacted(&event.event_hash)?;
         let summary = if is_redacted {
@@ -704,14 +587,8 @@ impl<'conn> Projector<'conn> {
             data.summary.as_str()
         };
 
-        self.conn
-            .execute(
-                "UPDATE items SET compact_summary = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                params![summary, event.wall_ts_us, event.item_id.as_str()],
-            )
-            .with_context(|| format!("project compact for {}", event.item_id))?;
-
-        Ok(())
+        self.set_field("compact_summary", summary, event)
+            .with_context(|| format!("project compact for {}", event.item_id))
     }
 
     fn project_snapshot(&self, event: &Event) -> Result<()> {
@@ -720,17 +597,11 @@ impl<'conn> Projector<'conn> {
         };
 
         self.ensure_item_exists(event)?;
+        self.touch(event)?;
 
         let json_str = serde_json::to_string(&data.state).context("serialize snapshot state")?;
-
-        self.conn
-            .execute(
-                "UPDATE items SET snapshot_json = ?1, updated_at_us = ?2 WHERE item_id = ?3",
-                params![json_str, event.wall_ts_us, event.item_id.as_str()],
-            )
-            .with_context(|| format!("project snapshot for {}", event.item_id))?;
-
-        Ok(())
+        self.set_field("snapshot_json", json_str, event)
+            .with_context(|| format!("project snapshot for {}", event.item_id))
     }
 
     fn project_redact(&self, event: &Event) -> Result<()> {
@@ -767,6 +638,184 @@ impl<'conn> Projector<'conn> {
             )
             .context("redact comment body")?;
 
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Order-independent writes (bn-1ugh)
+    // -----------------------------------------------------------------------
+    //
+    // Every projected field is guarded by the key of the event that last
+    // wrote it, stored in `field_clocks`. An event writes a field only when
+    // its `(wall_ts_us, agent, event_hash)` is greater than the stored key,
+    // the same order LWW merge and replay use. The projection of an event
+    // set therefore does not depend on the order of lines in the log.
+    //
+    // Set members (a label, an assignee, a link type to a target) are fields
+    // of their own. A whole-set replacement (legacy label arrays, unlink
+    // without a type) is a group reset: it claims every member it beats, and
+    // a later member write must beat the reset as well as the member's key.
+
+    /// Claim `field` of the event's item for `event`.
+    ///
+    /// Returns `true`, and records the event's key, when the event beats the
+    /// stored key or no key is stored.
+    fn claim(&self, field: &str, event: &Event) -> Result<bool> {
+        // Cached statements: these helpers run several times per event.
+        let changed = self
+            .conn
+            .prepare_cached(
+                "INSERT INTO field_clocks (item_id, field, wall_ts_us, agent, event_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(item_id, field) DO UPDATE SET
+                     wall_ts_us = excluded.wall_ts_us,
+                     agent = excluded.agent,
+                     event_hash = excluded.event_hash
+                 WHERE (excluded.wall_ts_us, excluded.agent, excluded.event_hash)
+                     > (field_clocks.wall_ts_us, field_clocks.agent, field_clocks.event_hash)",
+            )?
+            .execute(params![
+                event.item_id.as_str(),
+                field,
+                event.wall_ts_us,
+                event.agent,
+                event.event_hash,
+            ])
+            .with_context(|| format!("claim field {field} of {}", event.item_id))?;
+        Ok(changed > 0)
+    }
+
+    /// `true` when `event` beats the stored key of `field`, or none is stored.
+    fn beats(&self, field: &str, event: &Event) -> Result<bool> {
+        self.conn
+            .prepare_cached(
+                "SELECT NOT EXISTS(
+                     SELECT 1 FROM field_clocks
+                     WHERE item_id = ?1 AND field = ?2
+                       AND (wall_ts_us, agent, event_hash) >= (?3, ?4, ?5)
+                 )",
+            )?
+            .query_row(
+                params![
+                    event.item_id.as_str(),
+                    field,
+                    event.wall_ts_us,
+                    event.agent,
+                    event.event_hash,
+                ],
+                |row| row.get(0),
+            )
+            .with_context(|| format!("compare field {field} of {}", event.item_id))
+    }
+
+    /// Claim `member` of set `group` for `event`. The event must also beat
+    /// the group's last reset.
+    fn claim_member(&self, group: &str, member: &str, event: &Event) -> Result<bool> {
+        if !self.beats(&reset_field(group), event)? {
+            return Ok(false);
+        }
+        self.claim(&member_field(group, member), event)
+    }
+
+    /// Replace set `group` with `members`.
+    ///
+    /// Returns each member whose presence this event now decides, with
+    /// `true` when it must be present. Members with a newer write keep it.
+    fn claim_reset(
+        &self,
+        group: &str,
+        members: &[&str],
+        event: &Event,
+    ) -> Result<Vec<(String, bool)>> {
+        if !self.claim(&reset_field(group), event)? {
+            return Ok(Vec::new());
+        }
+
+        let prefix = member_field(group, "");
+        let mut known: std::collections::BTreeSet<String> = {
+            // SQLite measures the prefix itself: substr counts characters,
+            // not the bytes Rust's len() would give.
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT substr(field, length(?2) + 1) FROM field_clocks
+                 WHERE item_id = ?1 AND substr(field, 1, length(?2)) = ?2",
+            )?;
+            stmt.query_map(params![event.item_id.as_str(), prefix], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<_>>()?
+        };
+        known.extend(members.iter().map(|m| (*m).to_string()));
+
+        let mut decided = Vec::new();
+        for member in known {
+            if self.claim(&member_field(group, &member), event)? {
+                let present = members.contains(&member.as_str());
+                decided.push((member, present));
+            }
+        }
+        Ok(decided)
+    }
+
+    /// Write `column` of the event's item when the event wins the column.
+    ///
+    /// `column` must be a fixed column name, never user input.
+    fn set_field(&self, column: &str, value: impl rusqlite::ToSql, event: &Event) -> Result<()> {
+        if self.claim(column, event)? {
+            self.conn
+                .prepare_cached(&format!(
+                    "UPDATE items SET {column} = ?1 WHERE item_id = ?2"
+                ))?
+                .execute(params![value, event.item_id.as_str()])
+                .with_context(|| format!("set {column} of {}", event.item_id))?;
+        }
+        Ok(())
+    }
+
+    /// Fold the event's timestamp into the item's created/updated bounds.
+    fn touch(&self, event: &Event) -> Result<()> {
+        self.conn
+            .prepare_cached(
+                "UPDATE items
+                 SET created_at_us = MIN(created_at_us, ?1),
+                     updated_at_us = MAX(updated_at_us, ?1)
+                 WHERE item_id = ?2",
+            )?
+            .execute(params![event.wall_ts_us, event.item_id.as_str()])
+            .with_context(|| format!("touch {}", event.item_id))?;
+        Ok(())
+    }
+
+    fn set_label(&self, event: &Event, label: &str, present: bool) -> Result<()> {
+        if present {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO item_labels (item_id, label, created_at_us)
+                 VALUES (?1, ?2, ?3)",
+                params![event.item_id.as_str(), label, event.wall_ts_us],
+            )?;
+        } else {
+            self.conn.execute(
+                "DELETE FROM item_labels WHERE item_id = ?1 AND label = ?2",
+                params![event.item_id.as_str(), label],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn set_link(&self, event: &Event, target: &str, link_type: &str, present: bool) -> Result<()> {
+        if present {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO item_dependencies
+                     (item_id, depends_on_item_id, link_type, created_at_us)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![event.item_id.as_str(), target, link_type, event.wall_ts_us],
+            )?;
+        } else {
+            self.conn.execute(
+                "DELETE FROM item_dependencies
+                 WHERE item_id = ?1 AND depends_on_item_id = ?2 AND link_type = ?3",
+                params![event.item_id.as_str(), target, link_type],
+            )?;
+        }
         Ok(())
     }
 
@@ -824,6 +873,26 @@ impl<'conn> Projector<'conn> {
         )?;
         Ok(())
     }
+}
+
+/// Set group of an item's labels in `field_clocks`.
+const LABELS: &str = "label";
+/// Set group of an item's assignees in `field_clocks`.
+const ASSIGNEES: &str = "assignee";
+
+/// Set group of an item's link types to `target`.
+fn links_group(target: &str) -> String {
+    format!("link/{target}")
+}
+
+/// `field_clocks` field of one member of a set group.
+fn member_field(group: &str, member: &str) -> String {
+    format!("{group}/{member}")
+}
+
+/// `field_clocks` field of a set group's last whole-set replacement.
+fn reset_field(group: &str) -> String {
+    format!("{group}*")
 }
 
 enum ProjectResult {
@@ -914,6 +983,7 @@ pub fn clear_projection(conn: &Connection) -> Result<()> {
          DELETE FROM item_labels;
          DELETE FROM items;
          DELETE FROM projected_events;
+         DELETE FROM field_clocks;
          UPDATE projection_meta SET last_event_offset = 0, last_event_hash = NULL WHERE id = 1;",
     )
     .context("clear projection tables")?;

@@ -43,6 +43,22 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
         .with_context(|| format!("open projection database {}", path.display()))?;
 
     configure_connection(&conn).context("configure sqlite pragmas")?;
+    // An existing projection from before REBUILD_REQUIRED_BELOW lacks data
+    // the current code depends on (per-field winner keys). Mark it dirty so
+    // the next ensure_projection forces a full rebuild. A cleared cursor
+    // alone is not enough: a single-event write can advance it first. The
+    // marker is written before migrating, so a crash in between cannot
+    // leave a migrated database without it.
+    let before = migrations::current_schema_version(&conn).context("read schema version")?;
+    if before > 0
+        && before < migrations::REBUILD_REQUIRED_BELOW
+        && let Some(bones_dir) = path.parent()
+    {
+        mark_projection_dirty(
+            bones_dir,
+            &format!("schema upgrade from v{before}: full rebuild required"),
+        )?;
+    }
     migrations::migrate(&mut conn).context("apply projection migrations")?;
 
     Ok(conn)
@@ -362,6 +378,82 @@ mod tests {
             !marker.exists(),
             "dirty marker should be cleared after successful recovery"
         );
+    }
+
+    /// Regression for bn-1ugh review: a pre-v3 projection opened by a write
+    /// command (`open_projection`, then a single-event projection) must still
+    /// be rebuilt, so rows projected before v3 get their field keys.
+    #[test]
+    fn pre_v3_projection_rebuilds_after_single_write() {
+        use crate::db::{project::Projector, query, schema};
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard");
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+
+        let mut old = make_create("bn-old", "old item", 1_000);
+        let line = writer::write_event(&mut old).expect("serialize old create");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append old create");
+
+        // A v2 projection that already holds bn-old, with its cursor at the
+        // log end: what an older bn binary leaves behind.
+        let db_path = bones_dir.join("bones.db");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open v2 db");
+            conn.execute_batch(schema::MIGRATION_V1_SQL).expect("v1");
+            conn.execute_batch(schema::MIGRATION_V2_SQL).expect("v2");
+            conn.pragma_update(None, "user_version", 2_i64)
+                .expect("set v2");
+            conn.execute(
+                "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted,
+                     search_labels, created_at_us, updated_at_us)
+                 VALUES ('bn-old', 'old item', 'task', 'open', 'default', 0, '', 1000, 1000)",
+                [],
+            )
+            .expect("insert v2 row");
+            let len = shard_mgr.total_content_len().expect("log length");
+            query::update_projection_cursor(
+                &conn,
+                i64::try_from(len).expect("small log"),
+                Some(&old.event_hash),
+            )
+            .expect("set v2 cursor");
+        }
+
+        // A write command: open (migrates to v3), append, project one event.
+        let mut new = make_create("bn-new", "new item", 2_000);
+        let line = writer::write_event(&mut new).expect("serialize new create");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append new create");
+        {
+            let conn = open_projection(&db_path).expect("open and migrate");
+            Projector::new(&conn)
+                .project_event(&new)
+                .expect("project new create");
+        }
+
+        // The next read must rebuild, which gives bn-old its field keys.
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        let old_keys: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM field_clocks WHERE item_id = 'bn-old'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count bn-old keys");
+        assert!(old_keys > 0, "bn-old was not re-projected with field keys");
+        assert!(!projection_dirty_marker_path(&bones_dir).exists());
     }
 
     /// Regression for bn-r2zy: a `item.create` event that was skipped mid-batch
