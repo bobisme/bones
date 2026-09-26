@@ -1,7 +1,7 @@
 //! Projection-level simulation campaign (bn-2fs6). See `bones_sim::replica`.
 
 use bones_sim::replica::{
-    Plant, Profile, Shapes, Step, Violation, campaign, drive, generate, shapes,
+    ApplyCounts, Plant, Profile, Shapes, Step, Violation, campaign, drive, generate, shapes,
 };
 
 fn seed_count() -> u64 {
@@ -69,6 +69,35 @@ fn hostile_shapes_are_reached() {
     );
     assert!(total.rebase_pulls > 0, "no rebase pulls");
     assert!(total.faults.iter().all(|&n| n > 0), "a fault never fired");
+}
+
+/// The incremental-equals-rebuild oracle is trivially true when every
+/// apply falls back to a full rebuild. Most applies must resume from the
+/// cursor and project new events.
+#[test]
+fn incremental_path_dominates_applies() {
+    let mut total = ApplyCounts::default();
+    for seed in 0..seed_count() {
+        let outcome = drive(&generate(seed, Profile::default()), None)
+            .expect("driver")
+            .expect("seed converges");
+        total.add(outcome.applies);
+    }
+    eprintln!("applies over {} seeds: {total:?}", seed_count());
+    let applies = total.total();
+    assert!(applies > 0, "no applies ran");
+    // Measured over the default 48 seeds: 1608 incremental, 128 no-op,
+    // 328 full rebuilds (78% incremental). Rebuilds come from each agent's
+    // first apply, dropped projections and rebase pulls. Half leaves room
+    // for generator changes, but fails if the cursor digest stops matching
+    // after either a rebuild or an incremental apply: each of those makes
+    // at least every other apply a rebuild.
+    assert!(
+        total.incremental * 2 > applies,
+        "incremental path ran in only {} of {applies} applies",
+        total.incremental
+    );
+    assert!(total.full_rebuild > 0, "the rebuild fallback never ran");
 }
 
 /// Planted defect: corrupting a projection mid-run must trip the

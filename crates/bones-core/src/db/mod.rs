@@ -702,4 +702,158 @@ mod tests {
             .expect("count rewritten items");
         assert_eq!(counts, (0, 1));
     }
+
+    /// Init a `.bones/` dir with one shard; return its manager and bones dir.
+    fn init_bones_dir(dir: &TempDir) -> (std::path::PathBuf, ShardManager) {
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard");
+        (bones_dir, shard_mgr)
+    }
+
+    /// Serialize and append a create event; return the event and its line.
+    fn append_create(shard_mgr: &ShardManager, id: &str, title: &str, ts: i64) -> (Event, String) {
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+        let mut event = make_create(id, title, ts);
+        let line = writer::write_event(&mut event).expect("serialize create");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append create");
+        (event, line)
+    }
+
+    /// Overwrite one projected title directly in `SQLite`. Only a full
+    /// rebuild from the log restores it, so it shows whether one ran.
+    fn plant_canary(bones_dir: &std::path::Path, item_id: &str) {
+        let conn = open_projection(&bones_dir.join("bones.db")).expect("open projection");
+        let changed = conn
+            .execute(
+                "UPDATE items SET title = 'CANARY' WHERE item_id = ?1",
+                [item_id],
+            )
+            .expect("plant canary");
+        assert_eq!(changed, 1, "canary item must exist");
+    }
+
+    fn projected_title(conn: &rusqlite::Connection, item_id: &str) -> String {
+        conn.query_row(
+            "SELECT title FROM items WHERE item_id = ?1",
+            [item_id],
+            |row| row.get(0),
+        )
+        .expect("read projected title")
+    }
+
+    /// A rewrite that swaps two earlier lines keeps the log length and the
+    /// last event hash. `ensure_projection` must still see it (prefix digest)
+    /// and run a full rebuild.
+    #[test]
+    fn ensure_projection_rebuilds_when_earlier_lines_swap() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+        let (_, line_a) = append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_000);
+        let (_, line_b) = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_001);
+        let (last, _) = append_create(&shard_mgr, "bn-c", "charlie", 1_700_000_000_000_002);
+
+        drop(
+            ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn"),
+        );
+        let before = super::incremental::event_log_cursor(&bones_dir.join("events"))
+            .expect("log cursor before");
+        plant_canary(&bones_dir, "bn-a");
+
+        // Swap the first two event lines in place.
+        let (year, month) = shard_mgr.active_shard().expect("shard").expect("some");
+        let path = shard_mgr.shard_path(year, month);
+        let content = std::fs::read_to_string(&path).expect("read shard");
+        let ab = format!("{line_a}{line_b}");
+        assert!(content.contains(&ab), "lines a and b must be adjacent");
+        std::fs::write(&path, content.replace(&ab, &format!("{line_b}{line_a}")))
+            .expect("rewrite shard");
+
+        let after = super::incremental::event_log_cursor(&bones_dir.join("events"))
+            .expect("log cursor after");
+        assert_eq!(before, after, "rewrite must keep length and last hash");
+        assert_eq!(after.1.as_deref(), Some(last.event_hash.as_str()));
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure")
+            .expect("conn");
+        assert_eq!(
+            projected_title(&conn, "bn-a"),
+            "alpha",
+            "full rebuild must replace the canary"
+        );
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .expect("count items");
+        assert_eq!(count, 3);
+        assert_eq!(projected_title(&conn, "bn-b"), "bravo");
+        assert_eq!(projected_title(&conn, "bn-c"), "charlie");
+
+        // The rebuild stored the digest of the rewritten log.
+        let (offset, _) = super::query::get_projection_cursor(&conn).expect("cursor");
+        let offset = usize::try_from(offset).expect("offset");
+        assert_eq!(
+            super::query::get_projection_prefix_digest(&conn),
+            super::incremental::log_prefix_digest(&shard_mgr, offset).expect("digest"),
+        );
+    }
+
+    /// The CLI write path (append a line, then `Projector::project_event`,
+    /// which advances the cursor) records a prefix digest that matches the
+    /// log. The next `ensure_projection` must trust it and not rebuild.
+    #[test]
+    fn single_event_write_keeps_next_ensure_projection_incremental() {
+        use crate::db::project::Projector;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+        append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_000);
+        drop(
+            ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn"),
+        );
+
+        // What `bn create` does: append, open the projection, project.
+        let (event, _) = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_001);
+        {
+            let conn = open_projection(&bones_dir.join("bones.db")).expect("open projection");
+            assert!(
+                Projector::new(&conn)
+                    .project_event(&event)
+                    .expect("project")
+            );
+
+            let (offset, hash) = super::query::get_projection_cursor(&conn).expect("cursor");
+            let offset = usize::try_from(offset).expect("offset");
+            assert_eq!(offset, shard_mgr.total_content_len().expect("log length"));
+            assert_eq!(hash.as_deref(), Some(event.event_hash.as_str()));
+            let stored = super::query::get_projection_prefix_digest(&conn);
+            assert!(stored.is_some());
+            assert_eq!(
+                stored,
+                super::incremental::log_prefix_digest(&shard_mgr, offset).expect("digest"),
+                "stored digest must match the log"
+            );
+        }
+
+        plant_canary(&bones_dir, "bn-a");
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure")
+            .expect("conn");
+        assert_eq!(
+            projected_title(&conn, "bn-a"),
+            "CANARY",
+            "ensure_projection rebuilt after a single-event write"
+        );
+        assert_eq!(projected_title(&conn, "bn-b"), "bravo");
+    }
 }

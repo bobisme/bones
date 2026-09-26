@@ -625,6 +625,38 @@ pub struct Outcome {
     pub events_per_agent: Vec<usize>,
     /// Distinct events across all agents.
     pub distinct_events: usize,
+    /// How `incremental_apply` resolved, over every apply in the run.
+    pub applies: ApplyCounts,
+}
+
+/// How each `incremental_apply` call in a run resolved.
+///
+/// The incremental-equals-rebuild oracle is only meaningful when the
+/// incremental path runs: a full rebuild compared against a full rebuild
+/// checks nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ApplyCounts {
+    /// Resumed from the cursor and projected at least one new event.
+    pub incremental: usize,
+    /// Resumed from the cursor and found nothing new.
+    pub noop: usize,
+    /// Fell back to a full rebuild.
+    pub full_rebuild: usize,
+}
+
+impl ApplyCounts {
+    /// Total applies.
+    #[must_use]
+    pub const fn total(&self) -> usize {
+        self.incremental + self.noop + self.full_rebuild
+    }
+
+    /// Add `other` into `self`.
+    pub const fn add(&mut self, other: Self) {
+        self.incremental += other.incremental;
+        self.noop += other.noop;
+        self.full_rebuild += other.full_rebuild;
+    }
 }
 
 struct Replica {
@@ -634,6 +666,7 @@ struct Replica {
     lines: Vec<String>,
     hashes: BTreeSet<String>,
     snapshot: Vec<String>,
+    applies: ApplyCounts,
 }
 
 impl Replica {
@@ -651,6 +684,7 @@ impl Replica {
             lines: Vec::new(),
             hashes: BTreeSet::new(),
             snapshot: Vec::new(),
+            applies: ApplyCounts::default(),
         })
     }
 
@@ -703,12 +737,17 @@ impl Replica {
         corrupt: bool,
     ) -> Result<Option<Violation>> {
         let events_dir = self.bones_dir.join("events");
-        if let Err(err) = incremental_apply(&events_dir, &self.db_path(), false) {
-            return Ok(Some(Violation::ApplyFailed {
-                step,
-                agent,
-                error: format!("{err:#}"),
-            }));
+        match incremental_apply(&events_dir, &self.db_path(), false) {
+            Err(err) => {
+                return Ok(Some(Violation::ApplyFailed {
+                    step,
+                    agent,
+                    error: format!("{err:#}"),
+                }));
+            }
+            Ok(report) if report.full_rebuild_triggered => self.applies.full_rebuild += 1,
+            Ok(report) if report.events_applied == 0 => self.applies.noop += 1,
+            Ok(_) => self.applies.incremental += 1,
         }
         if corrupt {
             let conn = rusqlite::Connection::open(self.db_path())?;
@@ -1083,9 +1122,14 @@ pub fn drive(plan: &Plan, plant: Option<Plant>) -> Result<std::result::Result<Ou
     }
 
     let distinct: BTreeSet<&String> = replicas.iter().flat_map(|r| &r.hashes).collect();
+    let mut applies = ApplyCounts::default();
+    for replica in &replicas {
+        applies.add(replica.applies);
+    }
     Ok(Ok(Outcome {
         events_per_agent: replicas.iter().map(|r| r.hashes.len()).collect(),
         distinct_events: distinct.len(),
+        applies,
     }))
 }
 
