@@ -224,21 +224,29 @@ fn decode_varint_u32(raw: &[u8], cursor: &mut usize) -> Option<u32> {
     u32::try_from(value).ok()
 }
 
+/// Decode one LEB128 `u64` at `cursor`, accepting only the canonical
+/// (shortest) encoding. An overlong encoding, or one whose 10th byte holds
+/// more than bit 63, returns `None`, so each value has exactly one varint
+/// encoding and no high bits are dropped (bn-3ht9, same class as bn-16g3 in
+/// `cache::codec`).
 fn decode_varint_u64(raw: &[u8], cursor: &mut usize) -> Option<u64> {
+    let start = *cursor;
     let mut shift = 0_u32;
     let mut value = 0_u64;
 
     loop {
         let byte = *raw.get(*cursor)?;
         *cursor += 1;
-        let payload = u64::from(byte & 0x7f);
-        let shifted = payload.checked_shl(shift)?;
-        value = value.checked_add(shifted)?;
-        if (byte & 0x80) == 0 {
-            return Some(value);
-        }
-        if shift >= 63 {
+        // The 10th group holds only bit 63; anything more overflows a u64.
+        if shift == 63 && byte > 1 {
             return None;
+        }
+        value |= u64::from(byte & 0x7f) << shift;
+        if (byte & 0x80) == 0 {
+            if byte == 0 && *cursor - start > 1 {
+                return None;
+            }
+            return Some(value);
         }
         shift += 7;
     }
@@ -473,5 +481,62 @@ mod tests {
         assert!(stamp_from_text("itc:v1:abc").is_none());
         assert!(stamp_from_text("itc:v3:abcde").is_none());
         assert!(stamp_from_text("itc:AQ").is_none());
+    }
+
+    #[test]
+    fn varint_rejects_overlong_and_overflow() {
+        let decode = |bytes: &[u8]| decode_varint_u64(bytes, &mut 0);
+        assert_eq!(decode(&[0x00]), Some(0));
+        assert_eq!(decode(&[0x80, 0x00]), None, "overlong zero");
+        assert_eq!(decode(&[0x81, 0x80, 0x00]), None, "overlong one");
+        let mut max = Vec::new();
+        encode_varint_u64(u64::MAX, &mut max);
+        assert_eq!(decode(&max), Some(u64::MAX));
+        let mut high = max.clone();
+        *high.last_mut().expect("10 bytes") = 0x02;
+        assert_eq!(decode(&high), None, "10th byte beyond bit 63");
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::{decode_varint_u64, encode_varint_u64};
+
+    /// Upper bound on a `u64` LEB128 encoding.
+    const MAX_VARINT: usize = 10;
+
+    /// Every `u64` round-trips through the text-format varint.
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn text_varint_round_trip() {
+        let v: u64 = kani::any();
+        let mut buf = Vec::new();
+        encode_varint_u64(v, &mut buf);
+        assert!(buf.len() <= MAX_VARINT);
+        let mut cursor = 0;
+        assert!(decode_varint_u64(&buf, &mut cursor) == Some(v));
+        assert!(cursor == buf.len());
+    }
+
+    /// For any input of up to 11 bytes, `decode_varint_u64` does not panic,
+    /// and accepts only the canonical encoding: when it returns `v` and
+    /// consumes `n` bytes, those bytes are exactly `encode_varint_u64(v)`.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn text_varint_decode_accepts_only_canonical() {
+        let data: [u8; MAX_VARINT + 1] = kani::any();
+        let len: usize = kani::any_where(|&l| l <= data.len());
+        let mut cursor = 0;
+        if let Some(v) = decode_varint_u64(&data[..len], &mut cursor) {
+            assert!(cursor <= len);
+            let mut canonical = Vec::new();
+            encode_varint_u64(v, &mut canonical);
+            assert!(canonical.len() == cursor);
+            let mut i = 0;
+            while i < cursor {
+                assert!(canonical[i] == data[i]);
+                i += 1;
+            }
+        }
     }
 }
