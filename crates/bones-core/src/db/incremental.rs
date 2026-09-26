@@ -208,6 +208,19 @@ pub(crate) fn record_cursor_prefix(
     query::set_projection_prefix_digest(conn, digest.as_deref())
 }
 
+/// Read `user_version` without migrating or configuring the database.
+fn peek_schema_version(db_path: &Path) -> Option<u32> {
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    migrations::current_schema_version(&conn).ok()
+}
+
 /// Apply only events newer than the high-water mark to the projection.
 ///
 /// Steps:
@@ -239,6 +252,22 @@ pub fn incremental_apply(
 
     if force_full {
         return do_full_rebuild(events_dir, db_path, start, "force_full flag set");
+    }
+
+    // A projection from a newer bn cannot be opened for writing (see
+    // open_projection); name that reason instead of "corrupt".
+    if let Some(version) = peek_schema_version(db_path)
+        && version > migrations::LATEST_SCHEMA_VERSION
+    {
+        return do_full_rebuild(
+            events_dir,
+            db_path,
+            start,
+            &format!(
+                "schema version v{version} is newer than this bn (v{})",
+                migrations::LATEST_SCHEMA_VERSION
+            ),
+        );
     }
 
     // Try to open existing DB.  If it doesn't exist or is corrupt we need a

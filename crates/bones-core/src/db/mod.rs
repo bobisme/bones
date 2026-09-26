@@ -51,6 +51,26 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
     // marker is written before migrating, so a crash in between cannot
     // leave a migrated database without it.
     let before = migrations::current_schema_version(&conn).context("read schema version")?;
+    // A projection from a newer bn uses formats this binary does not know
+    // (e.g. field key layouts). Writing to it would mix formats. Leave it
+    // untouched, mark it dirty, and fail: read paths then rebuild it at this
+    // binary's schema (bn-2h7c).
+    if before > migrations::LATEST_SCHEMA_VERSION {
+        if let Some(bones_dir) = path.parent() {
+            mark_projection_dirty(
+                bones_dir,
+                &format!(
+                    "projection schema v{before} is newer than this bn (v{}): full rebuild required",
+                    migrations::LATEST_SCHEMA_VERSION
+                ),
+            )?;
+        }
+        anyhow::bail!(
+            "projection {} has schema v{before}, newer than this bn supports (v{})",
+            path.display(),
+            migrations::LATEST_SCHEMA_VERSION
+        );
+    }
     if before > 0
         && before < migrations::REBUILD_REQUIRED_BELOW
         && let Some(bones_dir) = path.parent()
@@ -242,6 +262,7 @@ mod tests {
     use crate::model::item_id::ItemId;
     use crate::shard::ShardManager;
     use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
     fn temp_db_path() -> (TempDir, std::path::PathBuf) {
@@ -389,6 +410,82 @@ mod tests {
     /// Regression for bn-1ugh review: a pre-v3 projection opened by a write
     /// command (`open_projection`, then a single-event projection) must still
     /// be rebuilt, so rows projected before v3 get their field keys.
+    /// A log with one create, and the projection built from it.
+    fn built_projection() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let bones_dir = dir.path().join(".bones");
+        std::fs::create_dir_all(bones_dir.join("events")).expect("events dir");
+        let shard_mgr = ShardManager::new(&bones_dir);
+        shard_mgr.init().expect("init shard");
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+        let mut create = make_create("bn-one", "one", 1_000);
+        let line = writer::write_event(&mut create).expect("serialize create");
+        shard_mgr
+            .append_raw(year, month, &line)
+            .expect("append create");
+        ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        (dir, bones_dir)
+    }
+
+    fn user_version(db_path: &Path) -> i64 {
+        rusqlite::Connection::open(db_path)
+            .expect("open raw")
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user_version")
+    }
+
+    #[test]
+    fn newer_schema_projection_is_left_alone_and_rebuilt() {
+        let (_dir, bones_dir) = built_projection();
+        let db_path = bones_dir.join("bones.db");
+        let newer = i64::from(migrations::LATEST_SCHEMA_VERSION) + 1;
+        rusqlite::Connection::open(&db_path)
+            .expect("open raw")
+            .pragma_update(None, "user_version", newer)
+            .expect("set newer version");
+
+        // A direct writer must not get a connection to the newer database.
+        assert!(open_projection(&db_path).is_err());
+        assert_eq!(user_version(&db_path), newer, "database left untouched");
+        assert!(projection_dirty_marker_path(&bones_dir).exists());
+
+        // A read path rebuilds it at this binary's schema.
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        assert_eq!(
+            migrations::current_schema_version(&conn).expect("version"),
+            migrations::LATEST_SCHEMA_VERSION
+        );
+        let item = crate::db::query::get_item(&conn, "bn-one", false).expect("query");
+        assert!(item.is_some(), "rebuilt projection holds the item");
+        assert!(!projection_dirty_marker_path(&bones_dir).exists());
+    }
+
+    #[test]
+    fn v4_projection_upgrade_marks_dirty_and_clears_cursor() {
+        let (_dir, bones_dir) = built_projection();
+        let db_path = bones_dir.join("bones.db");
+        rusqlite::Connection::open(&db_path)
+            .expect("open raw")
+            .pragma_update(None, "user_version", 4_i64)
+            .expect("set v4");
+
+        let conn = open_projection(&db_path).expect("open and migrate");
+        assert!(
+            projection_dirty_marker_path(&bones_dir).exists(),
+            "v4 link keys need a rebuild"
+        );
+        let (offset, hash) = crate::db::query::get_projection_cursor(&conn).expect("cursor");
+        assert_eq!((offset, hash), (0, None));
+        assert_eq!(crate::db::query::get_projection_prefix_digest(&conn), None);
+    }
+
     #[test]
     fn pre_v3_projection_rebuilds_after_single_write() {
         use crate::db::{project::Projector, query, schema};
