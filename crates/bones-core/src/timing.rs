@@ -44,9 +44,7 @@ static TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
 /// Supported truthy values: `1`, `true`, `yes`, `on` (case-insensitive).
 #[must_use]
 pub fn timing_enabled_from_env() -> bool {
-    std::env::var("BONES_TIMING")
-        .ok()
-        .is_some_and(|value| is_truthy(value.as_str()))
+    std::env::var("BONES_TIMING").is_ok_and(|value| is_truthy(value.as_str()))
 }
 
 /// Enable or disable timing collection.

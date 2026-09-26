@@ -41,7 +41,7 @@ impl MergeTrace {
 /// - `BONES_LOG` contains `debug` or `trace`
 #[must_use]
 pub fn merge_tracing_enabled() -> bool {
-    let debug_merge = std::env::var("BONES_DEBUG_MERGE").ok().is_some_and(|v| {
+    let debug_merge = std::env::var("BONES_DEBUG_MERGE").is_ok_and(|v| {
         let lowered = v.trim().to_ascii_lowercase();
         matches!(lowered.as_str(), "1" | "true" | "yes" | "on")
     });
@@ -50,7 +50,7 @@ pub fn merge_tracing_enabled() -> bool {
         return true;
     }
 
-    std::env::var("BONES_LOG").ok().is_some_and(|v| {
+    std::env::var("BONES_LOG").is_ok_and(|v| {
         let lowered = v.to_ascii_lowercase();
         lowered.contains("debug") || lowered.contains("trace")
     })

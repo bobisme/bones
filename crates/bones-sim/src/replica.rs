@@ -379,14 +379,14 @@ pub fn generate(seed: u64, profile: Profile) -> Plan {
 
         let roll = rng.next_bounded(100);
         let step = if known_items.is_empty() || (roll < 6 && !uncreated.is_empty()) {
-            match pick(&mut rng, &uncreated) {
-                Some(item) => Step::Create {
+            pick(&mut rng, &uncreated).map_or_else(
+                || pull_step(&mut rng, agent, &agents),
+                |item| Step::Create {
                     agent,
                     item,
                     wall_ts_us,
                 },
-                None => pull_step(&mut rng, agent, &agents),
-            }
+            )
         } else if roll < 60 {
             let item = pick(&mut rng, &known_items).unwrap_or(0);
             Step::Write {
@@ -933,6 +933,7 @@ fn write_event_data(agent: usize, op: &WriteOp) -> (EventType, EventData) {
 /// # Errors
 ///
 /// Returns an error if the driver itself fails.
+#[allow(clippy::too_many_lines)]
 pub fn drive(plan: &Plan, plant: Option<Plant>) -> Result<std::result::Result<Outcome, Violation>> {
     let agents = plan.profile.agents;
     let mut replicas: Vec<Replica> = (0..agents).map(|_| Replica::new()).collect::<Result<_>>()?;

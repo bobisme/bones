@@ -198,7 +198,7 @@ impl<'a> BitReader<'a> {
         })
     }
 
-    fn read_bit(&mut self) -> Result<bool, CodecError> {
+    const fn read_bit(&mut self) -> Result<bool, CodecError> {
         if self.cursor >= self.bit_len {
             return Err(CodecError::UnexpectedEof);
         }

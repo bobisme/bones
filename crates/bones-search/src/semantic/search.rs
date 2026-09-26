@@ -73,7 +73,7 @@ pub fn knn_search(
         };
         // Map cosine [-1, 1] to [0, 1] for consistent scoring with the rest of
         // the fusion pipeline.
-        let score = ((cosine + 1.0) * 0.5).clamp(0.0, 1.0);
+        let score = f32::midpoint(cosine, 1.0).clamp(0.0, 1.0);
         scored.push(SemanticSearchResult { item_id, score });
     }
 
