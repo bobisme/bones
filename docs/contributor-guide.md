@@ -89,6 +89,16 @@ Metrics can live in triage/search crates depending on scope.
 - To add a file with harnesses, list it in `FILES` in `scripts/kani.sh`.
 - `just kani` is not part of `just check`.
 
+## Verus Proofs
+
+`crates/bones-verified` holds the merge decisions that `bones-core` calls: the LWW key order, the epoch/phase join and the item timestamp joins. Verus proves them correct for all inputs, with no size bound. A plain `cargo build` erases the proofs and compiles the executable code only, so building bones does not need Verus.
+
+- Install: download the Verus release that matches the `vstd` version pinned in `crates/bones-verified/Cargo.toml` from https://github.com/verus-lang/verus/releases and unpack it to `~/.local/verus/` (or set `VERUS_DIR`).
+- Run: `just verus`. It cleans the crate first, because cargo-verus prints nothing on a cache hit, and fails unless Verus reports zero errors.
+- To upgrade Verus, change the `vstd` pin and the installed release together.
+- Before trusting a new proof, break the code it covers and confirm `just verus` fails.
+- `just verus` is not part of `just check`.
+
 ## Conventions and Style
 
 - Prefer small, composable modules and pure functions where practical.

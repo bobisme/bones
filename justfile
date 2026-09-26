@@ -9,6 +9,10 @@ check:
     rtk cargo clippy --workspace -- -D warnings
     rtk cargo test --workspace
 
+# Verus proofs for crates/bones-verified, under a memory cap (not part of check)
+verus:
+    scripts/verus.sh
+
 # Kani proofs, one harness at a time under a memory cap (not part of check)
 kani *harnesses:
     scripts/kani.sh {{harnesses}}

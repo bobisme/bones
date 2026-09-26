@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+bones-verified = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }

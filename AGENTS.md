@@ -17,6 +17,7 @@ crates/
   bones-search/  Search/index abstractions
   bones-cli/     `bn` command-line entry point
   bones-sim/     Deterministic simulation harness
+  bones-verified/ Verus-verified merge kernels used by bones-core (`just verus`)
 ```
 
 ## Architecture Diagram (high level)

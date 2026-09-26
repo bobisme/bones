@@ -165,21 +165,15 @@ impl EpochPhaseState {
     /// 1. Higher epoch wins entirely.
     /// 2. Same epoch: higher phase rank wins.
     pub fn merge(&mut self, other: &Self) {
-        match self.epoch.cmp(&other.epoch) {
-            std::cmp::Ordering::Less => {
-                // Other has higher epoch — take it entirely
-                self.epoch = other.epoch;
-                self.phase = other.phase;
-            }
-            std::cmp::Ordering::Equal => {
-                // Same epoch — take higher phase
-                if other.phase > self.phase {
-                    self.phase = other.phase;
-                }
-            }
-            std::cmp::Ordering::Greater => {
-                // We have higher epoch — keep ours
-            }
+        // Verified join (bn-226p): commutative, associative, idempotent, and
+        // the least upper bound. It returns one of its two inputs.
+        let joined = bones_verified::epoch_phase_join(
+            (self.epoch, self.phase.rank()),
+            (other.epoch, other.phase.rank()),
+        );
+        if joined != (self.epoch, self.phase.rank()) {
+            self.epoch = other.epoch;
+            self.phase = other.phase;
         }
     }
 }

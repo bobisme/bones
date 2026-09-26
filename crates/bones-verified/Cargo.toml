@@ -1,0 +1,18 @@
+[package]
+name = "bones-verified"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "Verus-verified merge kernels for bones CRDTs"
+repository.workspace = true
+
+[dependencies]
+vstd = "=0.0.0-2026-09-20-0158"
+
+[package.metadata.verus]
+verify = true
+
+# Code inside `verus!` is checked by Verus, not by the workspace's pedantic
+# clippy settings, which the macro expansion does not satisfy.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_only)'] }

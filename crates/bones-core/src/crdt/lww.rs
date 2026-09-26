@@ -138,23 +138,25 @@ impl<T: Clone> LwwRegister<T> {
         self.compare(other).0
     }
 
+    /// The decision is `bones_verified::lww_compare`, which Verus proves
+    /// computes a strict total order on `(wall_ts, agent_id, event_hash)`
+    /// (bn-226p). `str` order is byte order, so comparing the bytes gives
+    /// the same result as comparing the strings.
     fn compare(&self, other: &Self) -> (bool, TieBreakStep) {
-        // Step 1: Wall-clock timestamp (higher wins)
-        match self.wall_ts.cmp(&other.wall_ts) {
-            std::cmp::Ordering::Greater => return (true, TieBreakStep::WallTimestamp),
-            std::cmp::Ordering::Less => return (false, TieBreakStep::WallTimestamp),
-            std::cmp::Ordering::Equal => {}
-        }
-
-        // Step 2: Agent ID (lexicographically greater wins)
-        match self.agent_id.cmp(&other.agent_id) {
-            std::cmp::Ordering::Greater => return (true, TieBreakStep::AgentId),
-            std::cmp::Ordering::Less => return (false, TieBreakStep::AgentId),
-            std::cmp::Ordering::Equal => {}
-        }
-
-        // Step 3: Event hash (lexicographically greater wins — unique per event)
-        (self.event_hash >= other.event_hash, TieBreakStep::EventHash)
+        let (wins, step) = bones_verified::lww_compare(
+            self.wall_ts,
+            self.agent_id.as_bytes(),
+            self.event_hash.as_bytes(),
+            other.wall_ts,
+            other.agent_id.as_bytes(),
+            other.event_hash.as_bytes(),
+        );
+        let step = match step {
+            0 => TieBreakStep::WallTimestamp,
+            1 => TieBreakStep::AgentId,
+            _ => TieBreakStep::EventHash,
+        };
+        (wins, step)
     }
 }
 
@@ -428,10 +430,11 @@ mod tests {
 /// values.
 ///
 /// Bound: `wall_ts` is any `u64`. `agent_id` and `event_hash` are strings of
-/// length 0 to 2 over `{a, b}`. `compare` uses only `Ord::cmp` on each field,
-/// and this domain gives every Less/Equal/Greater outcome on each field,
-/// including the proper-prefix case, so every path through the tie-break
-/// chain is covered.
+/// length 0 to 2 over `{a, b}`. This domain gives every Less/Equal/Greater
+/// outcome on each field, including the proper-prefix case, so every path
+/// through the tie-break chain is covered. `compare` delegates to
+/// `bones_verified::lww_compare`, which Verus proves for all lengths; these
+/// harnesses check the bones-core wrapper around it.
 ///
 /// Registers carry no causal stamp since bn-1dy8, so the key above is the
 /// whole of the merge order.

@@ -175,13 +175,10 @@ impl WorkItemState {
         // Deleted: LWW merge
         self.deleted.merge(&other.deleted);
 
-        // Timestamps: created_at = min of non-zero, updated_at = max
-        if other.created_at != 0 && (self.created_at == 0 || other.created_at < self.created_at) {
-            self.created_at = other.created_at;
-        }
-        if other.updated_at > self.updated_at {
-            self.updated_at = other.updated_at;
-        }
+        // Timestamps: created_at = min of non-zero, updated_at = max. Both
+        // are verified semilattice joins (bn-226p).
+        self.created_at = bones_verified::min_nonzero(self.created_at, other.created_at);
+        self.updated_at = bones_verified::max(self.updated_at, other.updated_at);
     }
 
     /// Build the state of one item from its events, in any order.
