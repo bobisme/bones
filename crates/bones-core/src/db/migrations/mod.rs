@@ -1,7 +1,7 @@
 //! `SQLite` schema migrations for the disposable projection database.
 
 use super::schema;
-use rusqlite::{Connection, types::Type};
+use rusqlite::{Connection, TransactionBehavior, types::Type};
 
 /// Latest schema version understood by this binary.
 pub const LATEST_SCHEMA_VERSION: u32 = 4;
@@ -48,7 +48,15 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<u32> {
             continue;
         }
 
-        let tx = conn.transaction()?;
+        // Take the write lock first, then re-read the version inside the
+        // transaction: another process may have applied this migration since
+        // the read above. Some migrations (ALTER TABLE ADD COLUMN) fail when
+        // run twice (bn-3pnu).
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        current = current_schema_version(&tx)?;
+        if *version <= current {
+            continue;
+        }
         tx.execute_batch(sql)?;
         tx.pragma_update(None, "user_version", i64::from(*version))?;
         tx.execute(
@@ -185,6 +193,46 @@ mod tests {
         assert_eq!(projected_version, i64::from(LATEST_SCHEMA_VERSION));
 
         Ok(())
+    }
+
+    #[test]
+    fn concurrent_migrations_all_succeed() {
+        // Several processes may open an old projection at once. Each must
+        // either apply a migration or see that another one did (bn-3pnu).
+        for round in 0..20 {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("bones.db");
+            {
+                let conn = Connection::open(&path).expect("open");
+                conn.execute_batch(schema::MIGRATION_V1_SQL).expect("v1");
+                conn.execute_batch(schema::MIGRATION_V2_SQL).expect("v2");
+                conn.execute_batch(schema::MIGRATION_V3_SQL).expect("v3");
+                conn.pragma_update(None, "user_version", 3_i64)
+                    .expect("version");
+            }
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let path = path.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        let mut conn = Connection::open(&path).expect("open");
+                        conn.busy_timeout(std::time::Duration::from_secs(10))
+                            .expect("busy_timeout");
+                        barrier.wait();
+                        migrate(&mut conn)
+                    })
+                })
+                .collect();
+            for handle in handles {
+                let result = handle.join().expect("thread");
+                assert_eq!(
+                    result.expect("migrate"),
+                    LATEST_SCHEMA_VERSION,
+                    "round {round}"
+                );
+            }
+        }
     }
 
     /// Rows projected before v3 have no field keys, so the upgrade must
