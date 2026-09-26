@@ -550,3 +550,106 @@ mod tests {
         assert_eq!(m2, m3);
     }
 }
+
+/// Proofs that `wins_over` is a strict total order on distinct write keys.
+///
+/// Composition argument: `wins_over` compares the key
+/// `(wall_ts, agent_id, event_hash)`. The harnesses prove it is a total
+/// preorder (total and transitive) whose ties are exactly equal keys. So on
+/// distinct keys it is a strict total order, and `merge(a, b)` keeps the
+/// maximum. `max` under a total order is commutative, associative and
+/// idempotent, so `merge` is a join semilattice with no induction over merge
+/// sequences. An event hash is unique per event, so equal keys carry equal
+/// values.
+///
+/// Bound: `wall_ts` is any `u64`. `agent_id` and `event_hash` are strings of
+/// length 0 to 2 over `{a, b}`. `compare` uses only `Ord::cmp` on each field,
+/// and this domain gives every Less/Equal/Greater outcome on each field,
+/// including the proper-prefix case, so every path through the tie-break
+/// chain is covered.
+///
+/// The stamp is fixed at the seed. `compare` never reads it, and symbolic ITC
+/// trees exceed the 12G memory cap. So these harnesses cannot see a causal
+/// step put back into `compare`. The proptests `lww_register_*` in
+/// `tests/proptest_semilattice.rs`, over generated causal histories, catch
+/// that regression.
+#[cfg(kani)]
+mod kani_proofs {
+    use super::LwwRegister;
+    use crate::clock::itc::Stamp;
+
+    fn any_short_string() -> String {
+        let len: u8 = kani::any_where(|&l| l <= 2);
+        let mut s = String::new();
+        for i in 0..2 {
+            if i < len {
+                s.push(if kani::any() { 'a' } else { 'b' });
+            }
+        }
+        s
+    }
+
+    fn any_register() -> LwwRegister<u8> {
+        LwwRegister::new(
+            kani::any(),
+            Stamp::seed(),
+            kani::any(),
+            any_short_string(),
+            any_short_string(),
+        )
+    }
+
+    fn same_key(a: &LwwRegister<u8>, b: &LwwRegister<u8>) -> bool {
+        a.wall_ts == b.wall_ts && a.agent_id == b.agent_id && a.event_hash == b.event_hash
+    }
+
+    /// Totality and antisymmetry: for any two registers at least one wins,
+    /// and both win only when their keys are equal.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn wins_over_is_total_and_antisymmetric() {
+        let a = any_register();
+        let b = any_register();
+        assert!(a.wins_over(&b) || b.wins_over(&a));
+        if a.wins_over(&b) && b.wins_over(&a) {
+            assert!(same_key(&a, &b));
+        }
+        kani::cover!(a.wall_ts == b.wall_ts && a.agent_id == b.agent_id && a.wins_over(&b));
+    }
+
+    /// Transitivity: `a` wins over `b` and `b` wins over `c` implies `a` wins
+    /// over `c`.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn wins_over_is_transitive() {
+        let a = any_register();
+        let b = any_register();
+        let c = any_register();
+        if a.wins_over(&b) && b.wins_over(&c) {
+            assert!(a.wins_over(&c));
+        }
+        kani::cover!(
+            a.wins_over(&b)
+                && b.wins_over(&c)
+                && a.wall_ts == c.wall_ts
+                && a.agent_id == c.agent_id
+                && !same_key(&a, &c)
+        );
+    }
+
+    /// `merge` keeps the winner, and merging a register with itself is a
+    /// no-op.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn merge_keeps_the_winner() {
+        let a = any_register();
+        let b = any_register();
+        let mut self_merged = a.clone();
+        self_merged.merge(&a);
+        assert!(self_merged == a);
+        let mut merged = a.clone();
+        merged.merge(&b);
+        let winner = if a.wins_over(&b) { &a } else { &b };
+        assert!(merged == *winner);
+    }
+}
