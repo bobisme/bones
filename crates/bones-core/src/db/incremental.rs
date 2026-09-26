@@ -122,25 +122,67 @@ pub fn event_log_cursor(events_dir: &Path) -> Result<(usize, Option<String>)> {
     Ok((total_byte_len, last_event_hash))
 }
 
-/// BLAKE3 digest of the first `offset` bytes of the event log, in replay
-/// order, or `None` when the log is shorter than `offset`.
+/// Streaming BLAKE3 digest of the event log lines the replay iterator yields.
 ///
 /// It is stored beside the projection cursor. A rewrite of the log before
 /// the cursor (a rebase pull that reorders lines, or drops duplicates)
 /// changes it, so the cursor is not trusted and a full rebuild runs instead
 /// of resuming at a byte offset that now points into different content.
 ///
+/// Rebuild and incremental apply feed it the exact lines they replay, so the
+/// stored digest describes what was projected even if the log changes while
+/// they run (bn-2xjb).
+pub(crate) struct LogDigest {
+    hasher: blake3::Hasher,
+    end: usize,
+}
+
+impl LogDigest {
+    pub(crate) fn new() -> Self {
+        Self {
+            hasher: blake3::Hasher::new(),
+            end: 0,
+        }
+    }
+
+    /// Feed one replayed line that starts at byte `offset`.
+    pub(crate) fn update(&mut self, offset: usize, line: &str) {
+        self.hasher.update(line.as_bytes());
+        self.end = offset + line.len();
+    }
+
+    /// Byte offset just past the last line fed.
+    pub(crate) const fn end(&self) -> usize {
+        self.end
+    }
+
+    pub(crate) fn finish(&self) -> String {
+        self.hasher.finalize().to_hex().to_string()
+    }
+}
+
+/// Digest of the event log up to byte `offset`, or `None` when no line ends
+/// exactly at `offset` (the log is shorter, or `offset` is mid-line).
+///
 /// # Errors
 ///
 /// Returns an error if the shards cannot be read.
 pub fn log_prefix_digest(shard_mgr: &ShardManager, offset: usize) -> Result<Option<String>> {
-    let content = shard_mgr
-        .read_content_range(0, offset)
-        .map_err(|e| anyhow::anyhow!("read log prefix: {e}"))?;
-    if content.len() != offset {
-        return Ok(None);
+    let mut digest = LogDigest::new();
+    if offset == 0 {
+        return Ok(Some(digest.finish()));
     }
-    Ok(Some(blake3::hash(content.as_bytes()).to_hex().to_string()))
+    for line in shard_mgr.replay_lines()? {
+        let (at, line) = line.map_err(|e| anyhow::anyhow!("read log prefix: {e}"))?;
+        if at + line.len() > offset {
+            return Ok(None);
+        }
+        digest.update(at, &line);
+        if digest.end() == offset {
+            return Ok(Some(digest.finish()));
+        }
+    }
+    Ok(None)
 }
 
 /// `true` when the projection's stored prefix digest matches the log's
@@ -240,7 +282,25 @@ pub fn incremental_apply(
     // The log before the cursor must be byte-for-byte what was projected.
     // A rebase or reordering merge can keep the last hash near the offset
     // while moving or dropping earlier lines (found by bones-sim, bn-2fs6).
-    if !cursor_prefix_matches(&conn, &shard_mgr, offset)? {
+    //
+    // Read the log once: hash the lines before the cursor, compare, then
+    // replay the new lines from the same stream. Validation and replay see
+    // the same bytes, and the digest stored afterwards covers exactly the
+    // lines projected (bn-2xjb).
+    let mut all_lines = shard_mgr
+        .replay_lines()
+        .map_err(|e| anyhow::anyhow!("open shard line iterator: {e}"))?;
+    let mut digest = LogDigest::new();
+    let mut prefix_ok = offset > 0;
+    while prefix_ok && digest.end() < offset {
+        match all_lines.next() {
+            Some(Ok((at, line))) if at + line.len() <= offset => digest.update(at, &line),
+            Some(Err(e)) => return Err(anyhow::anyhow!("read shard line: {e}")),
+            _ => prefix_ok = false,
+        }
+    }
+    let stored = query::get_projection_prefix_digest(&conn);
+    if !prefix_ok || stored.as_deref() != Some(digest.finish().as_str()) {
         drop(conn);
         return do_full_rebuild(
             events_dir,
@@ -265,10 +325,7 @@ pub fn incremental_apply(
         }
     }
 
-    let mut line_iter = shard_mgr
-        .replay_lines_from_offset(offset)
-        .map_err(|e| anyhow::anyhow!("open shard line iterator: {e}"))?
-        .peekable();
+    let mut line_iter = all_lines.peekable();
 
     // If there's no new content, we're up to date
     if line_iter.peek().is_none() {
@@ -302,6 +359,7 @@ pub fn incremental_apply(
             line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;
         total_byte_len = abs_offset + line.len();
+        digest.update(abs_offset, &line);
 
         // Version check if we hit a header
         if !version_checked && line.trim_start().starts_with("# bones event log v") {
@@ -354,7 +412,7 @@ pub fn incremental_apply(
     let new_offset = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
     query::update_projection_cursor(&conn, new_offset, current_last_hash.as_deref())
         .context("update projection cursor after incremental apply")?;
-    record_cursor_prefix(&conn, &shard_mgr, total_byte_len)
+    query::set_projection_prefix_digest(&conn, Some(&digest.finish()))
         .context("record cursor prefix after incremental apply")?;
 
     tracing::info!(
@@ -796,6 +854,90 @@ mod tests {
                 .collect()
         };
         assert_eq!(titles_full, titles_inc);
+    }
+
+    fn stored_prefix(db_path: &Path) -> (usize, Option<String>) {
+        let conn = open_projection(db_path).unwrap();
+        let (offset, _) = query::get_projection_cursor(&conn).unwrap();
+        (
+            usize::try_from(offset).unwrap(),
+            query::get_projection_prefix_digest(&conn),
+        )
+    }
+
+    /// Rebuild and incremental apply store the digest of exactly the log they
+    /// replayed, so the next apply trusts the cursor and stays incremental.
+    #[test]
+    fn replay_records_prefix_digest_and_next_apply_stays_incremental() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+
+        append_event(&shard_mgr, &make_create_event("bn-001", "Item 1", 1000));
+        rebuild::rebuild(&events_dir, &db_path).unwrap();
+        let (offset, digest) = stored_prefix(&db_path);
+        assert_eq!(digest, log_prefix_digest(&shard_mgr, offset).unwrap());
+        assert!(digest.is_some());
+
+        append_event(&shard_mgr, &make_create_event("bn-002", "Item 2", 2000));
+        let report = incremental_apply(&events_dir, &db_path, false).unwrap();
+        assert!(
+            !report.full_rebuild_triggered,
+            "{:?}",
+            report.full_rebuild_reason
+        );
+        assert_eq!(report.events_applied, 1);
+        let (offset, digest) = stored_prefix(&db_path);
+        assert_eq!(digest, log_prefix_digest(&shard_mgr, offset).unwrap());
+
+        append_event(&shard_mgr, &make_create_event("bn-003", "Item 3", 3000));
+        let report = incremental_apply(&events_dir, &db_path, false).unwrap();
+        assert!(
+            !report.full_rebuild_triggered,
+            "{:?}",
+            report.full_rebuild_reason
+        );
+    }
+
+    /// A rewrite before the cursor that keeps the length and the last line
+    /// (the case the old 512-byte hash window could not see) forces a
+    /// rebuild, in incremental_apply and in ensure_projection's check.
+    #[test]
+    fn same_length_rewrite_before_cursor_forces_rebuild() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+
+        append_event(&shard_mgr, &make_create_event("bn-001", "Item A", 1000));
+        append_event(&shard_mgr, &make_create_event("bn-002", "Item 2", 2000));
+        rebuild::rebuild(&events_dir, &db_path).unwrap();
+
+        // Swap the first event for one of identical length: same log length,
+        // same last line and hash, different content before the cursor.
+        let (year, month) = shard_mgr.active_shard().unwrap().unwrap();
+        let path = shard_mgr.shard_path(year, month);
+        let content = std::fs::read_to_string(&path).unwrap();
+        let old_line = writer::write_line(&make_create_event("bn-001", "Item A", 1000)).unwrap();
+        let new_line = writer::write_line(&make_create_event("bn-001", "Item B", 1000)).unwrap();
+        assert_eq!(old_line.len(), new_line.len());
+        std::fs::write(&path, content.replace(&old_line, &new_line)).unwrap();
+
+        let (offset, _) = stored_prefix(&db_path);
+        let conn = open_projection(&db_path).unwrap();
+        assert!(!cursor_prefix_matches(&conn, &shard_mgr, offset).unwrap());
+        drop(conn);
+
+        let report = incremental_apply(&events_dir, &db_path, false).unwrap();
+        assert!(report.full_rebuild_triggered);
+        let conn = open_projection(&db_path).unwrap();
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM items WHERE item_id = 'bn-001'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Item B");
     }
 
     #[test]

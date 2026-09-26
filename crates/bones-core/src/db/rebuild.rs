@@ -227,12 +227,15 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let projector = project::Projector::new(&conn);
 
     let shard_line_iter = shard_mgr.replay_lines()?;
+    // Digest the exact lines replayed; see incremental::LogDigest.
+    let mut digest = crate::db::incremental::LogDigest::new();
 
     for line_res in shard_line_iter {
         let (offset, line): (usize, String) =
             line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
         line_no += 1;
         total_byte_len = offset + line.len();
+        digest.update(offset, &line);
 
         if !version_checked && line.trim_start().starts_with("# bones event log v") {
             version_checked = true;
@@ -290,7 +293,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let byte_offset_i64 = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
     crate::db::query::update_projection_cursor(&conn, byte_offset_i64, last_event_hash.as_deref())
         .context("update projection cursor after rebuild")?;
-    crate::db::incremental::record_cursor_prefix(&conn, &shard_mgr, total_byte_len)
+    crate::db::query::set_projection_prefix_digest(&conn, Some(&digest.finish()))
         .context("record cursor prefix after rebuild")?;
 
     // Count unique items
