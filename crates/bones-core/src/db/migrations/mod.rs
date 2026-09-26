@@ -4,18 +4,20 @@ use super::schema;
 use rusqlite::{Connection, TransactionBehavior, types::Type};
 
 /// Latest schema version understood by this binary.
-pub const LATEST_SCHEMA_VERSION: u32 = 4;
+pub const LATEST_SCHEMA_VERSION: u32 = 5;
 
-/// A projection created before this schema version must be rebuilt from the
-/// event log after migration: v3 adds per-field winner keys that only a
-/// replay can fill in.
-pub const REBUILD_REQUIRED_BELOW: u32 = 3;
+/// A projection created before this schema version must be rebuilt.
+///
+/// v3 adds per-field winner keys that only a replay of the event log can
+/// fill in, and v5 changes the format of link keys.
+pub const REBUILD_REQUIRED_BELOW: u32 = 5;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, schema::MIGRATION_V1_SQL),
     (2, schema::MIGRATION_V2_SQL),
     (3, schema::MIGRATION_V3_SQL),
     (4, schema::MIGRATION_V4_SQL),
+    (5, schema::MIGRATION_V5_SQL),
 ];
 
 /// Read `PRAGMA user_version` and convert it to a Rust `u32`.

@@ -44,7 +44,8 @@ pub fn open_projection(path: &Path) -> Result<Connection> {
 
     configure_connection(&conn).context("configure sqlite pragmas")?;
     // An existing projection from before REBUILD_REQUIRED_BELOW lacks data
-    // the current code depends on (per-field winner keys). Mark it dirty so
+    // the current code depends on (per-field winner keys in the current
+    // format). Mark it dirty so
     // the next ensure_projection forces a full rebuild. A cleared cursor
     // alone is not enough: a single-event write can advance it first. The
     // marker is written before migrating, so a crash in between cannot

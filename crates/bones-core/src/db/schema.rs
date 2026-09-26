@@ -211,6 +211,21 @@ SET schema_version = 4
 WHERE id = 1;
 ";
 
+/// Migration v5: link keys in `field_clocks` are length-prefixed by target
+/// (bn-3scg).
+///
+/// Keys written by v4 use the old format, so the migration clears the cursor
+/// and `open_projection` marks the projection dirty. The next use runs a
+/// full rebuild.
+pub const MIGRATION_V5_SQL: &str = r"
+UPDATE projection_meta
+SET schema_version = 5,
+    last_event_offset = 0,
+    last_event_hash = NULL,
+    last_event_prefix_digest = NULL
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

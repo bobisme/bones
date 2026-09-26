@@ -950,8 +950,13 @@ const LABELS: &str = "label";
 const ASSIGNEES: &str = "assignee";
 
 /// Set group of an item's link types to `target`.
+///
+/// The target is length-prefixed so that no target or link type containing
+/// '/' can alias another target's keys: without it, target `a` with type
+/// `b/c` and target `a/b` with type `c` both map to `link/a/b/c`, and the
+/// reset prefix `link/a/` also matches target `a/b` (bn-3scg).
 fn links_group(target: &str) -> String {
-    format!("link/{target}")
+    format!("link/{}:{target}", target.len())
 }
 
 /// `field_clocks` field of one member of a set group.
@@ -1455,6 +1460,67 @@ mod tests {
 
         let deps = query::get_dependencies(&conn, "bn-002").unwrap();
         assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn link_keys_do_not_collide_across_targets_with_slashes() {
+        let conn = test_db();
+        let projector = Projector::new(&conn);
+        for (id, hash, ts) in [
+            ("bn-001", "a01", 1000),
+            ("bn-x", "a02", 1001),
+            ("bn-x/a", "a03", 1002),
+        ] {
+            projector
+                .project_event(&make_create(id, "Item", hash, ts))
+                .unwrap();
+        }
+        let link = |target: &str, link_type: &str, hash: &str, ts: i64| {
+            make_event(
+                EventType::Link,
+                "bn-001",
+                EventData::Link(LinkData {
+                    target: target.into(),
+                    link_type: link_type.into(),
+                    extra: BTreeMap::new(),
+                }),
+                hash,
+                ts,
+            )
+        };
+        // Both would be keyed `link/bn-x/a/b` without the length prefix, and
+        // the older write would lose to the newer one.
+        projector
+            .project_event(&link("bn-x", "a/b", "b01", 3000))
+            .unwrap();
+        projector
+            .project_event(&link("bn-x/a", "b", "b02", 2000))
+            .unwrap();
+        // Removing every link to `x` must not touch links to `x/a`.
+        let unlink_all = make_event(
+            EventType::Unlink,
+            "bn-001",
+            EventData::Unlink(UnlinkData {
+                target: "bn-x".into(),
+                link_type: None,
+                extra: BTreeMap::new(),
+            }),
+            "b03",
+            4000,
+        );
+        projector.project_event(&unlink_all).unwrap();
+
+        let links: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT depends_on_item_id, link_type FROM item_dependencies
+                 WHERE item_id = 'bn-001' ORDER BY 1, 2",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(links, vec![("bn-x/a".to_string(), "b".to_string())]);
     }
 
     // -----------------------------------------------------------------------
