@@ -197,6 +197,20 @@ SET schema_version = 3,
 WHERE id = 1;
 ";
 
+/// Migration v4: digest of the event log prefix the projection cursor covers.
+///
+/// A rewrite of the log before the cursor (a rebase pull that reorders or
+/// drops lines) leaves a byte offset that points into different content.
+/// Comparing this digest before trusting the cursor forces a full rebuild in
+/// that case. NULL means unknown, which also forces a rebuild.
+pub const MIGRATION_V4_SQL: &str = r"
+ALTER TABLE projection_meta ADD COLUMN last_event_prefix_digest TEXT;
+
+UPDATE projection_meta
+SET schema_version = 4
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

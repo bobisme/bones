@@ -309,6 +309,8 @@ impl<'conn> Projector<'conn> {
 
         query::update_projection_cursor(self.conn, total_len_i64, Some(event_hash))
             .context("write projection cursor after single-event projection")?;
+        crate::db::incremental::record_cursor_prefix(self.conn, &shard_mgr, total_len)
+            .context("record cursor prefix after single-event projection")?;
 
         Ok(())
     }

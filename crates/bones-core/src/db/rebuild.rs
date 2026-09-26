@@ -290,6 +290,8 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let byte_offset_i64 = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
     crate::db::query::update_projection_cursor(&conn, byte_offset_i64, last_event_hash.as_deref())
         .context("update projection cursor after rebuild")?;
+    crate::db::incremental::record_cursor_prefix(&conn, &shard_mgr, total_byte_len)
+        .context("record cursor prefix after rebuild")?;
 
     // Count unique items
     let item_count: i64 = conn

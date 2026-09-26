@@ -6,6 +6,7 @@ pub mod campaign;
 pub mod clock;
 pub mod network;
 pub mod oracle;
+pub mod replica;
 pub mod rng;
 
 use anyhow::{Result, bail};

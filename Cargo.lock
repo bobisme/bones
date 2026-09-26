@@ -350,10 +350,13 @@ name = "bones-sim"
 version = "0.25.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "bones-core",
  "proptest",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "terseid",
  "tracing",
 ]

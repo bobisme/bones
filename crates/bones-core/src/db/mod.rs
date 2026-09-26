@@ -136,7 +136,12 @@ fn projection_needs_rebuild(
     let (total_bytes, last_hash) =
         incremental::event_log_cursor(events_dir).context("read event log cursor")?;
     let cursor = usize::try_from(offset).unwrap_or(usize::MAX);
-    let stale = total_bytes != cursor || hash != last_hash;
+    let mut stale = total_bytes != cursor || hash != last_hash;
+    if !stale {
+        // Same length and last hash can still hide a rewrite before the end.
+        let shard_mgr = crate::shard::ShardManager::new(bones_dir);
+        stale = !incremental::cursor_prefix_matches(&conn, &shard_mgr, cursor)?;
+    }
     if stale {
         debug!(
             cursor,

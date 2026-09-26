@@ -770,6 +770,44 @@ pub fn update_projection_cursor(
         params![offset, event_hash, now_us],
     )
     .context("update projection cursor")?;
+    // The prefix digest described the old offset. Clear it: a writer that
+    // does not also call set_projection_prefix_digest leaves "unknown",
+    // which forces a rebuild instead of trusting a stale digest. Databases
+    // older than schema v4 have no such column, and nothing to clear.
+    let _ = conn.execute(
+        "UPDATE projection_meta SET last_event_prefix_digest = NULL WHERE id = 1",
+        [],
+    );
+    Ok(())
+}
+
+/// Read the digest of the log prefix covered by the projection cursor.
+///
+/// Returns `None` when it is unknown, including on databases older than
+/// schema v4.
+#[must_use]
+pub fn get_projection_prefix_digest(conn: &Connection) -> Option<String> {
+    conn.query_row(
+        "SELECT last_event_prefix_digest FROM projection_meta WHERE id = 1",
+        [],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
+/// Record the digest of the log prefix covered by the projection cursor.
+/// Call it right after [`update_projection_cursor`].
+///
+/// # Errors
+///
+/// Returns an error if the update fails.
+pub fn set_projection_prefix_digest(conn: &Connection, digest: Option<&str>) -> Result<()> {
+    conn.execute(
+        "UPDATE projection_meta SET last_event_prefix_digest = ?1 WHERE id = 1",
+        params![digest],
+    )
+    .context("update projection prefix digest")?;
     Ok(())
 }
 

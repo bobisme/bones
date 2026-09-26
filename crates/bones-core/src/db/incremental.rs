@@ -122,6 +122,50 @@ pub fn event_log_cursor(events_dir: &Path) -> Result<(usize, Option<String>)> {
     Ok((total_byte_len, last_event_hash))
 }
 
+/// BLAKE3 digest of the first `offset` bytes of the event log, in replay
+/// order, or `None` when the log is shorter than `offset`.
+///
+/// It is stored beside the projection cursor. A rewrite of the log before
+/// the cursor (a rebase pull that reorders lines, or drops duplicates)
+/// changes it, so the cursor is not trusted and a full rebuild runs instead
+/// of resuming at a byte offset that now points into different content.
+///
+/// # Errors
+///
+/// Returns an error if the shards cannot be read.
+pub fn log_prefix_digest(shard_mgr: &ShardManager, offset: usize) -> Result<Option<String>> {
+    let content = shard_mgr
+        .read_content_range(0, offset)
+        .map_err(|e| anyhow::anyhow!("read log prefix: {e}"))?;
+    if content.len() != offset {
+        return Ok(None);
+    }
+    Ok(Some(blake3::hash(content.as_bytes()).to_hex().to_string()))
+}
+
+/// `true` when the projection's stored prefix digest matches the log's
+/// first `offset` bytes.
+pub(crate) fn cursor_prefix_matches(
+    conn: &Connection,
+    shard_mgr: &ShardManager,
+    offset: usize,
+) -> Result<bool> {
+    let Some(stored) = query::get_projection_prefix_digest(conn) else {
+        return Ok(false);
+    };
+    Ok(log_prefix_digest(shard_mgr, offset)?.as_deref() == Some(stored.as_str()))
+}
+
+/// Record the prefix digest for the cursor just written at `offset`.
+pub(crate) fn record_cursor_prefix(
+    conn: &Connection,
+    shard_mgr: &ShardManager,
+    offset: usize,
+) -> Result<()> {
+    let digest = log_prefix_digest(shard_mgr, offset)?;
+    query::set_projection_prefix_digest(conn, digest.as_deref())
+}
+
 /// Apply only events newer than the high-water mark to the projection.
 ///
 /// Steps:
@@ -192,6 +236,19 @@ pub fn incremental_apply(
     let shards_scanned = shards.len();
 
     let offset = usize::try_from(byte_offset).unwrap_or(0);
+
+    // The log before the cursor must be byte-for-byte what was projected.
+    // A rebase or reordering merge can keep the last hash near the offset
+    // while moving or dropping earlier lines (found by bones-sim, bn-2fs6).
+    if !cursor_prefix_matches(&conn, &shard_mgr, offset)? {
+        drop(conn);
+        return do_full_rebuild(
+            events_dir,
+            db_path,
+            start,
+            "event log changed before the projection cursor",
+        );
+    }
 
     // Validate cursor hash: it must appear in the tail of already-processed
     // content (the 512 bytes just before the cursor offset).
@@ -297,6 +354,8 @@ pub fn incremental_apply(
     let new_offset = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
     query::update_projection_cursor(&conn, new_offset, current_last_hash.as_deref())
         .context("update projection cursor after incremental apply")?;
+    record_cursor_prefix(&conn, &shard_mgr, total_byte_len)
+        .context("record cursor prefix after incremental apply")?;
 
     tracing::info!(
         events_applied = total_projected,

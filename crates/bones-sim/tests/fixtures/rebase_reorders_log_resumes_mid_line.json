@@ -1,0 +1,108 @@
+{
+    "seed": 15,
+    "profile": {
+        "agents": 3,
+        "items": 3,
+        "steps": 40,
+        "tick_millis": 100,
+        "max_abs_skew_millis": 1000,
+        "max_abs_drift_ppm": 50000
+    },
+    "clocks": [
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": -19877,
+            "skew_millis": -998
+        },
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": -15853,
+            "skew_millis": -709
+        },
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": -17010,
+            "skew_millis": 239
+        }
+    ],
+    "steps": [
+        {
+            "Create": {
+                "agent": 1,
+                "item": 1,
+                "wall_ts_us": 1699999999488000
+            }
+        },
+        {
+            "Pull": {
+                "to": 0,
+                "from": 1,
+                "mode": "Union"
+            }
+        },
+        {
+            "Pull": {
+                "to": 2,
+                "from": 1,
+                "mode": "Union"
+            }
+        },
+        {
+            "Write": {
+                "agent": 1,
+                "item": 2,
+                "op": {
+                    "Title": 1
+                },
+                "wall_ts_us": 1700000000669001
+            }
+        },
+        {
+            "Write": {
+                "agent": 2,
+                "item": 2,
+                "op": {
+                    "Label": {
+                        "add": true,
+                        "label": 2
+                    }
+                },
+                "wall_ts_us": 1700000001812002
+            }
+        },
+        {
+            "Write": {
+                "agent": 0,
+                "item": 0,
+                "op": {
+                    "Description": 3
+                },
+                "wall_ts_us": 1700000000669002
+            }
+        },
+        {
+            "Pull": {
+                "to": 1,
+                "from": 2,
+                "mode": "Union"
+            }
+        },
+        {
+            "Pull": {
+                "to": 2,
+                "from": 0,
+                "mode": "Union"
+            }
+        },
+        {
+            "Pull": {
+                "to": 1,
+                "from": 2,
+                "mode": "Rebase"
+            }
+        }
+    ]
+}

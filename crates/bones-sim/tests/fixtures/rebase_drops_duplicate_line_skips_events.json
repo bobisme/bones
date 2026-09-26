@@ -1,0 +1,93 @@
+{
+    "seed": 14,
+    "profile": {
+        "agents": 3,
+        "items": 3,
+        "steps": 40,
+        "tick_millis": 100,
+        "max_abs_skew_millis": 1000,
+        "max_abs_drift_ppm": 50000
+    },
+    "clocks": [
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": -28563,
+            "skew_millis": 868
+        },
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": -39327,
+            "skew_millis": -827
+        },
+        {
+            "base_millis": 1700000000000,
+            "tick_millis": 100,
+            "drift_ppm": 9324,
+            "skew_millis": 54
+        }
+    ],
+    "steps": [
+        {
+            "Write": {
+                "agent": 1,
+                "item": 2,
+                "op": {
+                    "Title": 2
+                },
+                "wall_ts_us": 1699999999270002
+            }
+        },
+        {
+            "Write": {
+                "agent": 1,
+                "item": 2,
+                "op": {
+                    "Description": 3
+                },
+                "wall_ts_us": 1699999999846000
+            }
+        },
+        {
+            "Redact": {
+                "agent": 1,
+                "item": 2,
+                "target_step": 1,
+                "wall_ts_us": 1699999999942000
+            }
+        },
+        {
+            "Fault": {
+                "agent": 1,
+                "fault": {
+                    "DuplicateLine": {
+                        "pick": 16475
+                    }
+                }
+            }
+        },
+        {
+            "Pull": {
+                "to": 0,
+                "from": 1,
+                "mode": "Union"
+            }
+        },
+        {
+            "Pull": {
+                "to": 1,
+                "from": 0,
+                "mode": "Rebase"
+            }
+        },
+        {
+            "Redact": {
+                "agent": 2,
+                "item": 1,
+                "target_step": 1,
+                "wall_ts_us": 1700000003889001
+            }
+        }
+    ]
+}
