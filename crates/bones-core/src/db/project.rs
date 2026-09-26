@@ -635,9 +635,10 @@ impl<'conn> Projector<'conn> {
                      reason = excluded.reason, \
                      redacted_by = excluded.redacted_by, \
                      redacted_at_us = excluded.redacted_at_us \
-                 WHERE (excluded.redacted_at_us, excluded.redacted_by, excluded.reason) \
+                 WHERE (excluded.redacted_at_us, excluded.redacted_by, excluded.reason, \
+                        excluded.item_id) \
                      < (event_redactions.redacted_at_us, event_redactions.redacted_by, \
-                        event_redactions.reason)",
+                        event_redactions.reason, event_redactions.item_id)",
                 params![
                     data.target_hash,
                     event.item_id.as_str(),
@@ -1662,6 +1663,41 @@ mod tests {
     // -----------------------------------------------------------------------
     // Redact
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn tied_redactions_record_the_same_row_in_any_order() {
+        // Two redactions of one target from different items, with the same
+        // agent, timestamp and reason. item_id breaks the tie (bn-36n3).
+        let redact = |item: &str, hash: &str| {
+            make_event(
+                EventType::Redact,
+                item,
+                EventData::Redact(RedactData {
+                    target_hash: "blake3:target".into(),
+                    reason: "secret".into(),
+                    extra: BTreeMap::new(),
+                }),
+                hash,
+                100,
+            )
+        };
+        let events = [redact("bn-a1", "r1"), redact("bn-b2", "r2")];
+        let row = |order: [usize; 2]| {
+            let conn = test_db();
+            let projector = Projector::new(&conn);
+            for i in order {
+                projector.project_event(&events[i]).unwrap();
+            }
+            conn.query_row(
+                "SELECT item_id FROM event_redactions WHERE target_event_hash = 'blake3:target'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(row([0, 1]), "bn-a1");
+        assert_eq!(row([1, 0]), "bn-a1");
+    }
 
     #[test]
     fn project_redact_records_and_blanks_comment() {
