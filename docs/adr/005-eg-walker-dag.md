@@ -11,7 +11,7 @@ Use Eg-Walker DAG replay for computing final set state from the event log.
 
 ### Mechanism
 - All events are nodes in a Directed Acyclic Graph (DAG).
-- Each event explicitly references its parent event IDs (captured via ITC fork/join).
+- Each event explicitly references its parent event IDs (the event hashes of the item's current heads; ITC was removed in bn-1dy8).
 - The state of an item (e.g., its status or priority) is computed by traversing the DAG from the last common ancestor (LCA) to the leaves.
 - Merging two workspaces involves merging their event DAGs and re-evaluating the set state.
 
@@ -39,4 +39,4 @@ Use Eg-Walker DAG replay for computing final set state from the event log.
 
 ## References
 - Related beads: bn-3rr.1, bn-2jr
-- Related ADRs: ADR-004 (ITC), ADR-006 (LWW)
+- Related ADRs: ADR-004 (ITC, superseded), ADR-006 (LWW)

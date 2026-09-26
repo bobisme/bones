@@ -1,7 +1,6 @@
 //! `bn bone tag` and `bn bone untag` — add/remove labels from bones.
 
 use crate::agent;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 use bones_core::db::query::{get_labels, try_open_projection};
@@ -114,7 +113,7 @@ fn emit_label_event(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;

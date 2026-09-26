@@ -19,17 +19,16 @@
 //! This is the same `(wall_ts, agent, event_hash)` order that the event
 //! merge driver and replay use to sort events.
 //!
-//! The ITC stamp is deliberately not part of the order. Causality is a
-//! partial order: putting it ahead of the wall clock makes the chain
-//! non-transitive under clock skew (a causally later write with a lower wall
-//! clock beats an earlier write, which beats a concurrent write, which beats
-//! the later write), and merge then depends on merge order. A causally later
-//! write therefore wins only when its wall clock is also later.
+//! Registers carry no causal stamp. The ITC stamp was removed in bn-1dy8:
+//! causality is a partial order, and putting it ahead of the wall clock made
+//! the chain non-transitive under clock skew, so merge depended on merge
+//! order. Instead, the local clock's receive rule
+//! (`ShardManager::observe_timestamp`, bn-52i6) gives a causally later write
+//! a later wall clock when the skew is under the cap.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::clock::itc::Stamp;
 use crate::crdt::trace::{MergeTrace, TieBreakStep, merge_tracing_enabled};
 use tracing::debug;
 
@@ -40,14 +39,12 @@ use tracing::debug;
 /// A Last-Writer-Wins register holding a value of type `T`.
 ///
 /// Each write records the value along with metadata used for deterministic
-/// merge: an ITC stamp for causal ordering, a wall-clock timestamp, the
-/// writing agent's ID, and the event hash.
+/// merge: a wall-clock timestamp, the writing agent's ID, and the event
+/// hash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LwwRegister<T> {
     /// The current value of the register.
     pub value: T,
-    /// ITC stamp for causal ordering.
-    pub stamp: Stamp,
     /// Wall-clock timestamp in microseconds since Unix epoch.
     pub wall_ts: u64,
     /// Agent identifier (e.g., "alice", "bot-1").
@@ -58,16 +55,9 @@ pub struct LwwRegister<T> {
 
 impl<T> LwwRegister<T> {
     /// Create a new LWW register with the given value and metadata.
-    pub const fn new(
-        value: T,
-        stamp: Stamp,
-        wall_ts: u64,
-        agent_id: String,
-        event_hash: String,
-    ) -> Self {
+    pub const fn new(value: T, wall_ts: u64, agent_id: String, event_hash: String) -> Self {
         Self {
             value,
-            stamp,
             wall_ts,
             agent_id,
             event_hash,
@@ -79,7 +69,7 @@ impl<T: Clone> LwwRegister<T> {
     /// Merge another register into this one, keeping the "winning" value.
     ///
     /// The winner is the greater write under `(wall_ts, agent_id,
-    /// event_hash)`; see the module docs for why the ITC stamp is not used.
+    /// event_hash)`; see the module docs for why no causal stamp is used.
     ///
     /// After merge, `self` contains the winning value.
     pub fn merge(&mut self, other: &Self) {
@@ -87,7 +77,6 @@ impl<T: Clone> LwwRegister<T> {
             // Keep self
         } else {
             self.value = other.value.clone();
-            self.stamp = other.stamp.clone();
             self.wall_ts = other.wall_ts;
             self.agent_id.clone_from(&other.agent_id);
             self.event_hash.clone_from(&other.event_hash);
@@ -136,7 +125,6 @@ impl<T: Clone> LwwRegister<T> {
 
         if !self_wins {
             self.value = other.value.clone();
-            self.stamp = other.stamp.clone();
             self.wall_ts = other.wall_ts;
             self.agent_id.clone_from(&other.agent_id);
             self.event_hash.clone_from(&other.event_hash);
@@ -183,92 +171,25 @@ impl<T: fmt::Display> fmt::Display for LwwRegister<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::itc::Stamp;
 
-    /// Helper: create a stamp with a specific event counter (seed identity).
-    fn make_stamp(counter: u64) -> Stamp {
-        let mut s = Stamp::seed();
-        for _ in 0..counter {
-            s.event();
-        }
-        s
-    }
-
-    /// Helper: create a stamp from a fork (anonymous identity, specific event).
-    fn make_forked_stamps(counter_a: u64, counter_b: u64) -> (Stamp, Stamp) {
-        let seed = Stamp::seed();
-        let (mut a, mut b) = seed.fork();
-        for _ in 0..counter_a {
-            a.event();
-        }
-        for _ in 0..counter_b {
-            b.event();
-        }
-        (a, b)
-    }
-
-    fn reg(
-        value: &str,
-        stamp: Stamp,
-        wall_ts: u64,
-        agent: &str,
-        hash: &str,
-    ) -> LwwRegister<String> {
+    fn reg(value: &str, wall_ts: u64, agent: &str, hash: &str) -> LwwRegister<String> {
         LwwRegister::new(
             value.to_string(),
-            stamp,
             wall_ts,
             agent.to_string(),
             hash.to_string(),
         )
     }
 
-    // === Causality does not override the wall clock ===
-
-    #[test]
-    fn causal_later_with_later_wall_ts_wins() {
-        let s1 = make_stamp(1);
-        let s2 = make_stamp(2);
-        // s1 is causally before s2 (same lineage, s2 has more events)
-        assert!(s1.leq(&s2));
-        assert!(!s2.leq(&s1));
-
-        let mut a = reg("old", s1, 100, "alice", "aaa");
-        let b = reg("new", s2, 200, "alice", "bbb");
-        a.merge(&b);
-        assert_eq!(a.value, "new");
-    }
-
-    #[test]
-    fn causal_later_with_earlier_wall_ts_loses() {
-        let s1 = make_stamp(1);
-        let s2 = make_stamp(2);
-
-        // Clock skew: the causally later write carries a lower wall clock.
-        let mut a = reg("new", s2, 100, "alice", "bbb");
-        let b = reg("old", s1, 200, "alice", "aaa");
-        a.merge(&b);
-        assert_eq!(a.value, "old");
-    }
-
-    /// Regression: with causality ahead of the wall clock, these three writes
-    /// formed a cycle (a beats b, b beats c, c beats a) and each merge order
-    /// produced a different winner.
+    /// Regression: when causality ranked ahead of the wall clock, these three
+    /// writes formed a cycle (a beats b, b beats c, c beats a) and each merge
+    /// order produced a different winner. Now every order converges on the
+    /// highest wall clock.
     #[test]
     fn causal_skew_cycle_converges_in_every_order() {
-        let (mut x, mut y) = Stamp::seed().fork();
-        x.event();
-        let stamp_a = x.clone();
-        x.event();
-        let stamp_c = x.clone();
-        y.event();
-        let stamp_b = y.clone();
-        assert!(stamp_a.leq(&stamp_c) && !stamp_c.leq(&stamp_a));
-        assert!(stamp_b.concurrent(&stamp_a) && stamp_b.concurrent(&stamp_c));
-
-        let a = reg("a", stamp_a, 3, "agent-a", "blake3:a");
-        let b = reg("b", stamp_b, 2, "agent-b", "blake3:b");
-        let c = reg("c", stamp_c, 1, "agent-c", "blake3:c");
+        let a = reg("a", 3, "agent-a", "blake3:a");
+        let b = reg("b", 2, "agent-b", "blake3:b");
+        let c = reg("c", 1, "agent-c", "blake3:c");
 
         let orders = [
             [&a, &b, &c],
@@ -286,70 +207,56 @@ mod tests {
         }
     }
 
-    // === Step 2: Concurrent, wall_ts tie-break ===
+    // === Step 1: wall_ts ===
 
     #[test]
     fn concurrent_higher_wall_ts_wins() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-        // sa and sb are concurrent (forked, both have events)
-        assert!(sa.concurrent(&sb));
-
-        let mut a = reg("alice-val", sa, 200, "alice", "aaa");
-        let b = reg("bob-val", sb, 300, "bob", "bbb");
+        let mut a = reg("alice-val", 200, "alice", "aaa");
+        let b = reg("bob-val", 300, "bob", "bbb");
         a.merge(&b);
         assert_eq!(a.value, "bob-val"); // higher wall_ts wins
     }
 
     #[test]
     fn concurrent_lower_wall_ts_loses() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let mut a = reg("alice-val", sa, 300, "alice", "aaa");
-        let b = reg("bob-val", sb, 200, "bob", "bbb");
+        let mut a = reg("alice-val", 300, "alice", "aaa");
+        let b = reg("bob-val", 200, "bob", "bbb");
         a.merge(&b);
         assert_eq!(a.value, "alice-val"); // a has higher wall_ts
     }
 
-    // === Step 3: Concurrent, same wall_ts, agent_id tie-break ===
+    // === Step 2: same wall_ts, agent_id tie-break ===
 
     #[test]
     fn concurrent_same_ts_higher_agent_wins() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let mut a = reg("alice-val", sa, 100, "alice", "aaa");
-        let b = reg("bob-val", sb, 100, "bob", "bbb");
+        let mut a = reg("alice-val", 100, "alice", "aaa");
+        let b = reg("bob-val", 100, "bob", "bbb");
         a.merge(&b);
         assert_eq!(a.value, "bob-val"); // "bob" > "alice" lexicographically
     }
 
     #[test]
     fn concurrent_same_ts_lower_agent_loses() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let mut a = reg("bob-val", sa, 100, "bob", "bbb");
-        let b = reg("alice-val", sb, 100, "alice", "aaa");
+        let mut a = reg("bob-val", 100, "bob", "bbb");
+        let b = reg("alice-val", 100, "alice", "aaa");
         a.merge(&b);
         assert_eq!(a.value, "bob-val"); // "bob" > "alice"
     }
 
-    // === Step 4: Concurrent, same ts, same agent, event_hash tie-break ===
+    // === Step 3: same ts, same agent, event_hash tie-break ===
 
     #[test]
     fn concurrent_same_agent_higher_hash_wins() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let mut a = reg("val-a", sa, 100, "alice", "hash-aaa");
-        let b = reg("val-b", sb, 100, "alice", "hash-zzz");
+        let mut a = reg("val-a", 100, "alice", "hash-aaa");
+        let b = reg("val-b", 100, "alice", "hash-zzz");
         a.merge(&b);
         assert_eq!(a.value, "val-b"); // "hash-zzz" > "hash-aaa"
     }
 
     #[test]
     fn concurrent_same_agent_lower_hash_loses() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let mut a = reg("val-a", sa, 100, "alice", "hash-zzz");
-        let b = reg("val-b", sb, 100, "alice", "hash-aaa");
+        let mut a = reg("val-a", 100, "alice", "hash-zzz");
+        let b = reg("val-b", 100, "alice", "hash-aaa");
         a.merge(&b);
         assert_eq!(a.value, "val-a"); // "hash-zzz" > "hash-aaa"
     }
@@ -358,10 +265,8 @@ mod tests {
 
     #[test]
     fn semilattice_commutative() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let a = reg("val-a", sa.clone(), 100, "alice", "hash-a");
-        let b = reg("val-b", sb.clone(), 200, "bob", "hash-b");
+        let a = reg("val-a", 100, "alice", "hash-a");
+        let b = reg("val-b", 200, "bob", "hash-b");
 
         let mut ab = a.clone();
         ab.merge(&b);
@@ -374,17 +279,9 @@ mod tests {
 
     #[test]
     fn semilattice_associative() {
-        let seed = Stamp::seed();
-        let (left, right) = seed.fork();
-        let (mut sa, sb) = left.fork();
-        let (mut sc, _) = right.fork();
-        sa.event();
-        // sb stays as is (concurrent with sa)
-        sc.event();
-
-        let a = reg("val-a", sa, 100, "alice", "hash-a");
-        let b = reg("val-b", sb, 200, "bob", "hash-b");
-        let c = reg("val-c", sc, 150, "carol", "hash-c");
+        let a = reg("val-a", 100, "alice", "hash-a");
+        let b = reg("val-b", 200, "bob", "hash-b");
+        let c = reg("val-c", 150, "carol", "hash-c");
 
         // (a merge b) merge c
         let mut left_merge = a.clone();
@@ -402,8 +299,7 @@ mod tests {
 
     #[test]
     fn semilattice_idempotent_self_merge() {
-        let s = make_stamp(3);
-        let a = reg("value", s, 500, "agent", "hash-123");
+        let a = reg("value", 500, "agent", "hash-123");
         let mut m = a.clone();
         m.merge(&a);
         assert_eq!(m, a);
@@ -412,21 +308,9 @@ mod tests {
     // === Edge cases ===
 
     #[test]
-    fn equal_stamps_are_idempotent() {
-        // Two registers with identical stamps (both leq each other)
-        let s = make_stamp(2);
-        let a = reg("same", s.clone(), 100, "agent", "hash");
-        let mut m = a.clone();
-        m.merge(&a);
-        assert_eq!(m, a);
-    }
-
-    #[test]
     fn identical_timestamps_different_agents() {
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let a = reg("alice-val", sa.clone(), 999, "alice", "hash-same");
-        let b = reg("bob-val", sb.clone(), 999, "bob", "hash-same");
+        let a = reg("alice-val", 999, "alice", "hash-same");
+        let b = reg("bob-val", 999, "bob", "hash-same");
 
         let mut ab = a.clone();
         ab.merge(&b);
@@ -441,11 +325,8 @@ mod tests {
 
     #[test]
     fn same_agent_concurrent_writes() {
-        // Same agent can have concurrent writes if forked
-        let (sa, sb) = make_forked_stamps(1, 1);
-
-        let a = reg("write-1", sa, 100, "alice", "hash-111");
-        let b = reg("write-2", sb, 100, "alice", "hash-222");
+        let a = reg("write-1", 100, "alice", "hash-111");
+        let b = reg("write-2", 100, "alice", "hash-222");
 
         let mut ab = a.clone();
         ab.merge(&b);
@@ -459,15 +340,13 @@ mod tests {
 
     #[test]
     fn display_shows_value() {
-        let s = make_stamp(1);
-        let r = reg("Hello, World!", s, 0, "agent", "hash");
+        let r = reg("Hello, World!", 0, "agent", "hash");
         assert_eq!(r.to_string(), "Hello, World!");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let s = make_stamp(2);
-        let r = reg("test-value", s, 42, "agent-1", "blake3:abc");
+        let r = reg("test-value", 42, "agent-1", "blake3:abc");
         let json = serde_json::to_string(&r).unwrap();
         let deserialized: LwwRegister<String> = serde_json::from_str(&json).unwrap();
         assert_eq!(r, deserialized);
@@ -475,21 +354,16 @@ mod tests {
 
     #[test]
     fn numeric_value_type() {
-        let s = make_stamp(1);
-        let mut a = LwwRegister::new(42u64, s.clone(), 100, "alice".to_string(), "h1".to_string());
-        let s2 = make_stamp(2);
-        let b = LwwRegister::new(99u64, s2, 200, "bob".to_string(), "h2".to_string());
+        let mut a = LwwRegister::new(42u64, 100, "alice".to_string(), "h1".to_string());
+        let b = LwwRegister::new(99u64, 200, "bob".to_string(), "h2".to_string());
         a.merge(&b);
         assert_eq!(a.value, 99);
     }
 
     #[test]
     fn merge_with_trace_disabled_by_default_has_no_payload() {
-        let s1 = make_stamp(1);
-        let s2 = make_stamp(2);
-
-        let mut a = reg("old", s1, 100, "alice", "aaa");
-        let b = reg("new", s2, 100, "alice", "bbb");
+        let mut a = reg("old", 100, "alice", "aaa");
+        let b = reg("new", 100, "alice", "bbb");
 
         let trace = a.merge_with_trace(&b, "title");
         assert_eq!(a.value, "new");
@@ -504,9 +378,8 @@ mod tests {
             return;
         }
 
-        let (sa, sb) = make_forked_stamps(1, 1);
-        let mut a = reg("alice-val", sa, 100, "alice", "aaa");
-        let b = reg("bob-val", sb, 200, "bob", "bbb");
+        let mut a = reg("alice-val", 100, "alice", "aaa");
+        let b = reg("bob-val", 200, "bob", "bbb");
 
         let trace = a.merge_with_trace(&b, "title");
         assert!(trace.enabled);
@@ -519,17 +392,9 @@ mod tests {
     #[test]
     fn merge_chain_converges() {
         // Multiple agents writing concurrently, all merge in different orders
-        let seed = Stamp::seed();
-        let (left, right) = seed.fork();
-        let (mut s1, mut s2) = left.fork();
-        let (mut s3, _) = right.fork();
-        s1.event();
-        s2.event();
-        s3.event();
-
-        let r1 = reg("v1", s1, 100, "alice", "h1");
-        let r2 = reg("v2", s2, 200, "bob", "h2");
-        let r3 = reg("v3", s3, 200, "carol", "h3");
+        let r1 = reg("v1", 100, "alice", "h1");
+        let r2 = reg("v2", 200, "bob", "h2");
+        let r3 = reg("v3", 200, "carol", "h3");
 
         // Order 1: r1, r2, r3
         let mut m1 = r1.clone();
@@ -568,15 +433,11 @@ mod tests {
 /// including the proper-prefix case, so every path through the tie-break
 /// chain is covered.
 ///
-/// The stamp is fixed at the seed. `compare` never reads it, and symbolic ITC
-/// trees exceed the 12G memory cap. So these harnesses cannot see a causal
-/// step put back into `compare`. The proptests `lww_register_*` in
-/// `tests/proptest_semilattice.rs`, over generated causal histories, catch
-/// that regression.
+/// Registers carry no causal stamp since bn-1dy8, so the key above is the
+/// whole of the merge order.
 #[cfg(kani)]
 mod kani_proofs {
     use super::LwwRegister;
-    use crate::clock::itc::Stamp;
 
     fn any_short_string() -> String {
         let len: u8 = kani::any_where(|&l| l <= 2);
@@ -592,7 +453,6 @@ mod kani_proofs {
     fn any_register() -> LwwRegister<u8> {
         LwwRegister::new(
             kani::any(),
-            Stamp::seed(),
             kani::any(),
             any_short_string(),
             any_short_string(),

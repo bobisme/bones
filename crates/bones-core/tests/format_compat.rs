@@ -974,3 +974,20 @@ fn v1_roundtrip_through_current_writer() {
         reparsed_all.len()
     );
 }
+
+/// A real line written by bn before bn-1dy8, with an ITC v3 stamp. ITC is
+/// gone, but the itc field stays opaque: old lines must still validate
+/// (hash included), parse, write back byte for byte, and replay.
+#[test]
+fn legacy_itc_v3_line_still_validates_and_replays() {
+    let line = "1771817390115739\t1\titc:v3:AWKTMnkmSTJyZnQAAAAAQa2vVqtdbcAAAAEykQE\t\titem.move\tbn-5rqf\t{\"state\":\"done\"}\tblake3:t67IdCtFD1XCkiytNavBaOt5FoSSAg0H2QOlVdQVDBc";
+    bones_core::event::validate::validate_event(line, 1).expect("legacy line validates");
+    let ParsedLine::Event(event) = parse_line(line).expect("legacy line parses") else {
+        panic!("expected an event");
+    };
+    let mut rewritten = (*event).clone();
+    let written = write_event(&mut rewritten).expect("write");
+    assert_eq!(written.trim_end_matches('\n'), line);
+    let state = bones_core::crdt::item_state::WorkItemState::from_events([&*event]);
+    assert_eq!(state.state.phase, bones_core::crdt::state::Phase::Done);
+}

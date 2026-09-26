@@ -1,7 +1,8 @@
 # ADR-007: ITC Sparse Base64 Text Encoding
 
 ## Status
-Accepted
+Superseded (bn-1dy8): ITC removed; the itc field is kept as a legacy placeholder.
+New events write `itc:AQ`. Old events keep their stored text, which is not decoded.
 
 ## Context
 

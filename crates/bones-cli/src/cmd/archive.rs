@@ -7,7 +7,6 @@
 use crate::agent;
 use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -17,8 +16,6 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-#[cfg(test)]
-use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
 use bones_core::event::Event;
@@ -121,7 +118,6 @@ fn resolve_days(args: &ArchiveArgs, bones_dir: &Path) -> u32 {
 }
 
 fn append_archive_event(
-    project_root: &Path,
     shard_mgr: &ShardManager,
     conn: &rusqlite::Connection,
     agent: &str,
@@ -158,7 +154,7 @@ fn append_archive_event(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = writer::write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -177,7 +173,6 @@ fn append_archive_event(
 }
 
 fn run_archive_single(
-    project_root: &Path,
     id: &str,
     agent: &str,
     output: OutputMode,
@@ -238,7 +233,7 @@ fn run_archive_single(
         anyhow::bail!("{msg}");
     }
 
-    let event_hash = append_archive_event(project_root, shard_mgr, conn, agent, &resolved_id)?;
+    let event_hash = append_archive_event(shard_mgr, conn, agent, &resolved_id)?;
 
     let result = ArchiveOutput {
         id: resolved_id,
@@ -257,7 +252,6 @@ fn run_archive_single(
 }
 
 fn run_archive_auto(
-    project_root: &Path,
     days: u32,
     agent: &str,
     output: OutputMode,
@@ -283,7 +277,7 @@ fn run_archive_auto(
             continue;
         }
 
-        append_archive_event(project_root, shard_mgr, conn, agent, &item.item_id)?;
+        append_archive_event(shard_mgr, conn, agent, &item.item_id)?;
         archived_ids.push(item.item_id);
     }
 
@@ -381,11 +375,10 @@ pub fn run_archive(
 
     if args.auto {
         let days = resolve_days(args, &bones_dir);
-        return run_archive_auto(project_root, days, &agent, output, &conn, &shard_mgr);
+        return run_archive_auto(days, &agent, output, &conn, &shard_mgr);
     }
 
     run_archive_single(
-        project_root,
         args.id.as_deref().expect("checked id exists"),
         &agent,
         output,

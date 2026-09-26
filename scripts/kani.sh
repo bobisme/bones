@@ -11,7 +11,6 @@ MEM=${KANI_MEM:-12G}
 TIMEOUT=${KANI_TIMEOUT:-600}
 FILES=(
   crates/bones-core/src/cache/codec.rs
-  crates/bones-core/src/clock/text.rs
   crates/bones-core/src/crdt/lww.rs
 )
 

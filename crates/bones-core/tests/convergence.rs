@@ -1,4 +1,3 @@
-use bones_core::clock::itc::Stamp;
 use bones_core::crdt::item_state::WorkItemState;
 use bones_core::crdt::state::Phase;
 use bones_core::event::Event;
@@ -16,12 +15,10 @@ fn make_event(
     event_hash: &str,
     item_id: &str,
 ) -> Event {
-    let mut stamp = Stamp::seed();
-    stamp.event();
     Event {
         wall_ts_us,
         agent: agent.to_string(),
-        itc: stamp.to_string(),
+        itc: bones_core::event::ITC_PLACEHOLDER.to_string(),
         parents: vec![],
         event_type,
         item_id: ItemId::new_unchecked(item_id),

@@ -14,7 +14,6 @@
 use crate::agent;
 use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -88,7 +87,6 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn run_unstart_single(
-    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -152,7 +150,7 @@ fn run_unstart_single(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = writer::write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -223,7 +221,7 @@ pub fn run_unstart(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_unstart_single(project_root, &conn, &shard_mgr, &agent, raw_id) {
+        match run_unstart_single(&conn, &shard_mgr, &agent, raw_id) {
             Ok(ok) => results.push(UnstartResult {
                 id: ok.id,
                 ok: true,

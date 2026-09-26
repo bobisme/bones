@@ -17,7 +17,6 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 
 #[derive(Args, Debug)]
@@ -322,7 +321,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
             event_hash: String::new(),
         };
 
-        append_event(project_root, &shard_manager, &mut event)?;
+        append_event(&shard_manager, &mut event)?;
         existing_item_ids.insert(event.item_id.to_string());
         report.imported_milestones += 1;
     }
@@ -365,7 +364,7 @@ pub fn run_import(args: &ImportArgs, output: OutputMode, project_root: &Path) ->
                 event_hash: String::new(),
             };
 
-            append_event(project_root, &shard_manager, &mut event)?;
+            append_event(&shard_manager, &mut event)?;
             previous_hash = Some(event.event_hash.clone());
 
             match event.event_type {
@@ -529,7 +528,7 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
             event_hash: String::new(),
         };
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
         let line = write_event(&mut event).context("failed to serialize imported event")?;
 
         {
@@ -742,11 +741,7 @@ fn plan_issue_events(
     Ok(planned)
 }
 
-fn append_event(
-    project_root: &Path,
-    shard_manager: &ShardManager,
-    event: &mut Event,
-) -> Result<()> {
+fn append_event(shard_manager: &ShardManager, event: &mut Event) -> Result<()> {
     use bones_core::lock::ShardLock;
     use std::time::Duration;
 
@@ -758,7 +753,7 @@ fn append_event(
         .rotate_if_needed()
         .context("failed to rotate shards")?;
 
-    assign_next_itc(project_root, event)?;
+    event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
     let line = write_event(event).context("failed to serialize imported event")?;
     shard_manager
         .append_raw(year, month, &line)

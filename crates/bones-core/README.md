@@ -4,7 +4,7 @@ Core data structures, CRDT event model, locking, error types, and projection eng
 
 ## What this crate provides
 
-- **Event model**: immutable append-only events with ITC vector clocks and deterministic hash addressing
+- **Event model**: immutable append-only events with wall-clock ordering and deterministic hash addressing
 - **CRDT projection**: replay events into a SQLite projection database with last-writer-wins tie-breaking
 - **Item model**: bones (tasks, goals, bugs) with state, urgency, labels, parents, and dependencies
 - **FTS5 search**: BM25 full-text index built into the projection

@@ -39,6 +39,13 @@ pub use types::{EventType, UnknownEventType};
 use crate::model::item_id::ItemId;
 use serde::{Deserialize, Serialize};
 
+/// Value of the `itc` field in every new event.
+///
+/// Bones no longer uses Interval Tree Clocks: they never decided an LWW
+/// winner correctly, and no code joined stamps across agents (bn-1dy8). The
+/// field stays in the format so old lines parse and hash the same.
+pub const ITC_PLACEHOLDER: &str = "itc:AQ";
+
 /// A single event in the bones event log.
 ///
 /// Each event represents an immutable, content-addressed mutation to a work
@@ -49,7 +56,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 1. `wall_ts_us` — wall-clock microseconds since Unix epoch
 /// 2. `agent` — identifier of the agent/user that produced the event
-/// 3. `itc` — Interval Tree Clock stamp (canonical text encoding)
+/// 3. `itc` — legacy Interval Tree Clock stamp, unused (see [`ITC_PLACEHOLDER`])
 /// 4. `parents` — parent event hashes (blake3:...), sorted lexicographically
 /// 5. `event_type` — one of the 11 event types
 /// 6. `item_id` — the work item this event mutates
@@ -71,9 +78,11 @@ pub struct Event {
     /// Identifier of the agent or user that produced this event.
     pub agent: String,
 
-    /// Interval Tree Clock stamp in canonical text encoding.
+    /// Legacy Interval Tree Clock stamp. Nothing reads it: ordering uses
+    /// `(wall_ts_us, agent, event_hash)` and the local clock's receive rule.
     ///
-    /// Used for causal ordering independent of wall-clock time.
+    /// Kept in the format so old lines parse and their hashes verify. New
+    /// events carry [`ITC_PLACEHOLDER`] (bn-1dy8).
     pub itc: String,
 
     /// Parent event hashes forming the Merkle-DAG.

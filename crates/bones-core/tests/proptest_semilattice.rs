@@ -176,7 +176,7 @@ proptest! {
         prop_assert_eq!(ma, a);
     }
 
-    // LwwRegister tests (causal histories with independent wall clocks)
+    // LwwRegister tests (write histories with frequent key ties)
     #[test]
     fn lww_register_commutative([a, b, _] in arb_lww_register_triple()) {
         let mut ab = a.clone();

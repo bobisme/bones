@@ -1,4 +1,3 @@
-use bones_core::clock::itc::{Id, Stamp};
 use bones_core::crdt::item_state::WorkItemState;
 use bones_core::crdt::lww::LwwRegister;
 use bones_core::crdt::state::{EpochPhaseState, Phase as LifecyclePhase};
@@ -65,19 +64,9 @@ pub fn arb_epoch_phase() -> impl Strategy<Value = EpochPhase> + Clone {
         .prop_map(|(epoch, phase)| EpochPhase { epoch, phase })
 }
 
-/// Operation in a simulated multi-replica causal history.
-#[derive(Clone, Debug)]
-enum HistoryOp {
-    /// `replica` records a write stamped with its clock and `wall_ts`.
-    Write { replica: usize, wall_ts: u64 },
-    /// `to` learns the causal history of `from` (ITC receive).
-    Sync { from: usize, to: usize },
-}
-
-/// One write from a simulated causal history.
+/// One write from a simulated write history.
 #[derive(Clone, Debug)]
 pub struct HistoryWrite {
-    pub stamp: Stamp,
     pub wall_ts: u64,
     pub agent_id: String,
     pub event_hash: String,
@@ -85,57 +74,23 @@ pub struct HistoryWrite {
 
 const HISTORY_REPLICAS: usize = 3;
 
-fn arb_history_op() -> impl Strategy<Value = HistoryOp> + Clone {
-    prop_oneof![
-        3 => (0..HISTORY_REPLICAS, 0u64..6)
-            .prop_map(|(replica, wall_ts)| HistoryOp::Write { replica, wall_ts }),
-        1 => (0..HISTORY_REPLICAS, 0..HISTORY_REPLICAS)
-            .prop_map(|(from, to)| HistoryOp::Sync { from, to }),
-    ]
-}
-
-fn replay_history(ops: &[HistoryOp]) -> Vec<HistoryWrite> {
-    let (left, c) = Stamp::seed().fork();
-    let (a, b) = left.fork();
-    let mut replicas = [a, b, c];
-    let mut writes = Vec::new();
-    for op in ops {
-        match *op {
-            HistoryOp::Write { replica, wall_ts } => {
-                replicas[replica].event();
-                let index = writes.len();
-                writes.push(HistoryWrite {
-                    stamp: replicas[replica].clone(),
-                    wall_ts,
-                    agent_id: format!("agent-{replica}"),
-                    event_hash: format!("blake3:{index:04x}"),
-                });
-            }
-            HistoryOp::Sync { from, to } => {
-                let known = Stamp::new(Id::zero(), replicas[from].event.clone());
-                replicas[to] = Stamp::join(&replicas[to], &known);
-            }
-        }
-    }
-    writes
-}
-
-/// A causal history of writes from three replicas that sync at random.
+/// A history of writes from three replicas.
 ///
-/// Stamps come from real ITC fork/event/join operations, and wall clocks are
-/// drawn independently of causality from a small range. A causally later
-/// write can therefore carry a lower wall clock (clock skew), and ties are
-/// common. Each write has a unique event hash.
-pub fn arb_causal_history() -> impl Strategy<Value = Vec<HistoryWrite>> + Clone {
-    (
-        (0..HISTORY_REPLICAS, 0u64..6),
-        prop::collection::vec(arb_history_op(), 2..16),
-    )
-        .prop_map(|((replica, wall_ts), rest)| {
-            let mut ops = vec![HistoryOp::Write { replica, wall_ts }];
-            ops.extend(rest);
-            replay_history(&ops)
-        })
+/// Wall clocks come from a small range, so ties on `wall_ts` and on
+/// `(wall_ts, agent_id)` are common and every step of the tie-break chain
+/// is exercised. Each write has a unique event hash.
+pub fn arb_write_history() -> impl Strategy<Value = Vec<HistoryWrite>> + Clone {
+    prop::collection::vec((0..HISTORY_REPLICAS, 0u64..6), 1..16).prop_map(|writes| {
+        writes
+            .into_iter()
+            .enumerate()
+            .map(|(index, (replica, wall_ts))| HistoryWrite {
+                wall_ts,
+                agent_id: format!("agent-{replica}"),
+                event_hash: format!("blake3:{index:04x}"),
+            })
+            .collect()
+    })
 }
 
 /// Build the register for write `index` of `history`, with a value derived
@@ -149,16 +104,15 @@ pub fn history_register<T>(
     let write = &history[index];
     LwwRegister::new(
         value(index),
-        write.stamp.clone(),
         write.wall_ts,
         write.agent_id.clone(),
         write.event_hash.clone(),
     )
 }
 
-/// Three registers picked from one causal history.
+/// Three registers picked from one write history.
 pub fn arb_lww_register_triple() -> impl Strategy<Value = [LwwRegister<String>; 3]> + Clone {
-    (arb_causal_history(), any::<[usize; 3]>()).prop_map(|(history, picks)| {
+    (arb_write_history(), any::<[usize; 3]>()).prop_map(|(history, picks)| {
         picks.map(|index| history_register(&history, index, |i| format!("w{i}")))
     })
 }
@@ -277,11 +231,11 @@ fn arb_work_item_state_from(history: Vec<HistoryWrite>) -> impl Strategy<Value =
         )
 }
 
-/// Three work item states whose LWW fields hold writes from one causal
-/// history, so merges compare stamps that are causally meaningful.
+/// Three work item states whose LWW fields hold writes from one write
+/// history, so merges compare writes with frequent key ties.
 pub fn arb_work_item_state_triple()
 -> impl Strategy<Value = (WorkItemState, WorkItemState, WorkItemState)> {
-    arb_causal_history().prop_flat_map(|history| {
+    arb_write_history().prop_flat_map(|history| {
         (
             arb_work_item_state_from(history.clone()),
             arb_work_item_state_from(history.clone()),

@@ -46,8 +46,6 @@
 
 use std::collections::HashSet;
 
-use crate::clock::itc::Stamp;
-use crate::clock::text::stamp_from_text;
 use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
 use crate::crdt::lww::LwwRegister;
@@ -105,10 +103,9 @@ pub struct WorkItemState {
 impl WorkItemState {
     /// Create a new empty `WorkItemState` with default values.
     ///
-    /// All LWW registers start with a zero stamp (epoch 0, no identity).
+    /// All LWW registers start at wall clock 0 with an empty agent and hash.
     /// All sets start empty. State starts at epoch 0, phase Open.
     pub fn new() -> Self {
-        let zero_stamp = Stamp::seed();
         let zero_ts = 0u64;
         let zero_agent = String::new();
         let zero_hash = String::new();
@@ -116,43 +113,27 @@ impl WorkItemState {
         Self {
             title: LwwRegister::new(
                 String::new(),
-                zero_stamp.clone(),
                 zero_ts,
                 zero_agent.clone(),
                 zero_hash.clone(),
             ),
             description: LwwRegister::new(
                 String::new(),
-                zero_stamp.clone(),
                 zero_ts,
                 zero_agent.clone(),
                 zero_hash.clone(),
             ),
-            kind: LwwRegister::new(
-                Kind::Task,
-                zero_stamp.clone(),
-                zero_ts,
-                zero_agent.clone(),
-                zero_hash.clone(),
-            ),
+            kind: LwwRegister::new(Kind::Task, zero_ts, zero_agent.clone(), zero_hash.clone()),
             state: EpochPhaseState::new(),
-            size: LwwRegister::new(
-                None,
-                zero_stamp.clone(),
-                zero_ts,
-                zero_agent.clone(),
-                zero_hash.clone(),
-            ),
+            size: LwwRegister::new(None, zero_ts, zero_agent.clone(), zero_hash.clone()),
             urgency: LwwRegister::new(
                 Urgency::Default,
-                zero_stamp.clone(),
                 zero_ts,
                 zero_agent.clone(),
                 zero_hash.clone(),
             ),
             parent: LwwRegister::new(
                 String::new(),
-                zero_stamp.clone(),
                 zero_ts,
                 zero_agent.clone(),
                 zero_hash.clone(),
@@ -162,7 +143,7 @@ impl WorkItemState {
             blocked_by: OrSet::new(),
             related_to: OrSet::new(),
             comments: GSet::new(),
-            deleted: LwwRegister::new(false, zero_stamp, zero_ts, zero_agent, zero_hash),
+            deleted: LwwRegister::new(false, zero_ts, zero_agent, zero_hash),
             created_at: 0,
             updated_at: 0,
         }
@@ -246,8 +227,6 @@ impl WorkItemState {
         }
 
         // Build LWW metadata from the event.
-        let stamp = stamp_from_text(&event.itc)
-            .unwrap_or_else(|| derive_stamp_from_hash(&event.event_hash));
         let agent_id = event.agent.clone();
         let event_hash = event.event_hash.clone();
 
@@ -257,7 +236,6 @@ impl WorkItemState {
                     lww_set(
                         &mut self.title,
                         data.title.clone(),
-                        stamp.clone(),
                         wall_ts,
                         agent_id.clone(),
                         event_hash.clone(),
@@ -265,7 +243,6 @@ impl WorkItemState {
                     lww_set(
                         &mut self.kind,
                         data.kind,
-                        stamp.clone(),
                         wall_ts,
                         agent_id.clone(),
                         event_hash.clone(),
@@ -274,7 +251,6 @@ impl WorkItemState {
                         lww_set(
                             &mut self.size,
                             Some(size),
-                            stamp.clone(),
                             wall_ts,
                             agent_id.clone(),
                             event_hash.clone(),
@@ -283,7 +259,6 @@ impl WorkItemState {
                     lww_set(
                         &mut self.urgency,
                         data.urgency,
-                        stamp.clone(),
                         wall_ts,
                         agent_id.clone(),
                         event_hash.clone(),
@@ -292,7 +267,6 @@ impl WorkItemState {
                         lww_set(
                             &mut self.description,
                             desc.clone(),
-                            stamp.clone(),
                             wall_ts,
                             agent_id.clone(),
                             event_hash.clone(),
@@ -302,7 +276,6 @@ impl WorkItemState {
                         lww_set(
                             &mut self.parent,
                             parent.clone(),
-                            stamp.clone(),
                             wall_ts,
                             agent_id.clone(),
                             event_hash.clone(),
@@ -324,7 +297,6 @@ impl WorkItemState {
                                 lww_set(
                                     &mut self.title,
                                     s.to_string(),
-                                    stamp,
                                     wall_ts,
                                     agent_id,
                                     event_hash,
@@ -337,38 +309,24 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            lww_set(
-                                &mut self.description,
-                                desc,
-                                stamp,
-                                wall_ts,
-                                agent_id,
-                                event_hash,
-                            );
+                            lww_set(&mut self.description, desc, wall_ts, agent_id, event_hash);
                         }
                         "kind" => {
                             if let Some(kind) =
                                 data.value.as_str().and_then(|s| s.parse::<Kind>().ok())
                             {
-                                lww_set(&mut self.kind, kind, stamp, wall_ts, agent_id, event_hash);
+                                lww_set(&mut self.kind, kind, wall_ts, agent_id, event_hash);
                             }
                         }
                         "size" => {
                             let size = data.value.as_str().and_then(|s| s.parse::<Size>().ok());
-                            lww_set(&mut self.size, size, stamp, wall_ts, agent_id, event_hash);
+                            lww_set(&mut self.size, size, wall_ts, agent_id, event_hash);
                         }
                         "urgency" => {
                             if let Some(urgency) =
                                 data.value.as_str().and_then(|s| s.parse::<Urgency>().ok())
                             {
-                                lww_set(
-                                    &mut self.urgency,
-                                    urgency,
-                                    stamp,
-                                    wall_ts,
-                                    agent_id,
-                                    event_hash,
-                                );
+                                lww_set(&mut self.urgency, urgency, wall_ts, agent_id, event_hash);
                             }
                         }
                         "parent" => {
@@ -377,14 +335,7 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            lww_set(
-                                &mut self.parent,
-                                parent,
-                                stamp,
-                                wall_ts,
-                                agent_id,
-                                event_hash,
-                            );
+                            lww_set(&mut self.parent, parent, wall_ts, agent_id, event_hash);
                         }
                         "labels" => {
                             // Labels update via OR-Set add/remove encoded in value.
@@ -487,14 +438,7 @@ impl WorkItemState {
 
             EventType::Delete => {
                 // Set deleted flag via LWW.
-                lww_set(
-                    &mut self.deleted,
-                    true,
-                    stamp,
-                    wall_ts,
-                    agent_id,
-                    event_hash,
-                );
+                lww_set(&mut self.deleted, true, wall_ts, agent_id, event_hash);
             }
 
             EventType::Compact => {
@@ -503,7 +447,6 @@ impl WorkItemState {
                     lww_set(
                         &mut self.description,
                         data.summary.clone(),
-                        stamp,
                         wall_ts,
                         agent_id,
                         event_hash,
@@ -606,30 +549,6 @@ fn apply_phase_transition(state: &mut EpochPhaseState, target: Phase) {
     // target == state.phase is a no-op.
 }
 
-/// Derive a unique fallback stamp from event hash.
-///
-/// Older events may carry non-decodable legacy ITC text. In that case,
-/// we preserve deterministic replay by deriving a stable fallback stamp
-/// from `event_hash`.
-fn derive_stamp_from_hash(event_hash: &str) -> Stamp {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    event_hash.hash(&mut hasher);
-    let bits = hasher.finish();
-
-    // Fork the seed stamp along a path determined by hash bits.
-    // 8 levels of forking gives 256 distinct stamp topologies,
-    // making any two different hashes almost certainly produce
-    // concurrent (incomparable) stamps.
-    let mut stamp = Stamp::seed();
-    for i in 0..8 {
-        let (left, right) = stamp.fork();
-        stamp = if (bits >> i) & 1 == 0 { left } else { right };
-    }
-    stamp.event();
-    stamp
-}
-
 /// Construct an OR-Set tag (Timestamp) from event metadata.
 ///
 /// Uses wall_ts as the time, and hashes the agent/event_hash/suffix
@@ -671,20 +590,16 @@ fn make_orset_tag(wall_ts: u64, agent: &str, event_hash: &str, suffix: &str) -> 
 fn lww_set<T: Clone>(
     register: &mut LwwRegister<T>,
     value: T,
-    stamp: Stamp,
     wall_ts: u64,
     agent_id: String,
     event_hash: String,
 ) {
-    register.merge(&LwwRegister::new(
-        value, stamp, wall_ts, agent_id, event_hash,
-    ));
+    register.merge(&LwwRegister::new(value, wall_ts, agent_id, event_hash));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::itc::Stamp;
     use crate::event::Event;
     use crate::event::data::*;
     use crate::event::types::EventType;
@@ -703,12 +618,10 @@ mod tests {
         agent: &str,
         event_hash: &str,
     ) -> Event {
-        let mut stamp = Stamp::seed();
-        stamp.event();
         Event {
             wall_ts_us,
             agent: agent.to_string(),
-            itc: stamp.to_string(),
+            itc: crate::event::ITC_PLACEHOLDER.to_string(),
             parents: vec![],
             event_type,
             item_id: ItemId::new_unchecked("bn-test1"),

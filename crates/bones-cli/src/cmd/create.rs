@@ -5,7 +5,6 @@
 
 use crate::agent;
 use crate::cmd::dup::build_fts_query;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use anyhow::Context;
@@ -771,8 +770,7 @@ fn run_create_single(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        // Assign ITC (local file op, safe under lock)
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         // Compute hash and serialize
         let line = writer::write_event(&mut event)
@@ -804,7 +802,7 @@ fn run_create_single(
                 event_hash: String::new(),
             };
 
-            assign_next_itc(project_root, &mut link_event)?;
+            link_event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
             let line = writer::write_event(&mut link_event)
                 .map_err(|e| anyhow::anyhow!("failed to serialize link event: {e}"))?;

@@ -1,7 +1,6 @@
 //! `bn move` — reparent a bone under a different goal.
 
 use crate::agent;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use bones_core::db::query::{get_item, try_open_projection};
@@ -94,7 +93,7 @@ fn emit_parent_event(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;

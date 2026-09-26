@@ -1,7 +1,8 @@
 # ADR-004: ITC Choice
 
 ## Status
-Accepted
+Superseded (bn-1dy8): ITC removed. LWW order is `(wall_ts, agent_id, event_hash)` (ADR-006).
+The `itc` event field is kept as a legacy placeholder.
 
 ## Context
 Need causal ordering for multi-agent CRDT operations in a decentralized system where agents can fork and join at any time without a central registry.

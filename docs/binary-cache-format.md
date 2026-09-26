@@ -156,7 +156,8 @@ Preceded by the same string table preamble as Column 1.
 ### Column 5 — ITC Stamps (`RawBytesCodec`)
 
 Interval Tree Clock stamps are variable-length text strings. Stored as
-length-prefixed raw bytes.
+length-prefixed raw bytes. The field is a legacy placeholder since bn-1dy8
+(new events write `itc:AQ`) and is not decoded.
 
 **Layout**:
 ```

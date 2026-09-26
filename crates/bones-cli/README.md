@@ -72,7 +72,7 @@ The tradeoff is that the data model must be designed so all operations commute. 
 
 See `notes/plan.md` for the full design reference. Highlights:
 
-- **CRDT/event layer**: event DAG replay, ITC clocks, deterministic merge/tie-break rules.
+- **CRDT/event layer**: event DAG replay, deterministic `(wall_ts, agent, event_hash)` merge/tie-break rules.
 - **Graph triage**: SCC condensation, transitive reduction, PageRank, betweenness, HITS/eigenvector signals, critical-path influence.
 - **Composite ranking**: urgency override + graph metrics + decay signals.
 - **Search fusion**: FTS5 lexical scoring + semantic vectors + structural similarity, merged with RRF.

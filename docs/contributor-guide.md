@@ -79,7 +79,7 @@ Metrics can live in triage/search crates depending on scope.
 
 ## Kani Proofs
 
-`crates/bones-core/src/cache/codec.rs` and `crates/bones-core/src/clock/text.rs` have Kani harnesses in `mod kani_proofs` (`#[cfg(kani)]`). They prove the varint, zigzag, timestamp-delta and RLE codecs, and the ITC text varint, for all inputs, or for a bound stated on each harness.
+`crates/bones-core/src/cache/codec.rs` and `crates/bones-core/src/crdt/lww.rs` have Kani harnesses in `mod kani_proofs` (`#[cfg(kani)]`). They prove the varint, zigzag, timestamp-delta and RLE codecs, and the LWW merge order, for all inputs, or for a bound stated on each harness.
 
 - Install once: `cargo install --locked kani-verifier && cargo kani setup`.
 - Run: `just kani` (all harnesses) or `just kani varint_round_trips`.

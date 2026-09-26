@@ -23,7 +23,6 @@ use crate::cmd::bones_gitattributes::{
     ensure_bones_gitattributes, remove_legacy_root_gitattributes_entry,
 };
 use crate::cmd::bones_gitignore::ensure_bones_gitignore;
-use crate::itc_state::assign_next_itc;
 use crate::output::{OutputMode, pretty_kv, pretty_section};
 
 #[derive(Args, Debug)]
@@ -296,7 +295,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             data: EventData::Create(create),
             event_hash: String::new(),
         };
-        append_event(project_root, &shard_manager, &mut create_event)?;
+        append_event(&shard_manager, &mut create_event)?;
         previous_hash.insert(item_id.to_string(), create_event.event_hash.clone());
         report.projection_events += 1;
 
@@ -322,7 +321,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(project_root, &shard_manager, &mut assign_event)?;
+            append_event(&shard_manager, &mut assign_event)?;
             previous_hash.insert(item_id.to_string(), assign_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -352,7 +351,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                 }),
                 event_hash: String::new(),
             };
-            append_event(project_root, &shard_manager, &mut move_event)?;
+            append_event(&shard_manager, &mut move_event)?;
             previous_hash.insert(item_id.to_string(), move_event.event_hash.clone());
             report.projection_events += 1;
         }
@@ -376,7 +375,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
                     }),
                     event_hash: String::new(),
                 };
-                append_event(project_root, &shard_manager, &mut comment_event)?;
+                append_event(&shard_manager, &mut comment_event)?;
                 previous_hash.insert(item_id.to_string(), comment_event.event_hash.clone());
                 report.comments_imported += 1;
                 report.projection_events += 1;
@@ -424,7 +423,7 @@ pub fn run_migrate(args: &MigrateArgs, output: OutputMode, project_root: &Path) 
             .map_or(0, |x| x.updated_us);
         link_event.wall_ts_us = source_ts.saturating_add(1);
 
-        append_event(project_root, &shard_manager, &mut link_event)?;
+        append_event(&shard_manager, &mut link_event)?;
         previous_hash.insert(source_item_id.to_string(), link_event.event_hash.clone());
         report.dependencies_imported += 1;
         report.projection_events += 1;
@@ -495,11 +494,7 @@ fn find_bones_dir(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn append_event(
-    project_root: &Path,
-    shard_manager: &ShardManager,
-    event: &mut Event,
-) -> Result<()> {
+fn append_event(shard_manager: &ShardManager, event: &mut Event) -> Result<()> {
     use bones_core::lock::ShardLock;
     use std::time::Duration;
 
@@ -511,7 +506,7 @@ fn append_event(
         .rotate_if_needed()
         .context("failed to rotate shards")?;
 
-    assign_next_itc(project_root, event)?;
+    event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
     let line = write_event(event).context("failed to serialize migrated event")?;
     shard_manager
         .append_raw(year, month, &line)

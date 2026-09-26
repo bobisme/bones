@@ -11,7 +11,6 @@
 use crate::agent;
 use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -20,8 +19,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-#[cfg(test)]
-use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
 use bones_core::event::Event;
@@ -87,7 +84,6 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn run_reopen_single(
-    project_root: &Path,
     conn: &rusqlite::Connection,
     shard_mgr: &ShardManager,
     agent: &str,
@@ -146,7 +142,7 @@ fn run_reopen_single(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = writer::write_event(&mut event)
             .map_err(|e| anyhow::anyhow!("failed to serialize event: {e}"))?;
@@ -217,7 +213,7 @@ pub fn run_reopen(
     let mut failures = Vec::new();
 
     for raw_id in item_ids(args) {
-        match run_reopen_single(project_root, &conn, &shard_mgr, &agent, raw_id) {
+        match run_reopen_single(&conn, &shard_mgr, &agent, raw_id) {
             Ok(ok) => results.push(ReopenResult {
                 id: ok.id,
                 ok: true,

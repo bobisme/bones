@@ -8,7 +8,6 @@ use crate::agent;
 use crate::cmd::assign::emit_assign_event;
 use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
 use clap::Args;
@@ -17,8 +16,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-#[cfg(test)]
-use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
 use bones_core::event::Event;
@@ -92,7 +89,6 @@ pub fn run_do_single(
     agent: &str,
     raw_id: &str,
 ) -> anyhow::Result<DoOutput> {
-    let project_root = bones_dir.parent().unwrap_or(bones_dir);
     validate::validate_item_id(raw_id)
         .map_err(|e| anyhow::anyhow!("invalid item_id '{}': {}", e.value, e.reason))?;
 
@@ -152,7 +148,7 @@ pub fn run_do_single(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         // Serialize and write
         let line = writer::write_event(&mut event)

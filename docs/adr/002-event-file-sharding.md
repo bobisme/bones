@@ -26,7 +26,7 @@ Use time-based monthly sharding: `.bones/events/YYYY-MM.events`.
 2. Sort by filename (lexicographic = chronological for YYYY-MM format)
 3. Within each shard, events are ordered by line position (append order)
 4. Cross-shard ordering: earlier shard < later shard
-5. For concurrent events (different agents, same timeframe): ITC provides causal ordering
+5. For concurrent events (different agents, same timeframe): order by `(wall_ts, agent, event_hash)` (ITC was removed in bn-1dy8)
 
 ### Shard Manifests
 Each frozen shard has a companion `.manifest` file:

@@ -55,7 +55,6 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod agent;
 mod cmd;
 mod git;
-mod itc_state;
 mod output;
 mod telemetry;
 mod tui;

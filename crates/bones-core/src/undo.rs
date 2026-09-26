@@ -195,7 +195,7 @@ pub fn compensating_event(
     Ok(Event {
         wall_ts_us: now,
         agent: current_agent.to_string(),
-        itc: "itc:AQ".to_string(),
+        itc: crate::event::ITC_PLACEHOLDER.to_string(),
         parents,
         event_type,
         item_id: ItemId::new_unchecked(item_id.as_str()),

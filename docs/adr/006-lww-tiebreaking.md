@@ -38,6 +38,8 @@ The original step 1 (ITC dominance) was removed; see "ITC Dominance First" above
 
 Cost: when a machine's clock lags, a causally later edit could lose to an earlier one. Since bn-52i6 the local clock follows the hybrid-logical-clock receive rule: rebuild and incremental apply call `ShardManager::observe_timestamp` with the newest event they applied, and `next_timestamp` returns a value above it. Write commands bring the projection up to date first, so a new write orders after every event its author has seen. Observed timestamps are capped at `MAX_OBSERVED_CLOCK_LEAD_US` (one hour) ahead of the local wall clock, so one far-future clock cannot drag every replica forward. Causal order therefore holds for clock skew below one hour.
 
+Since bn-1dy8 the ITC implementation and the register stamp are removed, and the property test draws write histories without stamps.
+
 ## Consequences
 - All replicas must implement the identical 3-step comparison logic.
 - Wall timestamps, agent IDs and event hashes must be consistently formatted in the event log to ensure lexicographical comparison works as expected.

@@ -4,7 +4,6 @@
 //! item creation directly using the bones-core API, bypassing the CLI
 //! rendering layer that would corrupt the terminal screen.
 
-use crate::itc_state::assign_next_itc;
 use crate::validate;
 use anyhow::{Context, Result};
 use bones_core::db::{project, query};
@@ -23,11 +22,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-fn append_event_locked(
-    project_root: &Path,
-    shard_mgr: &ShardManager,
-    event: &mut Event,
-) -> Result<()> {
+fn append_event_locked(shard_mgr: &ShardManager, event: &mut Event) -> Result<()> {
     if let Err(e) = validate::validate_agent(&event.agent) {
         anyhow::bail!("invalid agent '{}': {}", e.value, e.reason);
     }
@@ -45,7 +40,7 @@ fn append_event_locked(
         .next_timestamp()
         .map_err(|e| anyhow::anyhow!("failed to get timestamp: {e}"))?;
 
-    assign_next_itc(project_root, event)?;
+    event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
     let line = writer::write_event(event).context("serialize event")?;
     shard_mgr
@@ -97,7 +92,7 @@ pub fn do_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str) 
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -149,7 +144,7 @@ pub fn done_item(project_root: &Path, db_path: &Path, agent: &str, item_id: &str
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -214,7 +209,7 @@ pub fn create_item(
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {
@@ -278,7 +273,7 @@ pub fn update_item_fields(
             event_hash: String::new(),
         };
 
-        append_event_locked(project_root, &shard_mgr, &mut event)?;
+        append_event_locked(&shard_mgr, &mut event)?;
         if let Err(e) = projector.project_event(&event) {
             tracing::warn!(
                 "TUI update projection failed for field '{field}' (will recover on rebuild): {e}"
@@ -316,7 +311,7 @@ pub fn add_comment(
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI comment projection failed (will recover on rebuild): {e}");
     }
@@ -357,7 +352,7 @@ pub fn add_link(
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI add_link projection failed (will recover on rebuild): {e}");
     }
@@ -398,7 +393,7 @@ pub fn remove_link(
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
     if let Err(e) = projector.project_event(&event) {
         tracing::warn!("TUI remove_link projection failed (will recover on rebuild): {e}");
     }
@@ -488,7 +483,7 @@ pub fn move_item_state(
         event_hash: String::new(),
     };
 
-    append_event_locked(project_root, &shard_mgr, &mut event)?;
+    append_event_locked(&shard_mgr, &mut event)?;
 
     let projector = project::Projector::new(&conn);
     if let Err(e) = projector.project_event(&event) {

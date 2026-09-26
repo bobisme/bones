@@ -9,8 +9,9 @@
 //!
 //! **Snapshots are lattice elements, not regular updates.**
 //!
-//! - For every LWW field the snapshot carries the winning `(stamp, wall_ts,
-//!   agent_id, event_hash, value)` tuple — not just the value.
+//! - For every LWW field the snapshot carries the winning `(wall_ts,
+//!   agent_id, event_hash, value)` tuple — not just the value. Snapshots
+//!   written before bn-1dy8 also carry an ITC `stamp`, which is ignored.
 //! - For OR-Sets and G-Sets the snapshot carries the full set state.
 //! - Applying a snapshot uses `merge(state, snapshot_state)` — a field-wise
 //!   lattice join, *not* "overwrite with snapshot clock".
@@ -35,7 +36,6 @@ use std::collections::HashSet;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::clock::itc::Stamp;
 use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
 use crate::crdt::item_state::WorkItemState;
@@ -54,11 +54,11 @@ use crate::model::item_id::ItemId;
 
 /// Serializable representation of a single LWW register with its clock.
 ///
-/// Preserves the full tie-breaking chain for correct lattice merge.
+/// Preserves the full tie-breaking chain for correct lattice merge. Unknown
+/// keys are ignored, so a legacy `stamp` key still deserializes (bn-1dy8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LwwSnapshot<T> {
     pub value: T,
-    pub stamp: Stamp,
     pub wall_ts: u64,
     pub agent_id: String,
     pub event_hash: String,
@@ -68,7 +68,6 @@ impl<T: Clone> From<&LwwRegister<T>> for LwwSnapshot<T> {
     fn from(reg: &LwwRegister<T>) -> Self {
         Self {
             value: reg.value.clone(),
-            stamp: reg.stamp.clone(),
             wall_ts: reg.wall_ts,
             agent_id: reg.agent_id.clone(),
             event_hash: reg.event_hash.clone(),
@@ -80,7 +79,6 @@ impl<T: Clone> From<&LwwSnapshot<T>> for LwwRegister<T> {
     fn from(snap: &LwwSnapshot<T>) -> Self {
         Self {
             value: snap.value.clone(),
-            stamp: snap.stamp.clone(),
             wall_ts: snap.wall_ts,
             agent_id: snap.agent_id.clone(),
             event_hash: snap.event_hash.clone(),
@@ -300,7 +298,10 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
         .max_by(|a, b| {
             (a.order_ts(), &a.agent, &a.event_hash).cmp(&(b.order_ts(), &b.agent, &b.event_hash))
         })
-        .map_or_else(|| "itc:AQ".to_string(), |e| e.itc.clone());
+        .map_or_else(
+            || crate::event::ITC_PLACEHOLDER.to_string(),
+            |e| e.itc.clone(),
+        );
 
     let item_id_parsed = ItemId::new_unchecked(item_id);
 
@@ -580,7 +581,6 @@ impl Default for CompactionPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::itc::Stamp;
     use crate::event::data::*;
     use crate::model::item::{Kind, Size, State, Urgency};
     use std::collections::BTreeMap;
@@ -597,12 +597,10 @@ mod tests {
         event_hash: &str,
         item_id: &str,
     ) -> Event {
-        let mut stamp = Stamp::seed();
-        stamp.event();
         Event {
             wall_ts_us,
             agent: agent.to_string(),
-            itc: stamp.to_string(),
+            itc: crate::event::ITC_PLACEHOLDER.to_string(),
             parents: vec![],
             event_type,
             item_id: ItemId::new_unchecked(item_id),
@@ -767,7 +765,7 @@ mod tests {
             update_title_event("Newest", 3_000, "bob", "blake3:e5", id),
             move_event(State::Done, 4_000, "bob", "blake3:e6", id),
         ];
-        // Distinct stamps, so the test sees which event the snapshot's itc
+        // Distinct itc strings, so the test sees which event the snapshot's itc
         // comes from.
         let events: Vec<Event> = events
             .into_iter()
@@ -907,6 +905,45 @@ mod tests {
         assert_eq!(roundtripped.item_id, payload.item_id);
         assert_eq!(roundtripped.title.value, payload.title.value);
         assert_eq!(roundtripped.compacted_from, payload.compacted_from);
+    }
+
+    /// Snapshots written before bn-1dy8 carry an ITC `stamp` on every LWW
+    /// field. They must still deserialize, and the stamp is ignored.
+    #[test]
+    fn snapshot_payload_accepts_legacy_stamp_key() {
+        let events = sample_item_events("bn-test1");
+        let redacted = HashSet::new();
+        let snapshot = compact_item("bn-test1", &events, "compactor", &redacted).unwrap();
+        let payload = extract_snapshot_payload(&snapshot).unwrap();
+
+        let mut json = serde_json::to_value(&payload).expect("serialize");
+        let legacy_stamp = serde_json::json!({
+            "id": "One",
+            "event": { "Branch": [1, { "Leaf": 0 }, { "Leaf": 2 }] }
+        });
+        for field in [
+            "title",
+            "description",
+            "kind",
+            "size",
+            "urgency",
+            "parent",
+            "deleted",
+        ] {
+            json[field]
+                .as_object_mut()
+                .expect("LWW field is an object")
+                .insert("stamp".to_string(), legacy_stamp.clone());
+        }
+        assert!(json["title"].get("stamp").is_some());
+
+        let legacy: SnapshotPayload = serde_json::from_value(json).expect("legacy deserialize");
+        assert_eq!(legacy.title, payload.title);
+        assert_eq!(legacy.deleted, payload.deleted);
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::to_value(&payload).unwrap()
+        );
     }
 
     #[test]

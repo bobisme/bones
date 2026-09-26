@@ -16,7 +16,7 @@ Each line is a single event:
 - `wall_ts`: RFC3339 timestamp with nanosecond precision (UTC)
 - `agent_id`: The ID of the agent that created the event
 - `type`: Event type string (e.g., `item_created`, `status_updated`)
-- `event_id`: Unique event ID (ITC-based)
+- `event_id`: Unique event ID (the event hash; the `itc` column is a legacy placeholder since bn-1dy8)
 - `parent_ids`: Comma-separated list of causal parent event IDs (for DAG)
 - `payload`: JSON object containing event-specific data
 

@@ -22,7 +22,6 @@ use bones_core::model::item_id::ItemId;
 use bones_core::shard::ShardManager;
 
 use crate::agent;
-use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render_error, render_mode};
 use crate::validate;
 
@@ -135,8 +134,6 @@ fn emit_event(
         event_hash: String::new(),
     };
 
-    let project_root = bones_dir.parent().unwrap_or(bones_dir);
-
     // Bring the projection up to date before taking a timestamp: applying
     // events advances the local clock past them (bn-52i6). Best-effort,
     // like the projection below.
@@ -156,7 +153,7 @@ fn emit_event(
             .next_timestamp()
             .map_err(|e| anyhow::anyhow!("timestamp error: {e}"))?;
 
-        assign_next_itc(project_root, &mut event)?;
+        event.itc = bones_core::event::ITC_PLACEHOLDER.to_string();
 
         let line = write_event(&mut event).map_err(|e| anyhow::anyhow!("serialize event: {e}"))?;
 

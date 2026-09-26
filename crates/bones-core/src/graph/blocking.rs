@@ -247,7 +247,6 @@ pub fn ready_items<S: std::hash::BuildHasher>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::itc::Stamp;
     use crate::crdt::item_state::WorkItemState;
     use crate::event::Event;
     use crate::event::data::{EventData, LinkData, UnlinkData};
@@ -266,12 +265,10 @@ mod tests {
         agent: &str,
         hash: &str,
     ) -> Event {
-        let mut stamp = Stamp::seed();
-        stamp.event();
         Event {
             wall_ts_us: wall_ts,
             agent: agent.to_string(),
-            itc: stamp.to_string(),
+            itc: crate::event::ITC_PLACEHOLDER.to_string(),
             parents: vec![],
             event_type: EventType::Link,
             item_id: ItemId::new_unchecked("bn-test"),
@@ -291,12 +288,10 @@ mod tests {
         agent: &str,
         hash: &str,
     ) -> Event {
-        let mut stamp = Stamp::seed();
-        stamp.event();
         Event {
             wall_ts_us: wall_ts,
             agent: agent.to_string(),
-            itc: stamp.to_string(),
+            itc: crate::event::ITC_PLACEHOLDER.to_string(),
             parents: vec![],
             event_type: EventType::Unlink,
             item_id: ItemId::new_unchecked("bn-test"),
