@@ -31,10 +31,26 @@ pub struct Lww<T> {
 pub use crate::crdt::gset::GSet;
 
 /// Observed-Remove Set (Add-Wins)
+///
+/// Sets serialize in sorted order, so equal sets give equal bytes (and equal
+/// snapshot event hashes) on every replica (bn-1ed2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize + Ord", deserialize = "T: Deserialize<'de>"))]
 pub struct OrSet<T: Hash + Eq> {
+    #[serde(serialize_with = "serialize_sorted")]
     pub elements: HashSet<(T, Timestamp)>,
+    #[serde(serialize_with = "serialize_sorted")]
     pub tombstone: HashSet<(T, Timestamp)>,
+}
+
+/// Serialize a `HashSet` in sorted order instead of hash iteration order.
+pub(crate) fn serialize_sorted<T: Serialize + Ord, S: serde::Serializer>(
+    set: &HashSet<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut sorted: Vec<&T> = set.iter().collect();
+    sorted.sort();
+    serializer.collect_seq(sorted)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -203,10 +203,33 @@ impl WorkItemState {
         }
     }
 
+    /// Build the state of one item from its events, in any order.
+    ///
+    /// LWW fields merge, so their order does not matter. OR-Set removes and
+    /// phase transitions do depend on order, so events are applied in the
+    /// canonical order `(order_ts, agent, event_hash)`, the order the SQLite
+    /// projection's per-field keys give. Two replicas with the same events in
+    /// different log orders get the same state (bn-1ed2).
+    #[must_use]
+    pub fn from_events<'a>(events: impl IntoIterator<Item = &'a Event>) -> Self {
+        let mut sorted: Vec<&Event> = events.into_iter().collect();
+        sorted.sort_by(|a, b| {
+            (a.order_ts(), &a.agent, &a.event_hash).cmp(&(b.order_ts(), &b.agent, &b.event_hash))
+        });
+        let mut state = Self::new();
+        for event in sorted {
+            state.apply_event(event);
+        }
+        state
+    }
+
     /// Apply an event to this aggregate, updating the appropriate field CRDT.
     ///
     /// The event's metadata (wall_ts, agent, event_hash) is used to construct
-    /// the LWW timestamp or OR-Set tag for the update.
+    /// the LWW timestamp or OR-Set tag for the update. LWW fields merge, so an
+    /// older write never replaces a newer one. OR-Set removes and phase
+    /// transitions still depend on order: to replay a whole item, use
+    /// [`Self::from_events`].
     ///
     /// Unknown event types and unrecognized update fields are silently ignored
     /// (no-op), following the principle that invalid events are skipped during
@@ -231,14 +254,16 @@ impl WorkItemState {
         match event.event_type {
             EventType::Create => {
                 if let EventData::Create(data) = &event.data {
-                    self.title = LwwRegister::new(
+                    lww_set(
+                        &mut self.title,
                         data.title.clone(),
                         stamp.clone(),
                         wall_ts,
                         agent_id.clone(),
                         event_hash.clone(),
                     );
-                    self.kind = LwwRegister::new(
+                    lww_set(
+                        &mut self.kind,
                         data.kind,
                         stamp.clone(),
                         wall_ts,
@@ -246,7 +271,8 @@ impl WorkItemState {
                         event_hash.clone(),
                     );
                     if let Some(size) = data.size {
-                        self.size = LwwRegister::new(
+                        lww_set(
+                            &mut self.size,
                             Some(size),
                             stamp.clone(),
                             wall_ts,
@@ -254,7 +280,8 @@ impl WorkItemState {
                             event_hash.clone(),
                         );
                     }
-                    self.urgency = LwwRegister::new(
+                    lww_set(
+                        &mut self.urgency,
                         data.urgency,
                         stamp.clone(),
                         wall_ts,
@@ -262,7 +289,8 @@ impl WorkItemState {
                         event_hash.clone(),
                     );
                     if let Some(desc) = &data.description {
-                        self.description = LwwRegister::new(
+                        lww_set(
+                            &mut self.description,
                             desc.clone(),
                             stamp.clone(),
                             wall_ts,
@@ -271,7 +299,8 @@ impl WorkItemState {
                         );
                     }
                     if let Some(parent) = &data.parent {
-                        self.parent = LwwRegister::new(
+                        lww_set(
+                            &mut self.parent,
                             parent.clone(),
                             stamp.clone(),
                             wall_ts,
@@ -292,7 +321,8 @@ impl WorkItemState {
                     match data.field.as_str() {
                         "title" => {
                             if let Some(s) = data.value.as_str() {
-                                self.title = LwwRegister::new(
+                                lww_set(
+                                    &mut self.title,
                                     s.to_string(),
                                     stamp,
                                     wall_ts,
@@ -307,28 +337,38 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            self.description =
-                                LwwRegister::new(desc, stamp, wall_ts, agent_id, event_hash);
+                            lww_set(
+                                &mut self.description,
+                                desc,
+                                stamp,
+                                wall_ts,
+                                agent_id,
+                                event_hash,
+                            );
                         }
                         "kind" => {
                             if let Some(kind) =
                                 data.value.as_str().and_then(|s| s.parse::<Kind>().ok())
                             {
-                                self.kind =
-                                    LwwRegister::new(kind, stamp, wall_ts, agent_id, event_hash);
+                                lww_set(&mut self.kind, kind, stamp, wall_ts, agent_id, event_hash);
                             }
                         }
                         "size" => {
                             let size = data.value.as_str().and_then(|s| s.parse::<Size>().ok());
-                            self.size =
-                                LwwRegister::new(size, stamp, wall_ts, agent_id, event_hash);
+                            lww_set(&mut self.size, size, stamp, wall_ts, agent_id, event_hash);
                         }
                         "urgency" => {
                             if let Some(urgency) =
                                 data.value.as_str().and_then(|s| s.parse::<Urgency>().ok())
                             {
-                                self.urgency =
-                                    LwwRegister::new(urgency, stamp, wall_ts, agent_id, event_hash);
+                                lww_set(
+                                    &mut self.urgency,
+                                    urgency,
+                                    stamp,
+                                    wall_ts,
+                                    agent_id,
+                                    event_hash,
+                                );
                             }
                         }
                         "parent" => {
@@ -337,8 +377,14 @@ impl WorkItemState {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .unwrap_or_default();
-                            self.parent =
-                                LwwRegister::new(parent, stamp, wall_ts, agent_id, event_hash);
+                            lww_set(
+                                &mut self.parent,
+                                parent,
+                                stamp,
+                                wall_ts,
+                                agent_id,
+                                event_hash,
+                            );
                         }
                         "labels" => {
                             // Labels update via OR-Set add/remove encoded in value.
@@ -441,13 +487,21 @@ impl WorkItemState {
 
             EventType::Delete => {
                 // Set deleted flag via LWW.
-                self.deleted = LwwRegister::new(true, stamp, wall_ts, agent_id, event_hash);
+                lww_set(
+                    &mut self.deleted,
+                    true,
+                    stamp,
+                    wall_ts,
+                    agent_id,
+                    event_hash,
+                );
             }
 
             EventType::Compact => {
                 if let EventData::Compact(data) = &event.data {
                     // Replace description with summary.
-                    self.description = LwwRegister::new(
+                    lww_set(
+                        &mut self.description,
                         data.summary.clone(),
                         stamp,
                         wall_ts,
@@ -612,6 +666,21 @@ fn make_orset_tag(wall_ts: u64, agent: &str, event_hash: &str, suffix: &str) -> 
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Merge a write into an LWW register: the write applies only when it wins
+/// under `(wall_ts, agent, event_hash)`.
+fn lww_set<T: Clone>(
+    register: &mut LwwRegister<T>,
+    value: T,
+    stamp: Stamp,
+    wall_ts: u64,
+    agent_id: String,
+    event_hash: String,
+) {
+    register.merge(&LwwRegister::new(
+        value, stamp, wall_ts, agent_id, event_hash,
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,6 +735,30 @@ mod tests {
             agent,
             hash,
         )
+    }
+
+    #[test]
+    fn older_write_applied_later_does_not_win() {
+        // apply_event merges LWW fields, so an older write that arrives
+        // later in the log keeps the newer value (bn-1ed2).
+        let title = |value: &str, ts: i64, hash: &str| {
+            make_event(
+                EventType::Update,
+                EventData::Update(UpdateData {
+                    field: "title".to_string(),
+                    value: serde_json::json!(value),
+                    extra: std::collections::BTreeMap::new(),
+                }),
+                ts,
+                "alice",
+                hash,
+            )
+        };
+        let mut state = WorkItemState::new();
+        state.apply_event(&create_event("Created", 1_000, "alice", "blake3:c"));
+        state.apply_event(&title("Newer", 3_000, "blake3:n"));
+        state.apply_event(&title("Older", 2_000, "blake3:o"));
+        assert_eq!(state.title.value, "Newer");
     }
 
     fn update_title_event(title: &str, wall_ts: i64, agent: &str, hash: &str) -> Event {

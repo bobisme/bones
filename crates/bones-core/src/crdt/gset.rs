@@ -11,7 +11,10 @@ use std::collections::HashSet;
 /// - Associative: (a ∪ b) ∪ c = a ∪ (b ∪ c)
 /// - Idempotent: a ∪ a = a
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(bound(serialize = "T: Serialize + Ord", deserialize = "T: Deserialize<'de>"))]
 pub struct GSet<T: Eq + std::hash::Hash + Clone> {
+    /// Serialized in sorted order, like [`super::OrSet`].
+    #[serde(serialize_with = "super::serialize_sorted")]
     pub elements: HashSet<T>,
 }
 

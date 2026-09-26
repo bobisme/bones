@@ -264,14 +264,13 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
     }
 
     // Replay all events to build the final CRDT state.
-    let mut state = WorkItemState::new();
-    for event in events {
-        state.apply_event(event);
-    }
+    let state = WorkItemState::from_events(events);
 
     // Compute audit metadata.
-    let earliest_ts = events.iter().map(|e| e.wall_ts_us).min().unwrap_or(0);
-    let latest_ts = events.iter().map(|e| e.wall_ts_us).max().unwrap_or(0);
+    // order_ts, so the snapshot (latest + 1) sorts after every source event
+    // even when some carry pre-epoch timestamps (bn-1ed2).
+    let earliest_ts = events.iter().map(Event::order_ts).min().unwrap_or(0);
+    let latest_ts = events.iter().map(Event::order_ts).max().unwrap_or(0);
 
     // Build the snapshot payload.
     let payload = state.to_snapshot_payload(item_id, events.len(), earliest_ts, latest_ts);
@@ -294,8 +293,13 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
     let mut sorted_parents = parents;
     sorted_parents.sort();
 
+    // The canonically latest event, not the last in log order, so the
+    // snapshot is the same event on every replica (bn-1ed2).
     let itc = events
-        .last()
+        .iter()
+        .max_by(|a, b| {
+            (a.order_ts(), &a.agent, &a.event_hash).cmp(&(b.order_ts(), &b.agent, &b.event_hash))
+        })
         .map_or_else(|| "itc:AQ".to_string(), |e| e.itc.clone());
 
     let item_id_parsed = ItemId::new_unchecked(item_id);
@@ -394,10 +398,7 @@ pub fn compact_items<S: ::std::hash::BuildHasher>(
         }
 
         // Replay to determine eligibility.
-        let mut state = WorkItemState::new();
-        for event in events {
-            state.apply_event(event);
-        }
+        let state = WorkItemState::from_events(events);
 
         if !is_eligible(&state, min_age_days, now_us) {
             report.items_skipped += 1;
@@ -443,10 +444,7 @@ pub fn verify_compaction(
     snapshot_event: &Event,
 ) -> Result<bool> {
     // Replay original events.
-    let mut original_state = WorkItemState::new();
-    for event in original_events {
-        original_state.apply_event(event);
-    }
+    let original_state = WorkItemState::from_events(original_events);
 
     // Parse snapshot payload.
     let payload = extract_snapshot_payload(snapshot_event)
@@ -470,10 +468,7 @@ pub fn verify_compaction(
 /// Returns an error if the snapshot event cannot be deserialized.
 pub fn verify_lattice_join(original_events: &[Event], snapshot_event: &Event) -> Result<bool> {
     // Build original state.
-    let mut original_state = WorkItemState::new();
-    for event in original_events {
-        original_state.apply_event(event);
-    }
+    let original_state = WorkItemState::from_events(original_events);
 
     // Build snapshot state.
     let payload = extract_snapshot_payload(snapshot_event)?;
@@ -723,6 +718,86 @@ mod tests {
             ),
             move_event(State::Done, 6_000_000, "bob", "blake3:e6", item_id),
         ]
+    }
+
+    fn label_event(action: &str, label: &str, wall_ts: i64, hash: &str, item_id: &str) -> Event {
+        make_event(
+            EventType::Update,
+            EventData::Update(UpdateData {
+                field: "labels".to_string(),
+                value: serde_json::json!({"action": action, "label": label}),
+                extra: BTreeMap::new(),
+            }),
+            wall_ts,
+            "alice",
+            hash,
+            item_id,
+        )
+    }
+
+    /// Every ordering of `items`, by Heap's algorithm.
+    fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+        fn heap<T: Clone>(k: usize, items: &mut Vec<T>, out: &mut Vec<Vec<T>>) {
+            if k <= 1 {
+                out.push(items.clone());
+                return;
+            }
+            for i in 0..k {
+                heap(k - 1, items, out);
+                let j = if k % 2 == 0 { i } else { 0 };
+                items.swap(j, k - 1);
+            }
+        }
+        let mut out = Vec::new();
+        heap(items.len(), &mut items.to_vec(), &mut out);
+        out
+    }
+
+    #[test]
+    fn snapshot_does_not_depend_on_log_order() {
+        // A merged log is sorted by raw timestamp, which can differ from LWW
+        // order; the snapshot must match what the projection shows for every
+        // log order (bn-1ed2).
+        let id = "bn-ord";
+        let events = vec![
+            create_event("Created", 1_000, "alice", "blake3:e1", id),
+            label_event("add", "frontend", 1_500, "blake3:e2", id),
+            update_title_event("Older", 2_000, "bob", "blake3:e3", id),
+            label_event("remove", "backend", 2_500, "blake3:e4", id),
+            update_title_event("Newest", 3_000, "bob", "blake3:e5", id),
+            move_event(State::Done, 4_000, "bob", "blake3:e6", id),
+        ];
+        // Distinct stamps, so the test sees which event the snapshot's itc
+        // comes from.
+        let events: Vec<Event> = events
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut e)| {
+                e.itc = format!("itc:test{i}");
+                e
+            })
+            .collect();
+        let redacted = HashSet::new();
+        let mut first: Option<serde_json::Value> = None;
+        let mut first_hash: Option<String> = None;
+        for order in permutations(&events) {
+            let mut snapshot = compact_item(id, &order, "compactor", &redacted).unwrap();
+            // The written event, bytes and hash, is the same for every order.
+            crate::event::writer::write_event(&mut snapshot).unwrap();
+            match &first_hash {
+                None => first_hash = Some(snapshot.event_hash.clone()),
+                Some(expected) => assert_eq!(&snapshot.event_hash, expected),
+            }
+            let payload = extract_snapshot_payload(&snapshot).unwrap();
+            assert_eq!(payload.title.value, "Newest");
+            assert!(payload.labels.contains(&"frontend".to_string()));
+            assert!(!payload.labels.contains(&"backend".to_string()));
+            let json = serde_json::to_value(&payload).unwrap();
+            match &first {
+                None => first = Some(json),
+                Some(expected) => assert_eq!(&json, expected),
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
