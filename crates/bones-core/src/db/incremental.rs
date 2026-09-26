@@ -326,6 +326,7 @@ pub fn incremental_apply(
     }
 
     let mut line_iter = all_lines.peekable();
+    let mut newest_ts = i64::MIN;
 
     // If there's no new content, we're up to date
     if line_iter.peek().is_none() {
@@ -375,6 +376,7 @@ pub fn incremental_apply(
                     .map_err(|e| anyhow::anyhow!("migration failed: {e}"))?;
 
                 current_last_hash = Some(event.event_hash.clone());
+                newest_ts = newest_ts.max(event.wall_ts_us);
                 current_batch.push(event);
 
                 if current_batch.len() >= 1000 {
@@ -414,6 +416,7 @@ pub fn incremental_apply(
         .context("update projection cursor after incremental apply")?;
     query::set_projection_prefix_digest(&conn, Some(&digest.finish()))
         .context("record cursor prefix after incremental apply")?;
+    rebuild::observe_newest(&shard_mgr, newest_ts);
 
     tracing::info!(
         events_applied = total_projected,
@@ -938,6 +941,84 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title, "Item B");
+    }
+
+    fn now_us() -> i64 {
+        chrono::Utc::now().timestamp_micros()
+    }
+
+    fn title_update(id: &str, title: &str, ts: i64, agent: &str) -> Event {
+        let mut event = Event {
+            wall_ts_us: ts,
+            agent: agent.into(),
+            itc: "itc:AQ".into(),
+            parents: vec![],
+            event_type: EventType::Update,
+            item_id: ItemId::new_unchecked(id),
+            data: EventData::Update(UpdateData {
+                field: "title".into(),
+                value: serde_json::json!(title),
+                extra: BTreeMap::new(),
+            }),
+            event_hash: String::new(),
+        };
+        writer::write_event(&mut event).expect("compute hash");
+        event
+    }
+
+    fn projected_title(db_path: &Path, id: &str) -> String {
+        let conn = open_projection(db_path).unwrap();
+        conn.query_row("SELECT title FROM items WHERE item_id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    }
+
+    /// bn-52i6: a replica whose clock lags must still write after what it
+    /// has seen. Remote events 30 minutes "in the future" advance the local
+    /// clock through rebuild and incremental apply, so a local edit made
+    /// afterwards wins LWW.
+    #[test]
+    fn applied_events_advance_local_clock_so_local_edits_win() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        let ahead = now_us() + 30 * 60 * 1_000_000;
+
+        append_event(&shard_mgr, &make_create_event("bn-001", "Item", ahead));
+        rebuild::rebuild(&events_dir, &db_path).unwrap();
+        assert!(shard_mgr.next_timestamp().unwrap() > ahead);
+
+        let remote = title_update("bn-001", "remote", ahead + 60_000_000, "remote-agent");
+        append_event(&shard_mgr, &remote);
+        let report = incremental_apply(&events_dir, &db_path, false).unwrap();
+        assert!(!report.full_rebuild_triggered);
+
+        let local_ts = shard_mgr.next_timestamp().unwrap();
+        assert!(local_ts > remote.wall_ts_us);
+        append_event(
+            &shard_mgr,
+            &title_update("bn-001", "local", local_ts, "local-agent"),
+        );
+        incremental_apply(&events_dir, &db_path, false).unwrap();
+        assert_eq!(projected_title(&db_path, "bn-001"), "local");
+    }
+
+    /// A far-future timestamp is capped at the maximum clock lead, so one
+    /// replica with a broken clock cannot drag every clock forward.
+    #[test]
+    fn far_future_event_moves_clock_only_by_the_maximum_lead() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        let far = now_us() + 10 * 24 * 3_600 * 1_000_000;
+
+        append_event(&shard_mgr, &make_create_event("bn-001", "Item", far));
+        rebuild::rebuild(&events_dir, &db_path).unwrap();
+        let next = shard_mgr.next_timestamp().unwrap();
+        assert!(next < far);
+        assert!(next <= now_us() + crate::shard::MAX_OBSERVED_CLOCK_LEAD_US + 1);
+        assert!(next >= now_us() + crate::shard::MAX_OBSERVED_CLOCK_LEAD_US - 60_000_000);
     }
 
     #[test]

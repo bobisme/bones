@@ -137,6 +137,11 @@ fn emit_event(
 
     let project_root = bones_dir.parent().unwrap_or(bones_dir);
 
+    // Bring the projection up to date before taking a timestamp: applying
+    // events advances the local clock past them (bn-52i6). Best-effort,
+    // like the projection below.
+    let _ = try_open_projection(&bones_dir.join("bones.db"));
+
     {
         use bones_core::lock::ShardLock;
         let lock_path = shard_mgr.lock_path();

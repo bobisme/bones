@@ -36,7 +36,7 @@ This is the same order that replay (`dag/replay.rs`) and the event merge driver 
 ## Amendment (2026-09-25, bn-t694)
 The original step 1 (ITC dominance) was removed; see "ITC Dominance First" above. A property test that draws causal histories and wall clocks independently (`crates/bones-core/tests/proptest_semilattice.rs`) found the associativity violation after 24 cases.
 
-Cost: when a machine's clock lags, a causally later edit can lose to an earlier one. The writer's timestamp (`shard.rs` `next_timestamp`) is not a hybrid logical clock and does not advance on receive. Clamping new writes above the item's latest seen `wall_ts` would restore "causally later implies later `wall_ts`" for new data without changing this comparison.
+Cost: when a machine's clock lags, a causally later edit could lose to an earlier one. Since bn-52i6 the local clock follows the hybrid-logical-clock receive rule: rebuild and incremental apply call `ShardManager::observe_timestamp` with the newest event they applied, and `next_timestamp` returns a value above it. Write commands bring the projection up to date first, so a new write orders after every event its author has seen. Observed timestamps are capped at `MAX_OBSERVED_CLOCK_LEAD_US` (one hour) ahead of the local wall clock, so one far-future clock cannot drag every replica forward. Causal order therefore holds for clock skew below one hour.
 
 ## Consequences
 - All replicas must implement the identical 3-step comparison logic.

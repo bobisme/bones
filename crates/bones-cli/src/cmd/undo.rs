@@ -21,10 +21,10 @@
 //! ```
 
 use crate::agent;
+use crate::cmd::open_projection_for_mutation;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
-use bones_core::db;
 use bones_core::db::project;
 use bones_core::event::Event;
 use bones_core::event::parser::{ParsedLine, PartialParsedLine, parse_line, parse_line_partial};
@@ -368,9 +368,9 @@ pub fn run_undo(
         anyhow::anyhow!("{msg}")
     })?;
 
-    let db_path = bones_dir.join("bones.db");
-    let conn = db::open_projection(&db_path)?;
-    let _ = project::ensure_tracking_table(&conn);
+    // Brings the projection up to date first, which also advances the local
+    // clock past every applied event (bn-52i6).
+    let conn = open_projection_for_mutation(&bones_dir)?;
     let shard_mgr = ShardManager::new(&bones_dir);
 
     // ---------------------------------------------------------------------------

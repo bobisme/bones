@@ -36,7 +36,9 @@ pub fn wall_clock_now() -> u64 {
 /// Returns Some(warning) if the absolute difference exceeds `threshold_secs`.
 ///
 /// Called during event write (before appending to shard) to warn the user.
-/// Events are NEVER rejected due to clock skew — ITC ordering is authoritative.
+/// Events are NEVER rejected due to clock skew. LWW orders by wall clock, so
+/// skew beyond `MAX_OBSERVED_CLOCK_LEAD_US` can reorder causally related
+/// writes (see `ShardManager::observe_timestamp`).
 #[must_use]
 pub fn check_clock_skew(
     event_ts: u64,

@@ -575,13 +575,45 @@ impl ShardManager {
         Ok(next)
     }
 
+    /// Advance the local clock past `wall_ts_us`, an event timestamp seen in
+    /// the log from any replica (the hybrid-logical-clock receive rule).
+    ///
+    /// LWW orders writes by `(wall_ts, agent, event_hash)`. Without this, a
+    /// machine whose clock lags writes a causally later edit with an earlier
+    /// timestamp, and the edit loses. After observing, [`next_timestamp`]
+    /// returns a value above every event this replica has seen (bn-52i6).
+    ///
+    /// A timestamp more than [`MAX_OBSERVED_CLOCK_LEAD_US`] ahead of the
+    /// local wall clock is capped there, so one replica with a far-future
+    /// clock cannot drag every other replica's timestamps forward. Causal
+    /// order is only guaranteed for clock skew below that lead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if the clock file cannot be read or
+    /// written.
+    ///
+    /// [`next_timestamp`]: Self::next_timestamp
+    pub fn observe_timestamp(&self, wall_ts_us: i64) -> Result<(), ShardError> {
+        let cap = system_time_us().saturating_add(MAX_OBSERVED_CLOCK_LEAD_US);
+        let seen = wall_ts_us.min(cap);
+        if seen > self.read_clock()? {
+            self.write_clock(seen)?;
+        }
+        Ok(())
+    }
+
     /// Write a clock value to the clock file.
     fn write_clock(&self, value: i64) -> Result<(), ShardError> {
         let path = self.clock_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&path, value.to_string())?;
+        // Write then rename, so a concurrent reader never sees a torn value
+        // (which would parse as 0 and drop an observed clock lead).
+        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&tmp, value.to_string())?;
+        fs::rename(&tmp, &path)?;
         Ok(())
     }
 
@@ -854,6 +886,10 @@ impl ShardManager {
 // ---------------------------------------------------------------------------
 // ShardLineIterator
 // ---------------------------------------------------------------------------
+
+/// How far ahead of the local wall clock an observed event timestamp may
+/// move the local clock: one hour. See [`ShardManager::observe_timestamp`].
+pub const MAX_OBSERVED_CLOCK_LEAD_US: i64 = 3_600 * 1_000_000;
 
 struct ShardLineIterator {
     shards: Vec<(i32, u32)>,

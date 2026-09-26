@@ -158,6 +158,17 @@ fn check_sealed_shard_integrity(shard_mgr: &ShardManager) -> Result<()> {
     Ok(())
 }
 
+/// Advance the local clock past the newest replayed event (bn-52i6).
+/// Best-effort: a clock-file failure must not fail the projection.
+pub(crate) fn observe_newest(shard_mgr: &ShardManager, newest_ts: i64) {
+    if newest_ts == i64::MIN {
+        return;
+    }
+    if let Err(err) = shard_mgr.observe_timestamp(newest_ts) {
+        tracing::warn!(error = %err, "could not advance local clock past replayed events");
+    }
+}
+
 /// Drop the existing DB and rebuild it from the canonical event log.
 ///
 /// 1. Deletes the existing database file (if any)
@@ -229,6 +240,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let shard_line_iter = shard_mgr.replay_lines()?;
     // Digest the exact lines replayed; see incremental::LogDigest.
     let mut digest = crate::db::incremental::LogDigest::new();
+    let mut newest_ts = i64::MIN;
 
     for line_res in shard_line_iter {
         let (offset, line): (usize, String) =
@@ -250,6 +262,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
                     .map_err(|e| anyhow::anyhow!("migration failed at line {line_no}: {e}"))?;
 
                 last_event_hash = Some(event.event_hash.clone());
+                newest_ts = newest_ts.max(event.wall_ts_us);
                 current_batch.push(event);
 
                 if current_batch.len() >= batch_size {
@@ -295,6 +308,7 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
         .context("update projection cursor after rebuild")?;
     crate::db::query::set_projection_prefix_digest(&conn, Some(&digest.finish()))
         .context("record cursor prefix after rebuild")?;
+    observe_newest(&shard_mgr, newest_ts);
 
     // Count unique items
     let item_count: i64 = conn

@@ -4,11 +4,11 @@
 //! append-only event log but are excluded from active views.
 
 use crate::agent;
+use crate::cmd::open_projection_for_mutation;
 use crate::cmd::show::resolve_item_id;
 use crate::itc_state::assign_next_itc;
 use crate::output::{CliError, OutputMode, render, render_error};
 use crate::validate;
-use bones_core::db;
 use bones_core::db::project;
 use bones_core::db::query;
 use bones_core::event::Event;
@@ -255,9 +255,9 @@ pub fn run_delete(
         anyhow::anyhow!("{msg}")
     })?;
 
-    let db_path = bones_dir.join("bones.db");
-    let conn = db::open_projection(&db_path)?;
-    let _ = project::ensure_tracking_table(&conn);
+    // Brings the projection up to date first, which also advances the local
+    // clock past every applied event (bn-52i6).
+    let conn = open_projection_for_mutation(&bones_dir)?;
     let shard_mgr = ShardManager::new(&bones_dir);
 
     let mut results = Vec::new();
