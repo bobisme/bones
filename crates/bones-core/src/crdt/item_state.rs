@@ -6,9 +6,32 @@
 //!
 //! - **LWW** ([`LwwRegister<T>`]): title, description, kind, size, urgency, parent
 //! - **OR-Set** ([`OrSet<String>`]): assignees, labels, `blocked_by`, `related_to`
+//! - **OR-Set** ([`OrSet<LinkKey>`]): links, one member per `(target, link_type)`
 //! - **G-Set** ([`GSet<String>`]): comments (event hashes referencing comment content)
 //! - **Epoch+Phase** ([`EpochPhaseState`]): lifecycle state
 //! - **LWW<bool>** ([`LwwRegister<bool>`]): soft-delete flag
+//! - **LWW** ([`LwwRegister<String>`]): compact summary
+//!
+//! # Agreement With the Projection
+//!
+//! [`WorkItemState::from_events`] gives the same item as the SQLite
+//! projection (`db::project`) of the same events, which is what `bn show`
+//! displays. The rules below follow the projection (bn-t37g):
+//!
+//! - A create writes every field it carries. An absent description, size or
+//!   parent is a write of "none", so it beats an older update.
+//! - A non-string title, kind or urgency writes `""`, `task` or `default`.
+//! - A legacy array value for `labels` replaces the whole label set.
+//! - Links keep their raw link type. `blocked_by` and `related_to` are views
+//!   of [`WorkItemState::links`] for the types that mean "blocks" and
+//!   "related".
+//! - A compact event writes the compact summary, not the description.
+//! - `created_at` is the smallest non-zero event time (0 when every event is
+//!   at time 0 or before), the rule of the verified `min_nonzero` merge.
+//!
+//! The state stores "no description" and "no parent" as `""`, where the
+//! projection stores NULL. The projection keeps an unknown kind, size or
+//! urgency string as it is, which the typed registers here cannot hold.
 //!
 //! # Merge Semantics
 //!
@@ -46,6 +69,8 @@
 
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
 use crate::crdt::lww::LwwRegister;
@@ -61,6 +86,42 @@ use super::Timestamp;
 // ---------------------------------------------------------------------------
 // WorkItemState
 // ---------------------------------------------------------------------------
+
+/// One link of an item: the target item and the raw link type.
+///
+/// Links are keyed like the projection's `item_dependencies` rows, so a
+/// `blocks` and a `blocked_by` link to one target are two members.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LinkKey {
+    /// Target item ID.
+    pub target: String,
+    /// Raw link type, as written in the event.
+    pub link_type: String,
+}
+
+/// `true` when a link of this type makes its target block the item.
+pub fn is_blocking_link_type(link_type: &str) -> bool {
+    matches!(link_type, "blocks" | "blocked_by")
+}
+
+/// `true` when a link of this type relates its target to the item.
+pub fn is_related_link_type(link_type: &str) -> bool {
+    matches!(link_type, "related_to" | "related" | "relates")
+}
+
+/// The view of `links` for link types that match `pred`, keyed by target.
+fn link_view(links: &OrSet<LinkKey>, pred: fn(&str) -> bool) -> OrSet<String> {
+    let project = |set: &HashSet<(LinkKey, Timestamp)>| {
+        set.iter()
+            .filter(|(key, _)| pred(&key.link_type))
+            .map(|(key, tag)| (key.target.clone(), tag.clone()))
+            .collect()
+    };
+    OrSet {
+        elements: project(&links.elements),
+        tombstone: project(&links.tombstone),
+    }
+}
 
 /// Composite CRDT representing the full state of a work item.
 ///
@@ -90,11 +151,16 @@ pub struct WorkItemState {
     pub blocked_by: OrSet<String>,
     /// Related-to item IDs (OR-Set, add-wins).
     pub related_to: OrSet<String>,
+    /// Links with their raw link type (OR-Set, add-wins). `blocked_by` and
+    /// `related_to` are views of this set: see [`Self::derive_link_views`].
+    pub links: OrSet<LinkKey>,
     /// Comment event hashes (G-Set, grow-only).
     pub comments: GSet<String>,
     /// Soft-delete flag (LWW register).
     pub deleted: LwwRegister<bool>,
-    /// Wall-clock timestamp of the earliest event (for created_at).
+    /// Summary from the latest compact event (LWW register, empty = none).
+    pub compact_summary: LwwRegister<String>,
+    /// Smallest non-zero event time (for created_at). 0 means unknown.
     pub created_at: u64,
     /// Wall-clock timestamp of the latest applied event (for updated_at).
     pub updated_at: u64,
@@ -142,8 +208,10 @@ impl WorkItemState {
             labels: OrSet::new(),
             blocked_by: OrSet::new(),
             related_to: OrSet::new(),
+            links: OrSet::new(),
             comments: GSet::new(),
-            deleted: LwwRegister::new(false, zero_ts, zero_agent, zero_hash),
+            deleted: LwwRegister::new(false, zero_ts, zero_agent.clone(), zero_hash.clone()),
+            compact_summary: LwwRegister::new(String::new(), zero_ts, zero_agent, zero_hash),
             created_at: 0,
             updated_at: 0,
         }
@@ -168,12 +236,16 @@ impl WorkItemState {
         self.labels.merge(other.labels.clone());
         self.blocked_by.merge(other.blocked_by.clone());
         self.related_to.merge(other.related_to.clone());
+        self.links.merge(other.links.clone());
+        // The views are functions of links, not sets of their own.
+        self.derive_link_views();
 
         // G-Set: merge via set union
         self.comments.merge(other.comments.clone());
 
         // Deleted: LWW merge
         self.deleted.merge(&other.deleted);
+        self.compact_summary.merge(&other.compact_summary);
 
         // Timestamps: created_at = min of non-zero, updated_at = max. Both
         // are verified semilattice joins (bn-226p).
@@ -187,7 +259,8 @@ impl WorkItemState {
     /// phase transitions do depend on order, so events are applied in the
     /// canonical order `(order_ts, agent, event_hash)`, the order the SQLite
     /// projection's per-field keys give. Two replicas with the same events in
-    /// different log orders get the same state (bn-1ed2).
+    /// different log orders get the same state (bn-1ed2). Every handler is
+    /// idempotent, so a duplicate line changes nothing (bn-t37g).
     #[must_use]
     pub fn from_events<'a>(events: impl IntoIterator<Item = &'a Event>) -> Self {
         let mut sorted: Vec<&Event> = events.into_iter().collect();
@@ -215,13 +288,11 @@ impl WorkItemState {
     pub fn apply_event(&mut self, event: &Event) {
         let wall_ts = event.order_ts().cast_unsigned();
 
-        // Update created_at / updated_at timestamps.
-        if self.created_at == 0 || wall_ts < self.created_at {
-            self.created_at = wall_ts;
-        }
-        if wall_ts > self.updated_at {
-            self.updated_at = wall_ts;
-        }
+        // Update created_at / updated_at timestamps with the same joins as
+        // merge, so the result does not depend on the order of events. An
+        // event at time 0 leaves created_at alone (bn-t37g).
+        self.created_at = bones_verified::min_nonzero(self.created_at, wall_ts);
+        self.updated_at = bones_verified::max(self.updated_at, wall_ts);
 
         // Build LWW metadata from the event.
         let agent_id = event.agent.clone();
@@ -244,15 +315,15 @@ impl WorkItemState {
                         agent_id.clone(),
                         event_hash.clone(),
                     );
-                    if let Some(size) = data.size {
-                        lww_set(
-                            &mut self.size,
-                            Some(size),
-                            wall_ts,
-                            agent_id.clone(),
-                            event_hash.clone(),
-                        );
-                    }
+                    // Absent optional fields are writes of "none", as in
+                    // the projection (bn-t37g).
+                    lww_set(
+                        &mut self.size,
+                        data.size,
+                        wall_ts,
+                        agent_id.clone(),
+                        event_hash.clone(),
+                    );
                     lww_set(
                         &mut self.urgency,
                         data.urgency,
@@ -260,24 +331,20 @@ impl WorkItemState {
                         agent_id.clone(),
                         event_hash.clone(),
                     );
-                    if let Some(desc) = &data.description {
-                        lww_set(
-                            &mut self.description,
-                            desc.clone(),
-                            wall_ts,
-                            agent_id.clone(),
-                            event_hash.clone(),
-                        );
-                    }
-                    if let Some(parent) = &data.parent {
-                        lww_set(
-                            &mut self.parent,
-                            parent.clone(),
-                            wall_ts,
-                            agent_id.clone(),
-                            event_hash.clone(),
-                        );
-                    }
+                    lww_set(
+                        &mut self.description,
+                        data.description.clone().unwrap_or_default(),
+                        wall_ts,
+                        agent_id.clone(),
+                        event_hash.clone(),
+                    );
+                    lww_set(
+                        &mut self.parent,
+                        data.parent.clone().unwrap_or_default(),
+                        wall_ts,
+                        agent_id.clone(),
+                        event_hash.clone(),
+                    );
                     // Apply initial labels via OR-Set.
                     for label in &data.labels {
                         let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, label);
@@ -290,15 +357,9 @@ impl WorkItemState {
                 if let EventData::Update(data) = &event.data {
                     match data.field.as_str() {
                         "title" => {
-                            if let Some(s) = data.value.as_str() {
-                                lww_set(
-                                    &mut self.title,
-                                    s.to_string(),
-                                    wall_ts,
-                                    agent_id,
-                                    event_hash,
-                                );
-                            }
+                            // A non-string title writes "", as in the projection.
+                            let title = data.value.as_str().unwrap_or_default().to_string();
+                            lww_set(&mut self.title, title, wall_ts, agent_id, event_hash);
                         }
                         "description" => {
                             let desc = data
@@ -309,9 +370,14 @@ impl WorkItemState {
                             lww_set(&mut self.description, desc, wall_ts, agent_id, event_hash);
                         }
                         "kind" => {
-                            if let Some(kind) =
-                                data.value.as_str().and_then(|s| s.parse::<Kind>().ok())
-                            {
+                            // A non-string kind writes the default, as in the
+                            // projection. An unknown string is skipped: the
+                            // register cannot hold it.
+                            let kind = data
+                                .value
+                                .as_str()
+                                .map_or(Some(Kind::Task), |s| s.parse::<Kind>().ok());
+                            if let Some(kind) = kind {
                                 lww_set(&mut self.kind, kind, wall_ts, agent_id, event_hash);
                             }
                         }
@@ -320,9 +386,12 @@ impl WorkItemState {
                             lww_set(&mut self.size, size, wall_ts, agent_id, event_hash);
                         }
                         "urgency" => {
-                            if let Some(urgency) =
-                                data.value.as_str().and_then(|s| s.parse::<Urgency>().ok())
-                            {
+                            // As for kind: non-string writes the default.
+                            let urgency = data
+                                .value
+                                .as_str()
+                                .map_or(Some(Urgency::Default), |s| s.parse::<Urgency>().ok());
+                            if let Some(urgency) = urgency {
                                 lww_set(&mut self.urgency, urgency, wall_ts, agent_id, event_hash);
                             }
                         }
@@ -335,8 +404,33 @@ impl WorkItemState {
                             lww_set(&mut self.parent, parent, wall_ts, agent_id, event_hash);
                         }
                         "labels" => {
-                            // Labels update via OR-Set add/remove encoded in value.
-                            if let Some(obj) = data.value.as_object() {
+                            if let Some(labels) = data.value.as_array() {
+                                // Legacy array: replace the whole label set,
+                                // as the projection's group reset does.
+                                let wanted: Vec<String> = labels
+                                    .iter()
+                                    .filter_map(|l| l.as_str())
+                                    .map(str::to_string)
+                                    .collect();
+                                // Labels it keeps are not removed, so that a
+                                // second apply of the event changes nothing.
+                                let dropped: Vec<String> = self
+                                    .labels
+                                    .values()
+                                    .into_iter()
+                                    .filter(|label| !wanted.contains(label))
+                                    .cloned()
+                                    .collect();
+                                for label in &dropped {
+                                    self.labels.remove(label);
+                                }
+                                for label in wanted {
+                                    let tag =
+                                        make_orset_tag(wall_ts, &agent_id, &event_hash, &label);
+                                    self.labels.add(label, tag);
+                                }
+                            } else if let Some(obj) = data.value.as_object() {
+                                // Add/remove of one label.
                                 let action =
                                     obj.get("action").and_then(|v| v.as_str()).unwrap_or("");
                                 let label = obj
@@ -400,36 +494,44 @@ impl WorkItemState {
 
             EventType::Link => {
                 if let EventData::Link(data) = &event.data {
-                    let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, &data.target);
-                    match data.link_type.as_str() {
-                        "blocks" | "blocked_by" => {
-                            self.blocked_by.add(data.target.clone(), tag);
-                        }
-                        "related_to" | "related" => {
-                            self.related_to.add(data.target.clone(), tag);
-                        }
-                        _ => {} // Unknown link type — no-op.
-                    }
+                    // Every link type is kept, keyed by (target, type), as
+                    // in the projection (bn-t37g).
+                    let key = LinkKey {
+                        target: data.target.clone(),
+                        link_type: data.link_type.clone(),
+                    };
+                    let tag = make_orset_tag(
+                        wall_ts,
+                        &agent_id,
+                        &event_hash,
+                        &format!("{}\u{0}{}", key.target, key.link_type),
+                    );
+                    self.links.add(key, tag);
+                    self.derive_link_views();
                 }
             }
 
             EventType::Unlink => {
                 if let EventData::Unlink(data) = &event.data {
-                    let is_blocked = data
-                        .link_type
-                        .as_ref()
-                        .is_none_or(|lt| lt == "blocks" || lt == "blocked_by");
-                    let is_related = data
-                        .link_type
-                        .as_ref()
-                        .is_none_or(|lt| lt == "related_to" || lt == "related");
-
-                    if is_blocked {
-                        self.blocked_by.remove(&data.target);
+                    // A type removes that one link. No type removes every
+                    // link to the target.
+                    let removed: Vec<LinkKey> = self
+                        .links
+                        .values()
+                        .into_iter()
+                        .filter(|key| {
+                            key.target == data.target
+                                && data
+                                    .link_type
+                                    .as_ref()
+                                    .is_none_or(|lt| *lt == key.link_type)
+                        })
+                        .cloned()
+                        .collect();
+                    for key in &removed {
+                        self.links.remove(key);
                     }
-                    if is_related {
-                        self.related_to.remove(&data.target);
-                    }
+                    self.derive_link_views();
                 }
             }
 
@@ -440,9 +542,10 @@ impl WorkItemState {
 
             EventType::Compact => {
                 if let EventData::Compact(data) = &event.data {
-                    // Replace description with summary.
+                    // The summary is a field of its own, as in the
+                    // projection. It does not replace the description.
                     lww_set(
-                        &mut self.description,
+                        &mut self.compact_summary,
                         data.summary.clone(),
                         wall_ts,
                         agent_id,
@@ -462,6 +565,23 @@ impl WorkItemState {
                 // level by filtering event hashes. No CRDT state change.
             }
         }
+    }
+
+    /// Set `blocked_by` and `related_to` to their views of `links`.
+    ///
+    /// Each view holds the `(target, tag)` pairs of the links whose type
+    /// matches, adds and removes alike. A link tag belongs to one link, so
+    /// a target is in a view exactly when a matching link to it is present.
+    /// The views are a function of `links`, so they stay correct after
+    /// [`Self::merge`] and restore from a snapshot (bn-t37g).
+    pub fn derive_link_views(&mut self) {
+        self.blocked_by = link_view(&self.links, is_blocking_link_type);
+        self.related_to = link_view(&self.links, is_related_link_type);
+    }
+
+    /// Return the set of links, as `(target, link_type)` keys.
+    pub fn link_keys(&self) -> HashSet<&LinkKey> {
+        self.links.values()
     }
 
     /// Check if this item is soft-deleted.
@@ -1192,13 +1312,187 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn apply_compact_replaces_description() {
+    fn apply_compact_sets_summary_not_description() {
+        // The projection writes compact_summary and keeps the description
+        // (bn-t37g).
         let mut state = WorkItemState::new();
         state.apply_event(&create_event("Title", 1000, "alice", "blake3:c1"));
         assert_eq!(state.description.value, "A description");
 
         state.apply_event(&compact_event("TL;DR summary", 2000, "alice", "blake3:cp1"));
-        assert_eq!(state.description.value, "TL;DR summary");
+        assert_eq!(state.description.value, "A description");
+        assert_eq!(state.compact_summary.value, "TL;DR summary");
+    }
+
+    // -----------------------------------------------------------------------
+    // Agreement with the projection (bn-t37g)
+    // -----------------------------------------------------------------------
+
+    fn update_event(field: &str, value: serde_json::Value, ts: i64, hash: &str) -> Event {
+        make_event(
+            EventType::Update,
+            EventData::Update(UpdateData {
+                field: field.to_string(),
+                value,
+                extra: BTreeMap::new(),
+            }),
+            ts,
+            "alice",
+            hash,
+        )
+    }
+
+    #[test]
+    fn create_without_optional_fields_beats_older_update() {
+        // Clock skew: the update is older than the create. The create's
+        // absent description, size and parent are writes of "none".
+        let create = make_event(
+            EventType::Create,
+            EventData::Create(CreateData {
+                title: "T".to_string(),
+                kind: Kind::Task,
+                size: None,
+                urgency: Urgency::Default,
+                labels: vec![],
+                parent: None,
+                causation: None,
+                description: None,
+                extra: BTreeMap::new(),
+            }),
+            2_000,
+            "alice",
+            "blake3:c",
+        );
+        let events = [
+            update_event("description", serde_json::json!("old"), 1_000, "blake3:u1"),
+            update_event("size", serde_json::json!("l"), 1_000, "blake3:u2"),
+            update_event("parent", serde_json::json!("bn-p"), 1_000, "blake3:u3"),
+            create,
+        ];
+        let state = WorkItemState::from_events(&events);
+        assert_eq!(state.description.value, "");
+        assert_eq!(state.size.value, None);
+        assert_eq!(state.parent.value, "");
+    }
+
+    #[test]
+    fn non_string_values_write_defaults() {
+        let events = [
+            create_event("T", 1_000, "alice", "blake3:c"),
+            update_event("kind", serde_json::json!("bug"), 1_500, "blake3:k"),
+            update_event("urgency", serde_json::json!("urgent"), 1_500, "blake3:u"),
+            update_event("title", serde_json::json!(5), 2_000, "blake3:t2"),
+            update_event("kind", serde_json::Value::Null, 2_000, "blake3:k2"),
+            update_event("urgency", serde_json::json!(1), 2_000, "blake3:u2"),
+        ];
+        let state = WorkItemState::from_events(&events);
+        assert_eq!(state.title.value, "");
+        assert_eq!(state.kind.value, Kind::Task);
+        assert_eq!(state.urgency.value, Urgency::Default);
+    }
+
+    #[test]
+    fn legacy_label_array_replaces_the_set() {
+        let reset = update_event("labels", serde_json::json!(["a", "b"]), 2_000, "blake3:r");
+        let events = [
+            create_event("T", 1_000, "alice", "blake3:c"),
+            reset.clone(),
+            reset.clone(),
+        ];
+        let state = WorkItemState::from_events(&events);
+        let mut labels: Vec<&String> = state.label_names().into_iter().collect();
+        labels.sort();
+        assert_eq!(labels, ["a", "b"]);
+
+        // A second apply of the same event changes nothing.
+        let mut twice = state.clone();
+        twice.apply_event(&reset);
+        assert_eq!(twice.label_names(), state.label_names());
+    }
+
+    #[test]
+    fn links_keep_their_type() {
+        let events = [
+            link_event("bn-x", "blocks", 1_000, "alice", "blake3:l1"),
+            link_event("bn-x", "blocked_by", 1_100, "alice", "blake3:l2"),
+            link_event("bn-y", "relates", 1_200, "alice", "blake3:l3"),
+            link_event("bn-z", "duplicates", 1_300, "alice", "blake3:l4"),
+            unlink_event("bn-x", Some("blocks"), 2_000, "alice", "blake3:ul"),
+        ];
+        let state = WorkItemState::from_events(&events);
+        let mut links: Vec<(&str, &str)> = state
+            .link_keys()
+            .into_iter()
+            .map(|k| (k.target.as_str(), k.link_type.as_str()))
+            .collect();
+        links.sort_unstable();
+        assert_eq!(
+            links,
+            [
+                ("bn-x", "blocked_by"),
+                ("bn-y", "relates"),
+                ("bn-z", "duplicates")
+            ]
+        );
+        // Removing "blocks" keeps the "blocked_by" link in the view.
+        assert!(state.blocked_by_ids().contains(&"bn-x".to_string()));
+        assert!(state.related_to_ids().contains(&"bn-y".to_string()));
+        assert!(!state.related_to_ids().contains(&"bn-z".to_string()));
+
+        // A removal without a type removes every link to the target.
+        let mut all = events.to_vec();
+        all.push(unlink_event("bn-x", None, 3_000, "alice", "blake3:ul2"));
+        let state = WorkItemState::from_events(&all);
+        assert!(state.blocked_by.is_empty());
+        assert!(state.link_keys().iter().all(|k| k.target != "bn-x"));
+    }
+
+    #[test]
+    fn merge_keeps_link_views_derived_from_links() {
+        // Review repro: each side removes a different link type to one
+        // target. After the merge no link is left, so no view may hold it.
+        let e1 = link_event("bn-x", "blocks", 1_000, "alice", "blake3:e1");
+        let e2 = link_event("bn-x", "blocked_by", 1_100, "alice", "blake3:e2");
+        let u1 = unlink_event("bn-x", Some("blocks"), 2_000, "alice", "blake3:u1");
+        let u2 = unlink_event("bn-x", Some("blocked_by"), 2_100, "alice", "blake3:u2");
+        let s1 = WorkItemState::from_events([&e1, &e2, &u1]);
+        let s2 = WorkItemState::from_events([&e2, &u2]);
+
+        let mut merged = s1.clone();
+        merged.merge(&s2);
+        assert!(merged.link_keys().is_empty());
+        assert!(
+            merged.blocked_by.is_empty(),
+            "{:?}",
+            merged.blocked_by_ids()
+        );
+
+        let all = WorkItemState::from_events([&e1, &e2, &u1, &u2]);
+        assert!(all.blocked_by.is_empty());
+        let mut other_way = s2;
+        other_way.merge(&s1);
+        assert!(other_way.blocked_by.is_empty());
+    }
+
+    #[test]
+    fn zero_time_event_does_not_set_created_at() {
+        // created_at is the smallest non-zero time in any order, as merge
+        // and the projection compute it.
+        let zero = update_title_event("Z", 0, "alice", "blake3:z");
+        let later = create_event("T", 5_000, "alice", "blake3:c");
+        let late = update_title_event("L", 7_000, "alice", "blake3:l");
+        for order in [
+            [&zero, &later, &late],
+            [&later, &zero, &late],
+            [&late, &zero, &later],
+        ] {
+            let mut state = WorkItemState::new();
+            for event in order {
+                state.apply_event(event);
+            }
+            assert_eq!(state.created_at, 5_000);
+            assert_eq!(state.updated_at, 7_000);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1396,8 +1690,10 @@ mod tests {
             && a.labels == b.labels
             && a.blocked_by == b.blocked_by
             && a.related_to == b.related_to
+            && a.links == b.links
             && a.comments == b.comments
             && a.deleted.value == b.deleted.value
+            && a.compact_summary.value == b.compact_summary.value
             && a.created_at == b.created_at
             && a.updated_at == b.updated_at
     }

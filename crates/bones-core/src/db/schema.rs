@@ -226,6 +226,22 @@ SET schema_version = 5,
 WHERE id = 1;
 ";
 
+/// Migration v6: `created_at_us` uses the `min_nonzero` rule (bn-t37g).
+///
+/// Projections built by an older bn fold events at time 0 (for example the
+/// links `bn migrate` writes) into `created_at_us` as 0. The new rule reads
+/// 0 as "unknown", so the next event would set a wrong date. No schema
+/// change: the cursor is cleared and `REBUILD_REQUIRED_BELOW` forces a full
+/// rebuild.
+pub const MIGRATION_V6_SQL: &str = r"
+UPDATE projection_meta
+SET schema_version = 6,
+    last_event_offset = 0,
+    last_event_hash = NULL,
+    last_event_prefix_digest = NULL
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

@@ -487,6 +487,78 @@ mod tests {
     }
 
     #[test]
+    fn v5_projection_with_zero_created_at_is_rebuilt() {
+        // bn-t37g: a v5 bn folded time-0 events (e.g. `bn migrate` links)
+        // into created_at_us as 0. The v6 rule reads 0 as "unknown", so
+        // without a rebuild the next event would set created_at to its own
+        // time, and this replica would differ from a rebuilt one forever.
+        use crate::db::project::Projector;
+        use crate::event::data::UpdateData;
+
+        let (_dir, bones_dir) = built_projection();
+        let db_path = bones_dir.join("bones.db");
+        let shard_mgr = ShardManager::new(&bones_dir);
+        let (year, month) = shard_mgr
+            .active_shard()
+            .expect("active shard")
+            .expect("some shard");
+        let title = |value: &str, ts: i64| {
+            let mut event = make_create("bn-one", "unused", ts);
+            event.event_type = EventType::Update;
+            event.data = EventData::Update(UpdateData {
+                field: "title".to_string(),
+                value: serde_json::json!(value),
+                extra: BTreeMap::new(),
+            });
+            let line = writer::write_event(&mut event).expect("serialize update");
+            shard_mgr
+                .append_raw(year, month, &line)
+                .expect("append update");
+            event
+        };
+        title("zero", 0);
+        ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+
+        // What a v5 bn leaves: created_at 0, cursor at the log end.
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open raw");
+            conn.execute_batch(
+                "UPDATE items SET created_at_us = 0 WHERE item_id = 'bn-one';
+                 UPDATE projection_meta SET schema_version = 5 WHERE id = 1;
+                 PRAGMA user_version = 5;",
+            )
+            .expect("make v5 projection");
+        }
+
+        // A write command with the new binary: open, append, project one event.
+        let late = title("late", 5_000);
+        {
+            let conn = open_projection(&db_path).expect("open and migrate");
+            assert!(
+                projection_dirty_marker_path(&bones_dir).exists(),
+                "v5 created_at values need a rebuild"
+            );
+            Projector::new(&conn)
+                .project_event(&late)
+                .expect("project late update");
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        let created: i64 = conn
+            .query_row(
+                "SELECT created_at_us FROM items WHERE item_id = 'bn-one'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read created_at");
+        assert_eq!(created, 1_000, "created_at of the rebuilt projection");
+    }
+
+    #[test]
     fn pre_v3_projection_rebuilds_after_single_write() {
         use crate::db::{project::Projector, query, schema};
 

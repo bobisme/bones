@@ -839,11 +839,20 @@ impl<'conn> Projector<'conn> {
     }
 
     /// Fold the event's timestamp into the item's created/updated bounds.
+    ///
+    /// `created_at_us` is the smallest non-zero event time, and 0 only when
+    /// every event is at time 0 (a pre-epoch time orders as 0). This is the
+    /// verified `min_nonzero` join that `WorkItemState` and its snapshots
+    /// use, where 0 means "unknown" (bn-t37g).
     fn touch(&self, event: &Event) -> Result<()> {
         self.conn
             .prepare_cached(
                 "UPDATE items
-                 SET created_at_us = MIN(created_at_us, ?1),
+                 SET created_at_us = CASE
+                         WHEN ?1 = 0 THEN created_at_us
+                         WHEN created_at_us = 0 THEN ?1
+                         ELSE MIN(created_at_us, ?1)
+                     END,
                      updated_at_us = MAX(updated_at_us, ?1)
                  WHERE item_id = ?2",
             )?

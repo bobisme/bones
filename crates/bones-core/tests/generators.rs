@@ -1,4 +1,4 @@
-use bones_core::crdt::item_state::WorkItemState;
+use bones_core::crdt::item_state::{LinkKey, WorkItemState};
 use bones_core::crdt::lww::LwwRegister;
 use bones_core::crdt::state::{EpochPhaseState, Phase as LifecyclePhase};
 use bones_core::crdt::*;
@@ -132,6 +132,26 @@ fn arb_orset_string() -> impl Strategy<Value = OrSet<String>> + Clone {
     })
 }
 
+fn arb_orset_link() -> impl Strategy<Value = OrSet<LinkKey>> + Clone {
+    let key = |value: u16| LinkKey {
+        target: format!("bn-t{}", value / 4),
+        link_type: ["blocks", "blocked_by", "relates", "duplicates"][usize::from(value % 4)]
+            .to_string(),
+    };
+    arb_orset::<u16>().prop_map(move |set| OrSet {
+        elements: set
+            .elements
+            .into_iter()
+            .map(|(value, ts)| (key(value), ts))
+            .collect(),
+        tombstone: set
+            .tombstone
+            .into_iter()
+            .map(|(value, ts)| (key(value), ts))
+            .collect(),
+    })
+}
+
 fn arb_gset_string() -> impl Strategy<Value = GSet<String>> + Clone {
     arb_gset::<u16>().prop_map(|set| GSet {
         elements: set
@@ -192,41 +212,41 @@ fn parent_from_index(index: usize) -> String {
 
 fn arb_work_item_state_from(history: Vec<HistoryWrite>) -> impl Strategy<Value = WorkItemState> {
     (
-        any::<[usize; 7]>(),
+        any::<[usize; 8]>(),
         arb_epoch_phase_state(),
         (
             arb_orset_string(),
             arb_orset_string(),
-            arb_orset_string(),
-            arb_orset_string(),
+            arb_orset_link(),
             arb_gset_string(),
         ),
         0u64..100_000,
         0u64..10_000,
     )
         .prop_map(
-            move |(
-                picks,
-                state,
-                (assignees, labels, blocked_by, related_to, comments),
-                created_at,
-                delta,
-            )| WorkItemState {
-                title: history_register(&history, picks[0], |i| format!("title-{i}")),
-                description: history_register(&history, picks[1], |i| format!("desc-{i}")),
-                kind: history_register(&history, picks[2], kind_from_index),
-                state,
-                size: history_register(&history, picks[3], size_from_index),
-                urgency: history_register(&history, picks[4], urgency_from_index),
-                parent: history_register(&history, picks[5], parent_from_index),
-                assignees,
-                labels,
-                blocked_by,
-                related_to,
-                comments,
-                deleted: history_register(&history, picks[6], |i| i % 2 == 0),
-                created_at,
-                updated_at: created_at.saturating_add(delta),
+            move |(picks, state, (assignees, labels, links, comments), created_at, delta)| {
+                let mut state = WorkItemState {
+                    title: history_register(&history, picks[0], |i| format!("title-{i}")),
+                    description: history_register(&history, picks[1], |i| format!("desc-{i}")),
+                    kind: history_register(&history, picks[2], kind_from_index),
+                    state,
+                    size: history_register(&history, picks[3], size_from_index),
+                    urgency: history_register(&history, picks[4], urgency_from_index),
+                    parent: history_register(&history, picks[5], parent_from_index),
+                    assignees,
+                    labels,
+                    // Views of links: derive_link_views sets them below.
+                    blocked_by: OrSet::new(),
+                    related_to: OrSet::new(),
+                    links,
+                    comments,
+                    deleted: history_register(&history, picks[6], |i| i % 2 == 0),
+                    compact_summary: history_register(&history, picks[7], |i| format!("sum-{i}")),
+                    created_at,
+                    updated_at: created_at.saturating_add(delta),
+                };
+                state.derive_link_views();
+                state
             },
         )
 }

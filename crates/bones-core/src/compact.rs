@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crdt::OrSet;
 use crate::crdt::gset::GSet;
-use crate::crdt::item_state::WorkItemState;
+use crate::crdt::item_state::{LinkKey, WorkItemState};
 use crate::crdt::lww::LwwRegister;
 use crate::crdt::state::{EpochPhaseState, Phase};
 use crate::event::Event;
@@ -86,6 +86,32 @@ impl<T: Clone> From<&LwwSnapshot<T>> for LwwRegister<T> {
     }
 }
 
+impl LwwSnapshot<String> {
+    /// `true` for a register that no event wrote: empty value, zero clock.
+    const fn is_unwritten(&self) -> bool {
+        self.value.is_empty()
+            && self.wall_ts == 0
+            && self.agent_id.is_empty()
+            && self.event_hash.is_empty()
+    }
+}
+
+impl Default for LwwSnapshot<String> {
+    fn default() -> Self {
+        Self {
+            value: String::new(),
+            wall_ts: 0,
+            agent_id: String::new(),
+            event_hash: String::new(),
+        }
+    }
+}
+
+/// `true` for an OR-Set with no adds and no removes.
+fn orset_is_blank<T: std::hash::Hash + Eq>(set: &OrSet<T>) -> bool {
+    set.elements.is_empty() && set.tombstone.is_empty()
+}
+
 /// Full snapshot payload encoding every CRDT field with its clock metadata.
 ///
 /// This is the `state` JSON inside an `item.snapshot` event's [`SnapshotData`].
@@ -112,9 +138,20 @@ pub struct SnapshotPayload {
     pub labels: OrSet<String>,
     pub blocked_by: OrSet<String>,
     pub related_to: OrSet<String>,
+    /// Links with their raw link type (bn-t37g). Left out when blank, so a
+    /// snapshot of an item without links keeps its bytes. Snapshots written
+    /// before bn-t37g lack it: see [`WorkItemState::from_snapshot_payload`].
+    #[serde(default, skip_serializing_if = "orset_is_blank")]
+    pub links: OrSet<LinkKey>,
 
     // -- G-Set (grow-only comment hashes) --
     pub comments: GSet<String>,
+
+    /// Summary from the latest compact event (bn-t37g). Left out when no
+    /// compact event wrote it. Older snapshots carry the summary in
+    /// `description` instead.
+    #[serde(default, skip_serializing_if = "LwwSnapshot::is_unwritten")]
+    pub compact_summary: LwwSnapshot<String>,
 
     // -- Timestamps --
     pub created_at: u64,
@@ -130,7 +167,19 @@ pub struct SnapshotPayload {
     /// Wall-clock timestamp (microseconds) of the latest original event.
     #[serde(rename = "_latest_ts")]
     pub latest_ts: i64,
+    /// Snapshot format: [`SNAPSHOT_FORMAT`] for snapshots this bn writes, 0
+    /// (the default) for snapshots written before bn-t37g.
+    #[serde(rename = "_format", default)]
+    pub format: u32,
 }
+
+/// Format of the snapshots this bn writes.
+///
+/// Format 2 (bn-t37g) matches the projection: raw link types, a separate
+/// compact summary, and creates that write absent fields. `bn compact`
+/// replaces a snapshot of an older format even when its events did not
+/// change.
+pub const SNAPSHOT_FORMAT: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // WorkItemState ↔ SnapshotPayload conversion
@@ -163,12 +212,15 @@ impl WorkItemState {
             labels: self.labels.clone(),
             blocked_by: self.blocked_by.clone(),
             related_to: self.related_to.clone(),
+            links: self.links.clone(),
             comments: self.comments.clone(),
+            compact_summary: LwwSnapshot::from(&self.compact_summary),
             created_at: self.created_at,
             updated_at: self.updated_at,
             compacted_from,
             earliest_ts,
             latest_ts,
+            format: SNAPSHOT_FORMAT,
         }
     }
 
@@ -177,9 +229,18 @@ impl WorkItemState {
     /// The resulting state can be merged with other states via the normal
     /// `WorkItemState::merge` — this is how snapshots participate in the
     /// lattice.
+    ///
+    /// A snapshot written before bn-t37g has no `links`. Its `blocked_by`
+    /// and `related_to` members then become `blocks` and `related_to` links,
+    /// with the same tags.
     #[must_use]
     pub fn from_snapshot_payload(payload: &SnapshotPayload) -> Self {
-        Self {
+        let links = if orset_is_blank(&payload.links) {
+            legacy_links(&payload.blocked_by, &payload.related_to)
+        } else {
+            payload.links.clone()
+        };
+        let mut state = Self {
             title: LwwRegister::from(&payload.title),
             description: LwwRegister::from(&payload.description),
             kind: LwwRegister::from(&payload.kind),
@@ -191,12 +252,46 @@ impl WorkItemState {
             labels: payload.labels.clone(),
             blocked_by: payload.blocked_by.clone(),
             related_to: payload.related_to.clone(),
+            links,
             comments: payload.comments.clone(),
             deleted: LwwRegister::from(&payload.deleted),
+            compact_summary: LwwRegister::from(&payload.compact_summary),
             created_at: payload.created_at,
             updated_at: payload.updated_at,
-        }
+        };
+        // The stored views are for older readers. Derive them from links.
+        state.derive_link_views();
+        state
     }
+}
+
+/// Links of a snapshot written before bn-t37g, from its link views.
+///
+/// This is lossy. The old format kept only the views, so the raw link type
+/// is unknown: a `blocked_by` member becomes a `(target, "blocks")` link
+/// and a `related_to` member a `(target, "related_to")` link, with the same
+/// tags. The views derived from these links equal the stored views. But a
+/// merge with state replayed from the events can hold both the guessed type
+/// and the real one (e.g. `blocks` and `blocked_by`) for one target.
+fn legacy_links(blocked_by: &OrSet<String>, related_to: &OrSet<String>) -> OrSet<LinkKey> {
+    let mut links = OrSet::new();
+    for (view, link_type) in [(blocked_by, "blocks"), (related_to, "related_to")] {
+        let key = |target: &String| LinkKey {
+            target: target.clone(),
+            link_type: link_type.to_string(),
+        };
+        links.elements.extend(
+            view.elements
+                .iter()
+                .map(|(target, tag)| (key(target), tag.clone())),
+        );
+        links.tombstone.extend(
+            view.tombstone
+                .iter()
+                .map(|(target, tag)| (key(target), tag.clone())),
+        );
+    }
+    links
 }
 
 // ---------------------------------------------------------------------------
@@ -220,10 +315,47 @@ pub struct CompactionReport {
 // Core compaction functions
 // ---------------------------------------------------------------------------
 
+/// The events a snapshot of an item covers: each event of the item except
+/// snapshots, once per event hash, in their first log position.
+///
+/// A duplicate line (git union merges can make them) counts once, so every
+/// replica makes the same snapshot. An earlier snapshot is not a source: it
+/// only summarises events that are still in the log (bn-t37g).
+#[must_use]
+pub fn compaction_sources(events: &[Event]) -> Vec<Event> {
+    let mut seen = HashSet::new();
+    events
+        .iter()
+        .filter(|e| e.event_type != EventType::Snapshot && seen.insert(e.event_hash.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// `true` when `events` already hold a snapshot of exactly `sources`, in
+/// the current [`SNAPSHOT_FORMAT`].
+///
+/// A snapshot's parents are the sorted hashes of its sources, so a second
+/// `bn compact` with no new events for the item makes no new snapshot. A
+/// snapshot of an older format does not count, so it gets replaced once.
+fn has_snapshot_of(events: &[Event], sources: &[Event]) -> bool {
+    let mut hashes: Vec<&str> = sources.iter().map(|e| e.event_hash.as_str()).collect();
+    hashes.sort_unstable();
+    events.iter().any(|e| {
+        e.event_type == EventType::Snapshot
+            && e.parents.len() == hashes.len()
+            && e.parents
+                .iter()
+                .map(String::as_str)
+                .eq(hashes.iter().copied())
+            && extract_snapshot_payload(e).is_ok_and(|p| p.format >= SNAPSHOT_FORMAT)
+    })
+}
+
 /// Compact all events for a single item into one `item.snapshot` event.
 ///
-/// Replays `events` to produce final CRDT state, then creates a single
-/// snapshot event encoding the full `WorkItemState` with per-field clocks.
+/// Replays the [`compaction_sources`] of `events` to produce final CRDT
+/// state, then creates a single snapshot event encoding the full
+/// `WorkItemState` with per-field clocks.
 ///
 /// # Arguments
 ///
@@ -249,10 +381,6 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
     agent: &str,
     redacted_hashes: &HashSet<String, S>,
 ) -> Option<Event> {
-    if events.is_empty() {
-        return None;
-    }
-
     // Check for redacted events — refuse to compact if any source events
     // are redacted, since the snapshot would reintroduce the content.
     for event in events {
@@ -261,8 +389,13 @@ pub fn compact_item<S: ::std::hash::BuildHasher>(
         }
     }
 
+    let events = compaction_sources(events);
+    if events.is_empty() {
+        return None;
+    }
+
     // Replay all events to build the final CRDT state.
-    let state = WorkItemState::from_events(events);
+    let state = WorkItemState::from_events(&events);
 
     // Compute audit metadata.
     // order_ts, so the snapshot (latest + 1) sorts after every source event
@@ -392,14 +525,16 @@ pub fn compact_items<S: ::std::hash::BuildHasher>(
             continue;
         }
 
-        // Skip items that already consist of a single snapshot event.
-        if events.len() == 1 && events[0].event_type == EventType::Snapshot {
+        // Skip items with no events to compact, or with a snapshot of
+        // exactly these events already (bn-t37g).
+        let sources = compaction_sources(events);
+        if sources.is_empty() || has_snapshot_of(events, &sources) {
             report.items_skipped += 1;
             continue;
         }
 
         // Replay to determine eligibility.
-        let state = WorkItemState::from_events(events);
+        let state = WorkItemState::from_events(&sources);
 
         if !is_eligible(&state, min_age_days, now_us) {
             report.items_skipped += 1;
@@ -410,7 +545,7 @@ pub fn compact_items<S: ::std::hash::BuildHasher>(
         match compact_item(item_id, events, agent, redacted_hashes) {
             Some(snapshot) => {
                 report.items_compacted += 1;
-                report.events_replaced += events.len();
+                report.events_replaced += sources.len();
                 report.snapshots_created += 1;
                 snapshots.push(snapshot);
             }
@@ -444,8 +579,8 @@ pub fn verify_compaction(
     original_events: &[Event],
     snapshot_event: &Event,
 ) -> Result<bool> {
-    // Replay original events.
-    let original_state = WorkItemState::from_events(original_events);
+    // Replay the events the snapshot covers.
+    let original_state = WorkItemState::from_events(&compaction_sources(original_events));
 
     // Parse snapshot payload.
     let payload = extract_snapshot_payload(snapshot_event)
@@ -469,7 +604,7 @@ pub fn verify_compaction(
 /// Returns an error if the snapshot event cannot be deserialized.
 pub fn verify_lattice_join(original_events: &[Event], snapshot_event: &Event) -> Result<bool> {
     // Build original state.
-    let original_state = WorkItemState::from_events(original_events);
+    let original_state = WorkItemState::from_events(&compaction_sources(original_events));
 
     // Build snapshot state.
     let payload = extract_snapshot_payload(snapshot_event)?;
@@ -537,6 +672,9 @@ fn states_match(a: &WorkItemState, b: &WorkItemState) -> bool {
         && a.labels == b.labels
         && a.blocked_by == b.blocked_by
         && a.related_to == b.related_to
+        && a.links == b.links
+        && a.compact_summary.value == b.compact_summary.value
+        && a.compact_summary.wall_ts == b.compact_summary.wall_ts
         // G-Set
         && a.comments == b.comments
         // Timestamps
@@ -1083,6 +1221,136 @@ mod tests {
 
         assert_eq!(snapshots.len(), 0);
         assert_eq!(report.items_skipped, 1);
+    }
+
+    #[test]
+    fn duplicate_line_does_not_change_snapshot() {
+        // A union merge can write one event twice. The snapshot must be the
+        // same event as on a replica without the duplicate (bn-t37g).
+        let events = sample_item_events("bn-test1");
+        let mut with_dup = events.clone();
+        with_dup.insert(2, events[1].clone());
+        let redacted = HashSet::new();
+
+        let plain = compact_item("bn-test1", &events, "compactor", &redacted).unwrap();
+        let dup = compact_item("bn-test1", &with_dup, "compactor", &redacted).unwrap();
+        assert_eq!(dup.event_hash, plain.event_hash);
+        assert_eq!(extract_snapshot_payload(&dup).unwrap().compacted_from, 6);
+
+        let now = 6_000_000 + 365 * 24 * 60 * 60 * 1_000_000;
+        let by_item = BTreeMap::from([("bn-test1".to_string(), with_dup)]);
+        let (_, report) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert_eq!(report.events_replaced, 6);
+    }
+
+    #[test]
+    fn second_compaction_makes_no_new_snapshot() {
+        // `bn compact` appends the snapshot and keeps the events. A second
+        // run over events + snapshot must not make another snapshot
+        // (bn-t37g).
+        let events = sample_item_events("bn-test1");
+        let redacted = HashSet::new();
+        let now = 6_000_000 + 365 * 24 * 60 * 60 * 1_000_000;
+
+        let by_item = BTreeMap::from([("bn-test1".to_string(), events.clone())]);
+        let (first, _) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert_eq!(first.len(), 1);
+
+        let mut log = events.clone();
+        log.push(first[0].clone());
+        let by_item = BTreeMap::from([("bn-test1".to_string(), log.clone())]);
+        let (second, report) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert!(second.is_empty(), "second run made {second:?}");
+        assert_eq!(report.items_skipped, 1);
+
+        // A snapshot of the same events in an older format is replaced.
+        let mut old = first[0].clone();
+        if let EventData::Snapshot(data) = &mut old.data {
+            data.state.as_object_mut().unwrap().remove("_format");
+        }
+        let mut old_log = events.clone();
+        old_log.push(old);
+        let by_item = BTreeMap::from([("bn-test1".to_string(), old_log)]);
+        let (redo, _) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert_eq!(redo.len(), 1, "an old-format snapshot must be replaced");
+        assert_eq!(redo[0].event_hash, first[0].event_hash);
+
+        // The earlier snapshot is not a source: with a new event, the new
+        // snapshot covers the events only, and verifies against the log.
+        log.push(comment_event(
+            "late note",
+            7_000_000,
+            "bob",
+            "blake3:e7",
+            "bn-test1",
+        ));
+        let by_item = BTreeMap::from([("bn-test1".to_string(), log.clone())]);
+        let (third, _) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert_eq!(third.len(), 1);
+        let payload = extract_snapshot_payload(&third[0]).unwrap();
+        assert_eq!(payload.compacted_from, 7);
+        assert_eq!(payload.latest_ts, 7_000_000);
+        assert!(!third[0].parents.contains(&first[0].event_hash));
+        assert!(verify_compaction("bn-test1", &log, &third[0]).unwrap());
+    }
+
+    #[test]
+    fn snapshot_without_links_or_summary_keeps_its_keys() {
+        // New keys are left out when blank, so snapshots of items without
+        // links or compact events keep the bytes they had (bn-t37g).
+        let events = sample_item_events("bn-test1");
+        let snapshot = compact_item("bn-test1", &events, "compactor", &HashSet::new()).unwrap();
+        let EventData::Snapshot(data) = &snapshot.data else {
+            panic!("not a snapshot");
+        };
+        let obj = data.state.as_object().unwrap();
+        assert!(!obj.contains_key("links"));
+        assert!(!obj.contains_key("compact_summary"));
+    }
+
+    #[test]
+    fn legacy_snapshot_links_come_from_views() {
+        // A snapshot written before bn-t37g has only blocked_by and
+        // related_to. They become "blocks" and "related_to" links.
+        let mut state = WorkItemState::new();
+        for (target, link_type, hash) in [
+            ("bn-b", "blocks", "blake3:l1"),
+            ("bn-r", "related_to", "blake3:l2"),
+        ] {
+            state.apply_event(&make_event(
+                EventType::Link,
+                EventData::Link(LinkData {
+                    target: target.to_string(),
+                    link_type: link_type.to_string(),
+                    extra: BTreeMap::new(),
+                }),
+                1_000,
+                "alice",
+                hash,
+                "bn-test1",
+            ));
+        }
+        let mut json =
+            serde_json::to_value(state.to_snapshot_payload("bn-test1", 2, 1_000, 1_000)).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        assert!(obj.remove("links").is_some());
+        let legacy: SnapshotPayload = serde_json::from_value(json).expect("legacy deserialize");
+        assert!(orset_is_blank(&legacy.links));
+
+        let restored = WorkItemState::from_snapshot_payload(&legacy);
+        let links: HashSet<(String, String)> = restored
+            .link_keys()
+            .into_iter()
+            .map(|k| (k.target.clone(), k.link_type.clone()))
+            .collect();
+        let expected: HashSet<(String, String)> = [
+            ("bn-b".to_string(), "blocks".to_string()),
+            ("bn-r".to_string(), "related_to".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(links, expected);
+        assert_eq!(restored.compact_summary.value, "");
     }
 
     // -----------------------------------------------------------------------

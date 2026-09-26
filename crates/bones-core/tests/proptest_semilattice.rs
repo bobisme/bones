@@ -43,8 +43,10 @@ fn work_item_states_equal(a: &WorkItemState, b: &WorkItemState) -> bool {
         && a.labels == b.labels
         && a.blocked_by == b.blocked_by
         && a.related_to == b.related_to
+        && a.links == b.links
         && a.comments == b.comments
         && a.deleted == b.deleted
+        && a.compact_summary == b.compact_summary
         && a.created_at == b.created_at
         && a.updated_at == b.updated_at
 }
