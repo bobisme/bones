@@ -493,9 +493,15 @@ pub fn apply_replay(
 fn event_to_timestamp(event: &Event) -> Timestamp {
     use chrono::TimeZone;
 
-    let epoch_secs = event.wall_ts_us / 1_000_000;
-    let subsec_nanos = u32::try_from((event.wall_ts_us % 1_000_000) * 1_000).unwrap_or(0);
-    let wall = chrono::Utc.timestamp_opt(epoch_secs, subsec_nanos).unwrap();
+    // Clamped at 0 like every ordering path (bn-3is9). A value past chrono's
+    // range saturates instead of panicking.
+    let ts = event.order_ts();
+    let epoch_secs = ts / 1_000_000;
+    let subsec_nanos = u32::try_from((ts % 1_000_000) * 1_000).unwrap_or(0);
+    let wall = chrono::Utc
+        .timestamp_opt(epoch_secs, subsec_nanos)
+        .single()
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::MAX_UTC);
 
     // Hash the agent string to a u64 for the actor field.
     let actor = hash_str_to_u64(&event.agent);
@@ -504,7 +510,7 @@ fn event_to_timestamp(event: &Event) -> Timestamp {
     let event_hash_u64 = hash_str_to_u64(&event.event_hash);
 
     // Use wall_ts_us as a simple ITC substitute.
-    let itc = event.wall_ts_us.cast_unsigned();
+    let itc = event.order_ts().cast_unsigned();
 
     Timestamp {
         wall,

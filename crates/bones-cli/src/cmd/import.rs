@@ -514,7 +514,8 @@ fn run_jsonl_import(args: &ImportArgs, output: OutputMode, project_root: &Path) 
         };
 
         let mut event = Event {
-            wall_ts_us: record.timestamp,
+            // Never write a negative timestamp; see Event::order_ts.
+            wall_ts_us: record.timestamp.max(0),
             agent: record.agent,
             itc: String::new(),
             parents: parent_index

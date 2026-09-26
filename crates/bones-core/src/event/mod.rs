@@ -138,6 +138,23 @@ impl<'de> Deserialize<'de> for Event {
 }
 
 impl Event {
+    /// Wall clock that orders this event against others: `wall_ts_us`, with a
+    /// negative value clamped to 0.
+    ///
+    /// A log can hold negative timestamps (older imports of zero times), and
+    /// the parser accepts them, since a rejected line would stop every
+    /// replay. LWW registers hold `u64`, and the SQLite projection must pick
+    /// the same winners, so every ordering path reads this value instead of
+    /// `wall_ts_us` (bn-3is9).
+    #[must_use]
+    pub const fn order_ts(&self) -> i64 {
+        if self.wall_ts_us < 0 {
+            0
+        } else {
+            self.wall_ts_us
+        }
+    }
+
     /// Return the TSJSON parents field string (comma-separated, sorted).
     ///
     /// Returns an empty string for root events (no parents).

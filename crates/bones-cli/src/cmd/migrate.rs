@@ -1074,8 +1074,11 @@ fn normalize_priority_value(value: Option<&JsonValue>) -> String {
     }
 }
 
+/// Timestamps before the epoch, such as Go's zero time in beads exports,
+/// become 0, like a missing timestamp. Logs never get negative timestamps
+/// from here (see `Event::order_ts`).
 fn to_micros_opt(value: Option<&JsonValue>) -> Option<i64> {
-    value.and_then(to_micros_value)
+    value.and_then(to_micros_value).map(|us| us.max(0))
 }
 
 fn parse_any_timestamp(raw: &str) -> Option<i64> {
@@ -1204,6 +1207,13 @@ mod tests {
         // Non-terseid source IDs fall back to hash-based generation.
         let id = map_item_id("github-issue-42").expect("should produce valid id");
         assert!(id.as_str().starts_with("bn-"));
+    }
+
+    #[test]
+    fn pre_epoch_timestamps_become_zero() {
+        // Go's zero time appears in beads exports (bn-3is9).
+        let zero = serde_json::json!("0001-01-01T00:00:00Z");
+        assert_eq!(to_micros_opt(Some(&zero)), Some(0));
     }
 
     #[test]

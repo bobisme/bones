@@ -353,7 +353,7 @@ impl<'conn> Projector<'conn> {
                 self.set_label(event, label, !is_redacted)?;
             }
         }
-        self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
+        self.refresh_search_labels(event.item_id.as_str(), event.order_ts())?;
 
         Ok(())
     }
@@ -425,7 +425,7 @@ impl<'conn> Projector<'conn> {
                         self.set_label(event, label, present && !is_redacted)?;
                     }
                 }
-                self.refresh_search_labels(event.item_id.as_str(), event.wall_ts_us)?;
+                self.refresh_search_labels(event.item_id.as_str(), event.order_ts())?;
             }
             _ => {
                 // Unknown field: touch() already folded in the timestamp.
@@ -713,7 +713,7 @@ impl<'conn> Projector<'conn> {
     //
     // Every projected field is guarded by the key of the event that last
     // wrote it, stored in `field_clocks`. An event writes a field only when
-    // its `(wall_ts_us, agent, event_hash)` is greater than the stored key,
+    // its `(order_ts, agent, event_hash)` is greater than the stored key,
     // the same order LWW merge and replay use. The projection of an event
     // set therefore does not depend on the order of lines in the log.
     //
@@ -743,7 +743,7 @@ impl<'conn> Projector<'conn> {
             .execute(params![
                 event.item_id.as_str(),
                 field,
-                event.wall_ts_us,
+                event.order_ts(),
                 event.agent,
                 event.event_hash,
             ])
@@ -765,7 +765,7 @@ impl<'conn> Projector<'conn> {
                 params![
                     event.item_id.as_str(),
                     field,
-                    event.wall_ts_us,
+                    event.order_ts(),
                     event.agent,
                     event.event_hash,
                 ],
@@ -846,7 +846,7 @@ impl<'conn> Projector<'conn> {
                      updated_at_us = MAX(updated_at_us, ?1)
                  WHERE item_id = ?2",
             )?
-            .execute(params![event.wall_ts_us, event.item_id.as_str()])
+            .execute(params![event.order_ts(), event.item_id.as_str()])
             .with_context(|| format!("touch {}", event.item_id))?;
         Ok(())
     }
@@ -910,7 +910,7 @@ impl<'conn> Projector<'conn> {
                         item_id, title, kind, state, urgency,
                         is_deleted, search_labels, created_at_us, updated_at_us
                     ) VALUES (?1, '', 'task', 'open', 'default', 0, '', ?2, ?2)",
-                    params![event.item_id.as_str(), event.wall_ts_us],
+                    params![event.item_id.as_str(), event.order_ts()],
                 )
                 .with_context(|| format!("create placeholder item for {}", event.item_id))?;
         }
@@ -1409,6 +1409,47 @@ mod tests {
         assert_eq!(comments[0].body, "This is a comment");
         assert_eq!(comments[0].author, "test-agent");
         assert_eq!(comments[0].event_hash, "blake3:bbb");
+    }
+
+    #[test]
+    fn negative_timestamps_order_like_the_crdt() {
+        // Negative timestamps clamp to 0 for ordering (Event::order_ts), so
+        // the projection and WorkItemState pick the same winner (bn-3is9).
+        // By raw i64, -1 would win; clamped, both tie and the hash decides.
+        let title = |value: &str, hash: &str, ts: i64| {
+            make_event(
+                EventType::Update,
+                "bn-001",
+                EventData::Update(UpdateData {
+                    field: "title".into(),
+                    value: serde_json::json!(value),
+                    extra: BTreeMap::new(),
+                }),
+                hash,
+                ts,
+            )
+        };
+        let events = [
+            make_create("bn-001", "Created", "000", -10),
+            title("raw winner", "a01", -1),
+            title("clamped winner", "z01", -5),
+        ];
+
+        let conn = test_db();
+        let projector = Projector::new(&conn);
+        // apply_event overwrites, so merge one state per event: merge is
+        // where LWW picks the winner.
+        let mut state = crate::crdt::item_state::WorkItemState::new();
+        for event in events.iter().rev() {
+            projector.project_event(event).unwrap();
+            let mut single = crate::crdt::item_state::WorkItemState::new();
+            single.apply_event(event);
+            state.merge(&single);
+        }
+        let item = query::get_item(&conn, "bn-001", false).unwrap().unwrap();
+        assert_eq!(state.title.value, "clamped winner");
+        assert_eq!(item.title, state.title.value);
+        assert_eq!(item.created_at_us, 0);
     }
 
     // -----------------------------------------------------------------------

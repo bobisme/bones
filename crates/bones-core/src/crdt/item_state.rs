@@ -212,7 +212,7 @@ impl WorkItemState {
     /// (no-op), following the principle that invalid events are skipped during
     /// replay.
     pub fn apply_event(&mut self, event: &Event) {
-        let wall_ts = event.wall_ts_us as u64;
+        let wall_ts = event.order_ts().cast_unsigned();
 
         // Update created_at / updated_at timestamps.
         if self.created_at == 0 || wall_ts < self.created_at {
