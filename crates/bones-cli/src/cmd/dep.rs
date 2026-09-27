@@ -605,6 +605,8 @@ mod tests {
         assert_eq!(deps.len(), 1, "should have one dep");
         assert_eq!(deps[0].depends_on_item_id, "bn-aaa");
         assert_eq!(deps[0].link_type, "blocks");
+        // Close it before the next rebuild: Windows cannot delete an open file.
+        drop(conn);
 
         // dep rm bn-aaa bn-bbb
         let rm_args = DepRmArgs {

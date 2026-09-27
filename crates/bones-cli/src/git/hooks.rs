@@ -118,14 +118,19 @@ fn install_single_hook(path: &Path, hook_contents: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn make_executable(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perm = fs::metadata(path)?.permissions();
-        perm.set_mode(0o755);
-        fs::set_permissions(path, perm)?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = fs::metadata(path)?.permissions();
+    perm.set_mode(0o755);
+    fs::set_permissions(path, perm)?;
+    Ok(())
+}
+
+/// Windows has no executable bit; git runs hooks through its own shell.
+#[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)]
+const fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 

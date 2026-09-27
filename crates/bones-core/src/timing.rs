@@ -216,9 +216,17 @@ mod tests {
 
     static TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Serialise the tests that touch global timing state. A panic in one
+    /// test must not fail the others through a poisoned lock.
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        TEST_GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn timed_does_not_record_when_disabled() {
-        let _guard = TEST_GUARD.lock().expect("test guard lock");
+        let _guard = test_guard();
         set_timing_enabled(false);
         clear_timings();
 
@@ -231,11 +239,16 @@ mod tests {
 
     #[test]
     fn timed_records_when_enabled() {
-        let _guard = TEST_GUARD.lock().expect("test guard lock");
+        let _guard = test_guard();
         set_timing_enabled(true);
         clear_timings();
 
-        let value = timed("enabled", || 42_u8);
+        // Sleep so the sample is non-zero on coarse clocks (Apple silicon
+        // ticks about every 41 ns, so a trivial closure can measure 0).
+        let value = timed("enabled", || {
+            std::thread::sleep(Duration::from_millis(1));
+            42_u8
+        });
         assert_eq!(value, 42);
 
         let report = collect_report();
@@ -249,7 +262,7 @@ mod tests {
 
     #[test]
     fn collect_report_groups_and_sorts_operations() {
-        let _guard = TEST_GUARD.lock().expect("test guard lock");
+        let _guard = test_guard();
         clear_timings();
 
         record_sample("query", Duration::from_micros(3_000));
@@ -273,7 +286,7 @@ mod tests {
 
     #[test]
     fn truthy_parser_is_case_insensitive() {
-        let _guard = TEST_GUARD.lock().expect("test guard lock");
+        let _guard = test_guard();
 
         assert!(is_truthy("TrUe"));
         assert!(is_truthy("1"));
@@ -285,7 +298,7 @@ mod tests {
 
     #[test]
     fn display_table_and_json_have_expected_fields() {
-        let _guard = TEST_GUARD.lock().expect("test guard lock");
+        let _guard = test_guard();
         clear_timings();
 
         record_sample("project", Duration::from_micros(1_500));

@@ -487,7 +487,9 @@ mod tests {
         let shard_mgr = ShardManager::new(&bones_dir);
         shard_mgr.init().unwrap();
         let db_path = bones_dir.join("bones.db");
-        let _conn = db::open_projection(&db_path).unwrap();
+        // Create the projection, then close it: run_do rebuilds it, and
+        // Windows cannot delete an open file.
+        drop(db::open_projection(&db_path).unwrap());
 
         let args = DoArgs {
             id: "bn-nonexistent".to_string(),
