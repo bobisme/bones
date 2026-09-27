@@ -207,6 +207,9 @@ fn corrupt_shard_and_stale_projection_recover_deterministically() {
         before, 3,
         "fixture sanity: projection should include 3 items"
     );
+    // Close it before recovery rebuilds the projection: Windows cannot
+    // delete an open file.
+    drop(conn);
 
     let expected_offset = corrupt_nth_event_hash(&shard_path, 1, CORRUPTION_SEED);
     let report = recover_corrupt_shard(&shard_path).expect("recover corrupt shard");

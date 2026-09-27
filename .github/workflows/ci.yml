@@ -83,7 +83,8 @@ jobs:
             cargo test -p bones-search --features semantic-model2vec
             cargo test -p bones-search --no-default-features
           } else {
-            cargo test
+            # Report every failing test binary, not only the first.
+            cargo test --no-fail-fast
           }
 
   fmt:
