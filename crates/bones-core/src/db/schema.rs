@@ -261,6 +261,37 @@ SET schema_version = 7,
 WHERE id = 1;
 ";
 
+/// Migration v8: projection semantics of bn-1npc.
+///
+/// - `snapshot_sources` records the source events (`parents`) of each
+///   snapshot. A redaction of a source redacts the snapshot too: its
+///   `snapshot_json` reads "[redacted]" and the labels it owns are absent,
+///   in either arrival order (see `db::project`).
+/// - A label, assignee or link type that starts with a NUL after its spaces
+///   is blank, as `SQLite`'s `length(trim(x))` sees it (`field_value`).
+/// - A link to the item itself or to a target that is no item ID is no
+///   write in `WorkItemState` too, so snapshots agree with the projection.
+///
+/// Rows projected by an older bn can differ from a replay, so the cursor is
+/// cleared and `REBUILD_REQUIRED_BELOW` forces a full rebuild.
+pub const MIGRATION_V8_SQL: &str = r"
+CREATE TABLE IF NOT EXISTS snapshot_sources (
+    source_hash TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    PRIMARY KEY (source_hash, snapshot_hash)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_sources_snapshot
+    ON snapshot_sources(snapshot_hash, source_hash);
+
+UPDATE projection_meta
+SET schema_version = 8,
+    last_event_offset = 0,
+    last_event_hash = NULL,
+    last_event_prefix_digest = NULL
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

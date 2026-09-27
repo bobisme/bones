@@ -421,14 +421,29 @@ mod tests {
         }
     }
 
-    /// Build a WorkItemState with the given blocking links applied.
+    /// Build a WorkItemState with the given blocking links.
+    ///
+    /// The links go into the OR-Set directly: these tests use short names
+    /// ("A", "B") that are no item IDs, and a link event to such a target
+    /// is no write (`field_value::can_link`).
     fn state_with_blockers(blocker_ids: &[&str]) -> WorkItemState {
         let mut state = WorkItemState::new();
         for (i, blocker) in blocker_ids.iter().enumerate() {
-            let hash = format!("blake3:link{i}");
-            let event = make_link_event(blocker, "blocks", 1000 + i as i64, "agent", &hash);
-            state.apply_event(&event);
+            let tag = crate::crdt::Timestamp {
+                wall: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+                actor: 0,
+                event_hash: i as u64,
+                itc: 1000 + i as u64,
+            };
+            state.links.add(
+                crate::crdt::item_state::LinkKey {
+                    target: (*blocker).to_string(),
+                    link_type: "blocks".to_string(),
+                },
+                tag,
+            );
         }
+        state.derive_link_views();
         state
     }
 
@@ -830,21 +845,33 @@ mod tests {
 
         // A is blocked by B.
         let mut state_a = WorkItemState::new();
-        state_a.apply_event(&make_link_event("B", "blocks", 1000, "alice", "blake3:l1"));
-        states.insert("A".to_string(), state_a);
+        state_a.apply_event(&make_link_event(
+            "bn-b",
+            "blocks",
+            1000,
+            "alice",
+            "blake3:l1",
+        ));
+        states.insert("bn-a".to_string(), state_a);
 
         // B is blocked by C.
         let mut state_b = WorkItemState::new();
-        state_b.apply_event(&make_link_event("C", "blocks", 1001, "alice", "blake3:l2"));
-        states.insert("B".to_string(), state_b);
+        state_b.apply_event(&make_link_event(
+            "bn-c",
+            "blocks",
+            1001,
+            "alice",
+            "blake3:l2",
+        ));
+        states.insert("bn-b".to_string(), state_b);
 
         // C exists, no blockers.
-        states.insert("C".to_string(), WorkItemState::new());
+        states.insert("bn-c".to_string(), WorkItemState::new());
 
         let graph = BlockingGraph::from_states(&states);
 
         // Adding C blocked by A would create A → B → C → A.
-        let warning = detect_cycle_on_add(&graph, "C", "A");
+        let warning = detect_cycle_on_add(&graph, "bn-c", "bn-a");
         assert!(warning.is_some());
         let w = warning.unwrap();
         assert_eq!(w.cycle_len(), 3);

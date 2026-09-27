@@ -14,7 +14,11 @@
 //! The generator covers every event type: creates that sort after updates of
 //! their item (and items that only a branch creates), parent changes, link
 //! targets without a row, odd update values, compacts, and snapshots built
-//! from a subset of the earlier events of the item (bn-18fs). Every event
+//! from a subset of the earlier events of the item (bn-18fs). A snapshot's
+//! `parents` are its sources, as `bn compact` writes them, so a redaction
+//! of a source also redacts the snapshot (bn-1npc). Links to the item
+//! itself or to a target that is no item ID, and labels with a NUL, are
+//! in too (bn-1npc). Every event
 //! must project without error, and the comparison covers every column that a
 //! user can see.
 
@@ -88,7 +92,8 @@ enum Op {
     Link {
         link: bool,
         link_type: Option<u8>,
-        /// Which of the two other items is the target.
+        /// The target: one of the two other items (0, 1), the item itself
+        /// (2) or a target that is no item ID (3).
         target: u8,
     },
     Comment(u8),
@@ -129,12 +134,12 @@ fn arb_op() -> impl Strategy<Value = Op> {
             Just(Urgency::Punt)
         ]
         .prop_map(Op::Urgency),
-        1 => (any::<bool>(), 0u8..3).prop_map(|(add, label)| Op::Label { add, label }),
+        1 => (any::<bool>(), 0u8..4).prop_map(|(add, label)| Op::Label { add, label }),
         1 => (0u8..8).prop_map(Op::LabelsReplace),
         1 => (any::<bool>(), 0u8..2).prop_map(|(assign, agent)| Op::Assign { assign, agent }),
         1 => prop_oneof![Just(State::Open), Just(State::Doing), Just(State::Done)].prop_map(Op::Move),
         1 => (0u8..5).prop_map(Op::Parent),
-        1 => (any::<bool>(), prop::option::of(0u8..2), 0u8..2).prop_map(
+        1 => (any::<bool>(), prop::option::of(0u8..2), 0u8..4).prop_map(
             |(link, link_type, target)| Op::Link {
                 link_type: if link {
                     Some(link_type.unwrap_or(0))
@@ -247,7 +252,12 @@ fn build_event(write: &Write, agent: &str, prior: &[Event]) -> Event {
             "labels",
             serde_json::json!({
                 "action": if *add { "add" } else { "remove" },
-                "label": format!("label-{label}"),
+                // 3: a NUL inside, which SQLite's length() stops at.
+                "label": if *label == 3 {
+                    "x\u{0}y".to_string()
+                } else {
+                    format!("label-{label}")
+                },
             }),
         ),
         Op::LabelsReplace(bits) => update(
@@ -294,7 +304,7 @@ fn build_event(write: &Write, agent: &str, prior: &[Event]) -> Event {
         } => (
             EventType::Link,
             EventData::Link(LinkData {
-                target: other_item(write.item, *target).to_string(),
+                target: link_target(write.item, *target),
                 link_type: link_type_name(link_type.unwrap_or(0)),
                 extra: BTreeMap::new(),
             }),
@@ -306,7 +316,7 @@ fn build_event(write: &Write, agent: &str, prior: &[Event]) -> Event {
         } => (
             EventType::Unlink,
             EventData::Unlink(UnlinkData {
-                target: other_item(write.item, *target).to_string(),
+                target: link_target(write.item, *target),
                 link_type: link_type.map(link_type_name),
                 extra: BTreeMap::new(),
             }),
@@ -381,9 +391,13 @@ fn raw_value(n: u8) -> serde_json::Value {
     }
 }
 
-/// One of the two items other than `item`.
-fn other_item(item: usize, n: u8) -> &'static str {
-    ITEMS[(item + 1 + usize::from(n % 2)) % ITEMS.len()]
+/// Link target `n` of `item`: see `Op::Link`.
+fn link_target(item: usize, n: u8) -> String {
+    match n {
+        2 => ITEMS[item].to_string(),
+        3 => "not an id".to_string(),
+        _ => ITEMS[(item + 1 + usize::from(n % 2)) % ITEMS.len()].to_string(),
+    }
 }
 
 /// A plausible `item.snapshot`: the lattice state of a subset of the
@@ -405,7 +419,7 @@ fn snapshot_event(item: &str, keep: u8, wall_ts: i64, agent: &str, prior: &[Even
         earliest,
         latest,
     );
-    event(
+    let mut snapshot = event(
         EventType::Snapshot,
         item,
         EventData::Snapshot(SnapshotData {
@@ -414,7 +428,13 @@ fn snapshot_event(item: &str, keep: u8, wall_ts: i64, agent: &str, prior: &[Even
         }),
         wall_ts,
         agent,
-    )
+    );
+    // The sources, sorted and once each, as `compact_item` writes them.
+    let mut parents: Vec<String> = sources.iter().map(|e| e.event_hash.clone()).collect();
+    parents.sort();
+    parents.dedup();
+    snapshot.parents = parents;
+    snapshot
 }
 
 fn link_type_name(n: u8) -> String {
@@ -740,4 +760,29 @@ fn cleared_description_and_its_snapshot_agree() {
         &[w(0, Op::Title(0), 100)],
         [95, 95],
     );
+}
+
+/// A redaction of a snapshot's source redacts the snapshot too, whether it
+/// sorts before or after the snapshot (bn-1npc).
+#[test]
+fn redacted_snapshot_source_projects_the_same_in_every_order() {
+    for redact_ts in [100, 109] {
+        check_fixed(
+            &[
+                w(
+                    0,
+                    Op::Label {
+                        add: true,
+                        label: 1,
+                    },
+                    105,
+                ),
+                w(0, Op::Snapshot(0xff), 106),
+                // prior: two base creates, the label, the snapshot.
+                w(0, Op::Redact(2), redact_ts),
+            ],
+            &[w(0, Op::Title(0), 104)],
+            [95, 95],
+        );
+    }
 }

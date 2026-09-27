@@ -23,7 +23,24 @@
 //! # Redaction Interaction
 //!
 //! Snapshots check the redaction set before including field values. Compaction
-//! must never reintroduce redacted content.
+//! must never reintroduce redacted content, so [`compact_item`] refuses an
+//! item that has a redacted event.
+//!
+//! A redaction can still arrive after the snapshot (another replica
+//! compacted first). A snapshot's `parents` are its source events, and the
+//! projection treats a snapshot with a redacted source as redacted itself:
+//! its JSON reads "[redacted]" and the labels it owns are absent, in any
+//! order (bn-1npc, see `db::project`). `WorkItemState` does not model
+//! redaction.
+//!
+//! # Source Events Stay in the Log
+//!
+//! `bn compact` appends the snapshot and never removes its source events.
+//! Nothing else prunes them. So a snapshot needs to hold only what the
+//! projection cannot get from the sources: comment bodies are not in the
+//! payload (it keeps comment hashes only) and still project from the
+//! comment events. A log that holds the snapshot but not its sources shows
+//! no comments. This is by design (bn-1npc).
 //!
 //! # Audit Metadata
 //!
@@ -45,6 +62,7 @@ use crate::event::Event;
 use crate::event::data::{EventData, SnapshotData};
 use crate::event::types::EventType;
 use crate::event::writer;
+use crate::model::field_value::can_link;
 use crate::model::item::{Kind, Size, Urgency};
 use crate::model::item_id::ItemId;
 
@@ -242,11 +260,17 @@ impl WorkItemState {
     /// with the same tags.
     #[must_use]
     pub fn from_snapshot_payload(payload: &SnapshotPayload) -> Self {
-        let links = if orset_is_blank(&payload.links) {
+        let mut links = if orset_is_blank(&payload.links) {
             legacy_links(&payload.blocked_by, &payload.related_to)
         } else {
             payload.links.clone()
         };
+        // A snapshot written before bn-1npc can hold links that the
+        // projection cannot (see `field_value::can_link`). Replay of the
+        // same events no longer keeps them.
+        let linkable = |key: &LinkKey| can_link(&payload.item_id, &key.target);
+        links.elements.retain(|(key, _)| linkable(key));
+        links.tombstone.retain(|(key, _)| linkable(key));
         let mut state = Self {
             title: LwwRegister::from(&payload.title),
             description: LwwRegister::from(&payload.description),

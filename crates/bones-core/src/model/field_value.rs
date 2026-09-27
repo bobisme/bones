@@ -24,6 +24,18 @@
 //!
 //! Set members (a label, an assignee, a link type) that are blank (see
 //! [`is_blank_member`]) are no write too: the schema rejects them.
+//!
+//! A link whose target the projection cannot hold (see [`can_link`]) is no
+//! write. Its removal has no effect, as no such link exists.
+//!
+//! # Forward compatibility
+//!
+//! A newer client can add a kind, urgency or size value (for example a kind
+//! `"epic"`). This bn does not parse it, so an update to that value is no
+//! write in both the projection and `WorkItemState`: the field keeps the
+//! value of the newest write this bn can read. A snapshot that holds such a
+//! value does not deserialize as a `SnapshotPayload`, so the projection
+//! keeps it as JSON only.
 
 use serde_json::Value;
 
@@ -87,11 +99,26 @@ pub fn parent_or_none(parent: Option<&str>) -> Option<&str> {
 }
 
 /// `true` when the projection schema rejects `member` as a label, an
-/// assignee or a link type: `length(trim(member)) > 0` fails. `SQLite`'s
-/// `trim` removes spaces only.
+/// assignee or a link type: `length(trim(member)) > 0` fails.
+///
+/// This follows `SQLite` exactly. `trim` removes spaces only, and `length`
+/// of a text value counts the characters before the first NUL. So a member
+/// that starts with a NUL after its spaces is blank too.
 #[must_use]
 pub fn is_blank_member(member: &str) -> bool {
-    member.trim_matches(' ').is_empty()
+    let trimmed = member.trim_matches(' ');
+    trimmed.is_empty() || trimmed.starts_with('\0')
+}
+
+/// `true` when the projection can hold a link from `item_id` to `target`:
+/// the target is an item ID (see [`is_item_ref`]) and not the item itself.
+///
+/// The schema rejects other links (the `items` ID CHECK of the target's
+/// placeholder and `item_id <> depends_on_item_id`). The projection claims
+/// them but writes no row, and `WorkItemState` ignores them.
+#[must_use]
+pub fn can_link(item_id: &str, target: &str) -> bool {
+    is_item_ref(target) && target != item_id
 }
 
 /// `true` when `id` can be an `items.item_id`: two or three lowercase ASCII
@@ -146,6 +173,57 @@ mod tests {
         assert!(is_blank_member("   "));
         assert!(!is_blank_member("\t"));
         assert!(!is_blank_member(" a "));
+        assert!(is_blank_member("\u{0}x"));
+        assert!(is_blank_member(" \u{0}"));
+        assert!(is_blank_member("  \u{0} x"));
+        assert!(!is_blank_member("x\u{0}"));
+        assert!(!is_blank_member("a"));
+    }
+
+    /// `is_blank_member` must agree with the schema's CHECK in `SQLite`
+    /// itself, for every member a handler can write.
+    #[test]
+    fn blank_members_match_sqlite() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open db");
+        conn.execute_batch("CREATE TABLE t (m TEXT NOT NULL CHECK (length(trim(m)) > 0))")
+            .expect("create table");
+        for member in [
+            "",
+            " ",
+            "  ",
+            "a",
+            " a ",
+            "\t",
+            "\n",
+            "\u{0}",
+            "\u{0}x",
+            " \u{0}",
+            "\u{0} ",
+            "x\u{0}",
+            " x\u{0}",
+            "  \u{0} x",
+            "\u{a0}",
+            "\u{3000}",
+            "é",
+        ] {
+            let accepted = conn
+                .execute("INSERT INTO t (m) VALUES (?1)", [member])
+                .is_ok();
+            assert_eq!(
+                is_blank_member(member),
+                !accepted,
+                "member {member:?}: SQLite accepted = {accepted}"
+            );
+        }
+    }
+
+    #[test]
+    fn links_follow_the_schema_checks() {
+        assert!(can_link("bn-a1", "bn-b2"));
+        assert!(!can_link("bn-a1", "bn-a1"));
+        assert!(!can_link("bn-a1", "not an id"));
+        assert!(!can_link("bn-a1", ""));
+        assert!(!can_link("bn-a1", "BN-B2"));
     }
 
     #[test]

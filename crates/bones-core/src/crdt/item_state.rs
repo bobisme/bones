@@ -499,9 +499,12 @@ impl WorkItemState {
             EventType::Link => {
                 if let EventData::Link(data) = &event.data
                     && !field_value::is_blank_member(&data.link_type)
+                    && field_value::can_link(event.item_id.as_str(), &data.target)
                 {
                     // Every link type is kept, keyed by (target, type), as
-                    // in the projection (bn-t37g).
+                    // in the projection (bn-t37g). A link the projection
+                    // cannot hold (to the item itself, or to a target that
+                    // is no item ID) is no write, as there (bn-1npc).
                     let key = LinkKey {
                         target: data.target.clone(),
                         link_type: data.link_type.clone(),
@@ -1439,6 +1442,43 @@ mod tests {
         let mut twice = state.clone();
         twice.apply_event(&reset);
         assert_eq!(twice.label_names(), state.label_names());
+    }
+
+    #[test]
+    fn links_the_projection_cannot_hold_are_no_write() {
+        // bn-1npc: the projection claims a link to the item itself or to a
+        // target that is no item ID, but writes no row
+        // (`field_value::can_link`). The state must not keep it either.
+        let events = [
+            link_event("bn-test1", "blocks", 1_000, "alice", "blake3:self"),
+            link_event("not an id", "blocks", 1_100, "alice", "blake3:bad"),
+            link_event("BN-X", "related_to", 1_200, "alice", "blake3:upper"),
+            link_event("bn-x", "blocks", 1_300, "alice", "blake3:ok"),
+            unlink_event("bn-test1", None, 1_400, "alice", "blake3:un"),
+        ];
+        let state = WorkItemState::from_events(&events);
+        let links: Vec<(&str, &str)> = state
+            .link_keys()
+            .into_iter()
+            .map(|k| (k.target.as_str(), k.link_type.as_str()))
+            .collect();
+        assert_eq!(links, [("bn-x", "blocks")]);
+        assert_eq!(state.blocked_by_ids().len(), 1);
+        assert!(state.related_to_ids().is_empty());
+
+        // An older snapshot can still hold such links: they are dropped.
+        let mut payload = WorkItemState::from_events(&events[3..4])
+            .to_snapshot_payload("bn-test1", 1, 1_300, 1_300);
+        payload.links.add(
+            LinkKey {
+                target: "bn-test1".to_string(),
+                link_type: "blocks".to_string(),
+            },
+            make_orset_tag(1_000, "alice", "blake3:self", "x"),
+        );
+        let restored = WorkItemState::from_snapshot_payload(&payload);
+        assert_eq!(restored.link_keys().len(), 1);
+        assert_eq!(restored.blocked_by_ids().len(), 1);
     }
 
     #[test]

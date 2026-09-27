@@ -4,15 +4,17 @@ use super::schema;
 use rusqlite::{Connection, TransactionBehavior, types::Type};
 
 /// Latest schema version understood by this binary.
-pub const LATEST_SCHEMA_VERSION: u32 = 7;
+pub const LATEST_SCHEMA_VERSION: u32 = 8;
 
 /// A projection created before this schema version must be rebuilt.
 ///
 /// v3 adds per-field winner keys that only a replay of the event log can
 /// fill in, v5 changes the format of link keys, v6 changes how
-/// `created_at_us` treats events at time 0, and v7 changes how several
-/// events project (bn-18fs, see `schema::MIGRATION_V7_SQL`).
-pub const REBUILD_REQUIRED_BELOW: u32 = 7;
+/// `created_at_us` treats events at time 0, v7 changes how several
+/// events project (bn-18fs, see `schema::MIGRATION_V7_SQL`), and v8 adds
+/// snapshot sources for redaction and changes blank members and links
+/// (bn-1npc, see `schema::MIGRATION_V8_SQL`).
+pub const REBUILD_REQUIRED_BELOW: u32 = 8;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, schema::MIGRATION_V1_SQL),
@@ -22,6 +24,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (5, schema::MIGRATION_V5_SQL),
     (6, schema::MIGRATION_V6_SQL),
     (7, schema::MIGRATION_V7_SQL),
+    (8, schema::MIGRATION_V8_SQL),
 ];
 
 /// Read `PRAGMA user_version` and convert it to a Rust `u32`.

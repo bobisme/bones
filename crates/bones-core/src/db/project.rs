@@ -27,7 +27,7 @@ use crate::db::query;
 use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
-use crate::model::field_value::{self, is_item_ref};
+use crate::model::field_value::{self, can_link};
 use crate::shard::ShardManager;
 
 // ---------------------------------------------------------------------------
@@ -700,7 +700,7 @@ impl<'conn> Projector<'conn> {
         self.ensure_item_exists_at(item_id, created, updated)?;
         self.fold_bounds(item_id, created, updated)?;
 
-        let is_redacted = self.is_event_redacted(&event.event_hash)?;
+        let is_redacted = self.record_snapshot_sources(event)?;
         let json_str = if is_redacted {
             REDACTED.to_string()
         } else {
@@ -716,6 +716,46 @@ impl<'conn> Projector<'conn> {
             .map_or(Ok(()), |payload| {
                 self.merge_snapshot(event, &payload, is_redacted)
             })
+    }
+
+    /// Record the snapshot's source events (its `parents`), and return
+    /// `true` when the snapshot counts as redacted: it is redacted itself,
+    /// or one of its sources is (bn-1npc).
+    ///
+    /// A snapshot holds the content of its sources, so a redaction of a
+    /// source redacts the snapshot as well. It then projects like a
+    /// redacted snapshot: `snapshot_json` reads "[redacted]" and the labels
+    /// it owns are absent, with their keys still claimed. A redaction that
+    /// arrives after the snapshot finds it through `snapshot_sources` (see
+    /// `project_redact`), so the result does not depend on the order.
+    ///
+    /// Its LWW fields need no such rule: they carry the keys of the source
+    /// events that wrote them, so a redaction of a source already covers
+    /// them. The labels are the gap: the snapshot claims them with its own
+    /// hash (`lower_key`). This only shows when the log does not hold the
+    /// source: a source in the log beats the snapshot's lower-bound claim.
+    /// The payload does not say which source added which label, so every
+    /// label the snapshot owns is hidden.
+    fn record_snapshot_sources(&self, event: &Event) -> Result<bool> {
+        let mut insert = self.conn.prepare_cached(
+            "INSERT OR IGNORE INTO snapshot_sources (source_hash, snapshot_hash) VALUES (?1, ?2)",
+        )?;
+        for parent in &event.parents {
+            insert
+                .execute(params![parent, event.event_hash])
+                .with_context(|| format!("record source {parent} of snapshot {}", event.item_id))?;
+        }
+        self.conn
+            .prepare_cached(
+                "SELECT EXISTS(
+                     SELECT 1 FROM event_redactions
+                     WHERE target_event_hash = ?1
+                        OR target_event_hash IN
+                           (SELECT source_hash FROM snapshot_sources WHERE snapshot_hash = ?1)
+                 )",
+            )?
+            .query_row(params![event.event_hash], |row| row.get(0))
+            .context("check snapshot redaction")
     }
 
     /// Merge a snapshot into the item field by field (bn-18fs).
@@ -740,7 +780,12 @@ impl<'conn> Projector<'conn> {
     ///   own key is lost. Members that the payload has only as tombstones
     ///   are skipped: the payload does not say when they were removed.
     ///
-    /// Not merged: comments (the payload holds hashes, not bodies).
+    /// Not merged: comments (the payload holds hashes, not bodies). `bn
+    /// compact` keeps the comment events in the log, so this loses nothing
+    /// (see `crate::compact`).
+    ///
+    /// A snapshot with a redacted source counts as redacted: see
+    /// `record_snapshot_sources`.
     ///
     /// Only a payload of `SNAPSHOT_FORMAT` or newer is merged (see
     /// `project_snapshot`).
@@ -912,10 +957,16 @@ impl<'conn> Projector<'conn> {
         // newer event owns show that event in either order, so they stay.
         // Look up by hash alone: handlers check redaction by hash on any
         // item, so the target may belong to another item than this event.
+        //
+        // A snapshot of the target counts as redacted too, so the fields it
+        // owns are rewritten as well (bn-1npc, see record_snapshot_sources).
         let owned: Vec<(String, String)> = {
-            let mut stmt = self
-                .conn
-                .prepare_cached("SELECT item_id, field FROM field_clocks WHERE event_hash = ?1")?;
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT item_id, field FROM field_clocks
+                 WHERE event_hash = ?1
+                    OR event_hash IN
+                       (SELECT snapshot_hash FROM snapshot_sources WHERE source_hash = ?1)",
+            )?;
             stmt.query_map(params![data.target_hash], |row| {
                 Ok((row.get(0)?, row.get(1)?))
             })?
@@ -1047,15 +1098,26 @@ impl<'conn> Projector<'conn> {
 
         let prefix = member_field(group, "");
         let mut known: std::collections::BTreeSet<String> = {
-            // SQLite measures the prefix itself: substr counts characters,
-            // not the bytes Rust's len() would give.
+            // A byte range, not SQLite's substr() or length(): those stop
+            // at the first NUL, and a member or a link target can hold one
+            // (bn-1npc). Comparisons use every byte. The prefix ends with
+            // '/', so every field that starts with it sorts before the
+            // prefix with '/' changed to '0'.
+            let end = format!("{}0", &prefix[..prefix.len() - 1]);
             let mut stmt = self.conn.prepare_cached(
-                "SELECT substr(field, length(?2) + 1) FROM field_clocks
-                 WHERE item_id = ?1 AND substr(field, 1, length(?2)) = ?2",
+                "SELECT field FROM field_clocks
+                 WHERE item_id = ?1 AND field >= ?2 AND field < ?3",
             )?;
-            stmt.query_map(params![event.item_id.as_str(), prefix], |row| {
+            stmt.query_map(params![event.item_id.as_str(), prefix, end], |row| {
                 row.get::<_, String>(0)
             })?
+            .map(|field| {
+                field.map(|f| {
+                    f.strip_prefix(prefix.as_str())
+                        .unwrap_or_default()
+                        .to_string()
+                })
+            })
             .collect::<rusqlite::Result<_>>()?
         };
         known.extend(members.iter().map(|m| (*m).to_string()));
@@ -1386,13 +1448,6 @@ impl Member for LinkKey {
     }
 }
 
-/// `true` when the schema can hold a link from the event's item to
-/// `target`: the target is an item ID and not the item itself. Other links
-/// are claimed but never written, in any order.
-fn can_link(item_id: &str, target: &str) -> bool {
-    is_item_ref(target) && target != item_id
-}
-
 /// Text that replaces redacted content in the projection.
 const REDACTED: &str = "[redacted]";
 
@@ -1531,6 +1586,7 @@ pub fn clear_projection(conn: &Connection) -> Result<()> {
          DELETE FROM items;
          DELETE FROM projected_events;
          DELETE FROM field_clocks;
+         DELETE FROM snapshot_sources;
          UPDATE projection_meta SET last_event_offset = 0, last_event_hash = NULL WHERE id = 1;",
     )
     .context("clear projection tables")?;
@@ -3061,6 +3117,93 @@ mod tests {
         }
     }
 
+    /// Every order of `items`.
+    fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+        if items.len() <= 1 {
+            return vec![items.to_vec()];
+        }
+        let mut out = Vec::new();
+        for i in 0..items.len() {
+            let mut rest = items.to_vec();
+            let first = rest.remove(i);
+            for mut tail in permutations(&rest) {
+                tail.insert(0, first.clone());
+                out.push(tail);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn redacted_source_redacts_its_snapshot_in_every_order() {
+        // bn-1npc: E adds a label, a snapshot S of the item holds it, and a
+        // redaction R targets E. S claims the label with a lower-bound key
+        // that names S, not E. With E gone from the log (a log that holds
+        // the snapshot only), S owned the label and R could not reach it.
+        // S's JSON also kept E's content.
+        let create = make_create("bn-001", "Item", "p01", 1000);
+        let secret = update_event(
+            "bn-001",
+            "labels",
+            serde_json::json!({"action": "add", "label": "secret"}),
+            "p02",
+            1100,
+        );
+        let snapshot = snapshot_of(&[create.clone(), secret.clone()], "bn-001");
+        assert!(snapshot.parents.contains(&secret.event_hash));
+        let redact = make_event(
+            EventType::Redact,
+            "bn-001",
+            EventData::Redact(RedactData {
+                target_hash: secret.event_hash.clone(),
+                reason: "secret".into(),
+                extra: BTreeMap::new(),
+            }),
+            "p03",
+            2000,
+        );
+
+        let observe = |events: &[&Event]| {
+            let conn = project_all(events);
+            let json: Option<String> = conn
+                .query_row(
+                    "SELECT snapshot_json FROM items WHERE item_id = 'bn-001'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            (visible(&conn, "bn-001"), json)
+        };
+
+        for log in [
+            vec![&create, &secret, &snapshot, &redact],
+            vec![&create, &snapshot, &redact],
+            vec![&snapshot, &redact],
+        ] {
+            let orders = permutations(&log);
+            let first = observe(&orders[0]);
+            assert_eq!(first.1.as_deref(), Some("[redacted]"), "log {}", log.len());
+            let labels: Vec<&String> = first
+                .0
+                .iter()
+                .filter(|row| row.contains("secret"))
+                .collect();
+            assert!(labels.is_empty(), "redacted label shows: {labels:?}");
+            for order in &orders[1..] {
+                assert_eq!(observe(order), first, "log {}", log.len());
+            }
+        }
+
+        // The same snapshot without the redaction keeps the label.
+        let conn = project_all(&[&snapshot]);
+        let labels: Vec<String> = query::get_labels(&conn, "bn-001")
+            .unwrap()
+            .into_iter()
+            .map(|l| l.label)
+            .collect();
+        assert!(labels.contains(&"secret".to_string()), "{labels:?}");
+    }
+
     #[test]
     fn delete_and_its_snapshot_agree_on_deleted_at() {
         // Negative wall clocks order as 0. The delete wrote its raw -5 and
@@ -3194,6 +3337,81 @@ mod tests {
         assert_eq!(state.label_names().len(), 1);
         assert!(state.assignee_names().is_empty());
         assert!(state.link_keys().is_empty());
+    }
+
+    #[test]
+    fn members_with_a_nul_follow_sqlite() {
+        // bn-1npc: SQLite's length() stops at the first NUL, so the CHECK
+        // rejects "\0x" and " \0" but accepts "x\0". The first two are
+        // blank (no write) and the event projects without error. A member
+        // with a NUL inside must also be found by a later whole-set reset:
+        // substr() stopped at the NUL and missed it.
+        let assign = |agent: &str, hash: &str, ts: i64| {
+            make_event(
+                EventType::Assign,
+                "bn-001",
+                EventData::Assign(AssignData {
+                    agent: agent.into(),
+                    action: AssignAction::Assign,
+                    extra: BTreeMap::new(),
+                }),
+                hash,
+                ts,
+            )
+        };
+        let label = |label: &str, hash: &str, ts: i64| {
+            update_event(
+                "bn-001",
+                "labels",
+                serde_json::json!({"action": "add", "label": label}),
+                hash,
+                ts,
+            )
+        };
+        let mut events = vec![
+            make_create("bn-001", "Item", "n01", 1000),
+            label("\u{0}x", "n02", 1100),
+            label(" \u{0}", "n03", 1101),
+            assign("\u{0}", "n04", 1102),
+            label("x\u{0}", "n05", 1103),
+            assign("a\u{0}b", "n06", 1104),
+        ];
+        let conn = test_db();
+        let stats = Projector::new(&conn).project_batch(&events).unwrap();
+        assert_eq!(stats.errors, 0);
+        let labels = |conn: &Connection| -> Vec<String> {
+            query::get_labels(conn, "bn-001")
+                .unwrap()
+                .into_iter()
+                .map(|l| l.label)
+                .collect()
+        };
+        assert_eq!(labels(&conn), ["auth", "backend", "x\u{0}"]);
+        let assignees: Vec<String> = query::get_assignees(&conn, "bn-001")
+            .unwrap()
+            .into_iter()
+            .map(|a| a.agent)
+            .collect();
+        assert_eq!(assignees, ["a\u{0}b"]);
+
+        // A legacy whole-set replacement removes "x\0" too.
+        events.push(update_event(
+            "bn-001",
+            "labels",
+            serde_json::json!(["auth"]),
+            "n07",
+            1200,
+        ));
+        let conn = test_db();
+        let stats = Projector::new(&conn).project_batch(&events).unwrap();
+        assert_eq!(stats.errors, 0);
+        assert_eq!(labels(&conn), ["auth"]);
+
+        let state = crate::crdt::item_state::WorkItemState::from_events(&events);
+        let mut names: Vec<&String> = state.label_names().into_iter().collect();
+        names.sort();
+        assert_eq!(names, ["auth"]);
+        assert_eq!(state.assignee_names().len(), 1);
     }
 
     #[test]

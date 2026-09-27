@@ -513,7 +513,7 @@ mod tests {
             assert_eq!((offset, hash), (0, None));
             assert_eq!(
                 migrations::current_schema_version(&conn).expect("version"),
-                7
+                migrations::LATEST_SCHEMA_VERSION
             );
         }
 
@@ -528,6 +528,59 @@ mod tests {
             )
             .expect("read description");
         assert_eq!(description, None, "rebuilt row");
+        assert!(!projection_dirty_marker_path(&bones_dir).exists());
+    }
+
+    #[test]
+    fn v7_projection_is_rebuilt_under_v8_semantics() {
+        // bn-1npc: a v7 bn kept no snapshot sources, so a redaction of a
+        // snapshot's source left the snapshot's labels and JSON in place,
+        // and it projected members with a NUL differently. Without a
+        // rebuild such rows would stay.
+        let (_dir, bones_dir) = built_projection();
+        let db_path = bones_dir.join("bones.db");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open raw");
+            conn.execute_batch(
+                "UPDATE items SET title = 'stale v7 row' WHERE item_id = 'bn-one';
+                 DROP TABLE snapshot_sources;
+                 UPDATE projection_meta SET schema_version = 7 WHERE id = 1;
+                 PRAGMA user_version = 7;",
+            )
+            .expect("make v7 projection");
+        }
+
+        {
+            let conn = open_projection(&db_path).expect("open and migrate");
+            assert!(
+                projection_dirty_marker_path(&bones_dir).exists(),
+                "v7 rows need a rebuild"
+            );
+            let (offset, hash) = crate::db::query::get_projection_cursor(&conn).expect("cursor");
+            assert_eq!((offset, hash), (0, None));
+            assert_eq!(
+                migrations::current_schema_version(&conn).expect("version"),
+                8
+            );
+            let sources: i64 = conn
+                .query_row("SELECT COUNT(*) FROM snapshot_sources", [], |row| {
+                    row.get(0)
+                })
+                .expect("snapshot_sources exists");
+            assert_eq!(sources, 0);
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM items WHERE item_id = 'bn-one'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read title");
+        assert_eq!(title, "one", "rebuilt row");
         assert!(!projection_dirty_marker_path(&bones_dir).exists());
     }
 

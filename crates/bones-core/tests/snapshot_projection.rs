@@ -9,15 +9,20 @@
 //! The generator writes events of a few items with overlapping clocks (a
 //! create can sort after an update), times at or before 0, creates without
 //! optional fields, malformed update values, legacy label arrays, every link
-//! type, compact events and duplicate lines.
+//! type, links to the item itself and to targets that are no item ID,
+//! members with a NUL, compact events and duplicate lines.
 //!
 //! Malformed update values are no write in both (bn-18fs, see
-//! `model::field_value`).
+//! `model::field_value`). So are values from a newer client that this bn
+//! cannot parse (a kind `"epic"`), links the projection cannot hold, and
+//! members the schema rejects (bn-1npc).
 //!
 //! The projection of the snapshot alone, as a compacted log holds it, must
-//! also show the same item (bn-18fs), except for comments (a snapshot
-//! keeps their hashes, not their bodies) and `updated_at` (the snapshot
-//! sorts after its sources).
+//! also show the same item (bn-18fs), except for comments and `updated_at`
+//! (the snapshot sorts after its sources). A snapshot keeps comment hashes,
+//! not bodies, so a log of the snapshot alone shows no comments. That is by
+//! design: `bn compact` appends the snapshot and never removes its source
+//! events, so the comments stay in the log (see `bones_core::compact`).
 //!
 //! Known representation gaps, normalized here: the state stores "no
 //! description" and "no parent" as `""` where the projection stores NULL.
@@ -46,15 +51,22 @@ const ITEMS: [&str; 2] = ["bn-a1", "bn-b2"];
 /// Link targets and parents. The log creates them first: the projection's
 /// foreign keys need them.
 const TARGETS: [&str; 2] = ["bn-t0", "bn-t1"];
+/// Link targets the projection cannot hold (bn-1npc): no item IDs. Target
+/// index `TARGETS.len()` is the item itself, the next ones are these.
+const BAD_TARGETS: [&str; 2] = ["not an id", "BN-T0"];
+/// Target indexes: the valid targets, the item itself, the bad targets.
+const TARGET_COUNT: u8 = (TARGETS.len() + 1 + BAD_TARGETS.len()) as u8;
 const PARENTS: [&str; 2] = ["bn-p0", "bn-p1"];
 const AGENTS: [&str; 3] = ["agent-a", "agent-b", "agent-c"];
-const LINK_TYPES: [&str; 6] = [
+const LINK_TYPES: [&str; 7] = [
     "blocks",
     "blocked_by",
     "related_to",
     "related",
     "relates",
     "duplicates",
+    // Blank to SQLite's length(trim(x)): no write (bn-1npc).
+    " \u{0}blocks",
 ];
 
 fn proptest_config() -> Config {
@@ -142,10 +154,15 @@ fn arb_non_string() -> impl Strategy<Value = serde_json::Value> {
 }
 
 /// Strings that no kind, urgency or size parses, and that are no item ID.
+/// The last ones model values that a newer client adds (bn-1npc): this bn
+/// ignores them the same way in the projection and in `WorkItemState`.
 fn arb_bad_string() -> impl Strategy<Value = serde_json::Value> {
     prop_oneof![
         Just(serde_json::json!("")),
         Just(serde_json::json!("bogus")),
+        Just(serde_json::json!("epic")),
+        Just(serde_json::json!("critical")),
+        Just(serde_json::json!("xxxl")),
     ]
 }
 
@@ -162,6 +179,19 @@ fn arb_update() -> impl Strategy<Value = Op> {
             serde_json::json!({"action": "add", "label": "  "})
         )),
         Just(Op::Update("labels", serde_json::json!(["", "label-1"]))),
+        // SQLite's length() stops at the first NUL (bn-1npc).
+        Just(Op::Update(
+            "labels",
+            serde_json::json!({"action": "add", "label": " \u{0}x"})
+        )),
+        Just(Op::Update(
+            "labels",
+            serde_json::json!({"action": "add", "label": "x\u{0}"})
+        )),
+        Just(Op::Update(
+            "labels",
+            serde_json::json!(["\u{0}", "label-2"])
+        )),
         (0u8..3).prop_map(|n| Op::Update("title", serde_json::json!(format!("title {n}")))),
         arb_non_string().prop_map(|v| Op::Update("title", v)),
         (0u8..3).prop_map(|n| Op::Update("description", serde_json::json!(format!("desc {n}")))),
@@ -211,9 +241,9 @@ fn arb_op() -> impl Strategy<Value = Op> {
             Just(State::Archived)
         ]
         .prop_map(Op::Move),
-        3 => (0u8..2, 0..LINK_TYPES.len() as u8)
+        3 => (0..TARGET_COUNT, 0..LINK_TYPES.len() as u8)
             .prop_map(|(target, link_type)| Op::Link { target, link_type }),
-        2 => (0u8..2, prop::option::of(0..LINK_TYPES.len() as u8))
+        2 => (0..TARGET_COUNT, prop::option::of(0..LINK_TYPES.len() as u8))
             .prop_map(|(target, link_type)| Op::Unlink { target, link_type }),
         1 => (0u8..3).prop_map(Op::Comment),
         1 => (0u8..3).prop_map(Op::Compact),
@@ -287,7 +317,17 @@ fn label_names(bits: u8) -> Vec<String> {
         .collect()
 }
 
-fn build_data(op: &Op, n: usize) -> (EventType, EventData) {
+/// Target `n` of a link from `item`: see `TARGET_COUNT`.
+fn target_name(item: &str, n: u8) -> String {
+    let n = usize::from(n);
+    match n.checked_sub(TARGETS.len()) {
+        None => TARGETS[n].to_string(),
+        Some(0) => item.to_string(),
+        Some(k) => BAD_TARGETS[k - 1].to_string(),
+    }
+}
+
+fn build_data(op: &Op, n: usize, item: &str) -> (EventType, EventData) {
     match op {
         Op::Create {
             title,
@@ -343,7 +383,7 @@ fn build_data(op: &Op, n: usize) -> (EventType, EventData) {
         Op::Link { target, link_type } => (
             EventType::Link,
             EventData::Link(LinkData {
-                target: TARGETS[usize::from(*target)].to_string(),
+                target: target_name(item, *target),
                 link_type: LINK_TYPES[usize::from(*link_type)].to_string(),
                 extra: BTreeMap::new(),
             }),
@@ -351,7 +391,7 @@ fn build_data(op: &Op, n: usize) -> (EventType, EventData) {
         Op::Unlink { target, link_type } => (
             EventType::Unlink,
             EventData::Unlink(UnlinkData {
-                target: TARGETS[usize::from(*target)].to_string(),
+                target: target_name(item, *target),
                 link_type: link_type.map(|t| LINK_TYPES[usize::from(t)].to_string()),
                 extra: BTreeMap::new(),
             }),
@@ -417,7 +457,7 @@ fn build_events(writes: &[Write]) -> Vec<Event> {
             }
             continue;
         }
-        let (event_type, data) = build_data(&write.op, n);
+        let (event_type, data) = build_data(&write.op, n, ITEMS[write.item]);
         let mut event = Event {
             wall_ts_us: write.wall_ts,
             agent: AGENTS[write.agent].to_string(),
