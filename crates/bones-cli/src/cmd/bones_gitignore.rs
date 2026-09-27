@@ -7,11 +7,16 @@ const MANAGED_ENTRIES: &[&str] = &[
     "bones.db",
     "bones.db-shm",
     "bones.db-wal",
+    "bones.db.rebuild",
+    "bones.db.rebuild-journal",
+    "bones.db.rebuild-shm",
+    "bones.db.rebuild-wal",
     "feedback.jsonl",
     "agent_profiles/",
     "cache/",
     "itc/",
     "lock",
+    "projection.lock",
     "events/current.events",
 ];
 

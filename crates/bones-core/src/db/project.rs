@@ -79,6 +79,10 @@ impl<'conn> Projector<'conn> {
     /// Events are applied inside a single transaction for performance.
     /// Duplicate events (same `event_hash`) are silently skipped.
     ///
+    /// This does not take the projection write lock or write the cursor. A
+    /// caller that writes the cursor afterwards holds the lock across both
+    /// (as `incremental_apply` and the rebuild do).
+    ///
     /// # Errors
     ///
     /// Returns an error if the transaction fails to commit. Individual event
@@ -176,10 +180,29 @@ impl<'conn> Projector<'conn> {
     /// Returns `true` if the event was projected, `false` if it was a
     /// duplicate.
     ///
+    /// For an on-disk projection this takes the projection write lock (see
+    /// [`crate::db::projection_lock`]). Do not call it while this thread
+    /// holds that lock.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the projection fails.
+    /// Returns an error if the projection fails, or if the projection lock
+    /// is not free within [`crate::db::PROJECTION_LOCK_TIMEOUT`].
     pub fn project_event(&self, event: &Event) -> Result<bool> {
+        // Hold the projection write lock across the event rows and the
+        // cursor write, so a rebuild cannot copy its pages in between and
+        // leave the cursor covering an event it removed (bn-x6aa). A lock
+        // timeout returns an error before any write: the cursor stays
+        // behind the event, and the next ensure_projection replays it.
+        let db_file = self.main_db_file()?;
+        let _lock = match &db_file {
+            Some(path) => Some(
+                crate::db::lock_projection(path)
+                    .context("lock projection for single-event projection")?,
+            ),
+            None => None,
+        };
+
         // One savepoint per event: a crash mid-event must not leave some of
         // its field keys claimed without the event recorded as projected.
         self.conn
@@ -216,7 +239,10 @@ impl<'conn> Projector<'conn> {
             }
         };
 
-        if let Err(err) = self.update_cursor_to_event_log_end(&event.event_hash) {
+        #[cfg(test)]
+        fault::before_cursor_write();
+        if let Err(err) = self.update_cursor_to_event_log_end(&event.event_hash, db_file.as_deref())
+        {
             tracing::warn!(
                 event_hash = %event.event_hash,
                 error = %err,
@@ -334,7 +360,9 @@ impl<'conn> Projector<'conn> {
         Ok(())
     }
 
-    fn update_cursor_to_event_log_end(&self, event_hash: &str) -> Result<()> {
+    /// The file of the connection's main database, or `None` for an
+    /// in-memory projection (tests), which has no event log.
+    fn main_db_file(&self) -> Result<Option<std::path::PathBuf>> {
         let main_db_file: String = self
             .conn
             .query_row(
@@ -343,13 +371,21 @@ impl<'conn> Projector<'conn> {
                 |row| row.get(0),
             )
             .context("read main database file from pragma_database_list")?;
-
         if main_db_file.trim().is_empty() {
-            // In-memory projections used in tests have no on-disk log context.
-            return Ok(());
+            return Ok(None);
         }
+        Ok(Some(std::path::PathBuf::from(main_db_file)))
+    }
 
-        let db_path = std::path::Path::new(&main_db_file);
+    fn update_cursor_to_event_log_end(
+        &self,
+        event_hash: &str,
+        db_file: Option<&std::path::Path>,
+    ) -> Result<()> {
+        // In-memory projections used in tests have no on-disk log context.
+        let Some(db_path) = db_file else {
+            return Ok(());
+        };
         let Some(bones_dir) = db_path.parent() else {
             return Ok(());
         };
@@ -1494,6 +1530,43 @@ pub(crate) mod fault {
 
     pub(super) fn should_fail(hash: &str) -> bool {
         FAIL_HASH.with(|h| h.borrow().as_deref() == Some(hash))
+    }
+
+    /// A test hook that runs on the current thread at one point of a
+    /// projection write, to force an interleaving with another thread.
+    pub(crate) type Hook = Box<dyn FnMut()>;
+
+    thread_local! {
+        static BEFORE_CURSOR_WRITE: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static BEFORE_INSTALL: RefCell<Option<Hook>> = const { RefCell::new(None) };
+    }
+
+    fn run(slot: &'static std::thread::LocalKey<RefCell<Option<Hook>>>) {
+        let hook = slot.with(|h| h.borrow_mut().take());
+        if let Some(mut hook) = hook {
+            hook();
+            slot.with(|h| *h.borrow_mut() = Some(hook));
+        }
+    }
+
+    /// Run `hook` after event rows commit and before the cursor write.
+    pub(crate) fn set_before_cursor_write(hook: Option<Hook>) {
+        BEFORE_CURSOR_WRITE.with(|h| *h.borrow_mut() = hook);
+    }
+
+    /// Run `hook` after a rebuild stages and before it installs.
+    pub(crate) fn set_before_install(hook: Option<Hook>) {
+        BEFORE_INSTALL.with(|h| *h.borrow_mut() = hook);
+    }
+
+    #[inline]
+    pub(crate) fn before_cursor_write() {
+        run(&BEFORE_CURSOR_WRITE);
+    }
+
+    #[inline]
+    pub(crate) fn before_install() {
+        run(&BEFORE_INSTALL);
     }
 }
 

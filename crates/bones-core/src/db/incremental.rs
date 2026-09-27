@@ -250,6 +250,13 @@ pub fn incremental_apply(
 ) -> Result<ApplyReport> {
     let start = Instant::now();
 
+    // Hold the projection write lock from validation through the cursor
+    // write. A concurrent rebuild could otherwise copy its pages in after
+    // the replayed rows commit and before the cursor write, and the cursor
+    // would then cover events the copy removed (bn-x6aa). A full-rebuild
+    // fallback below runs under this same lock (rebuild_locked).
+    let _lock = crate::db::lock_projection(db_path).context("lock projection for apply")?;
+
     if force_full {
         return do_full_rebuild(events_dir, db_path, start, "force_full flag set");
     }
@@ -439,7 +446,10 @@ pub fn incremental_apply(
         total_errors += stats.errors;
     }
 
-    // Update cursor to the end of current content
+    // Update cursor to the end of current content. The lock keeps any other
+    // projection writer out between the last batch commit and this write.
+    #[cfg(test)]
+    project::fault::before_cursor_write();
     let new_offset = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
     query::update_projection_cursor(&conn, new_offset, current_last_hash.as_deref())
         .context("update projection cursor after incremental apply")?;
@@ -616,6 +626,8 @@ fn validate_cursor_hash(content: &str, offset: usize, hash: &str) -> bool {
 }
 
 /// Perform a full rebuild and wrap the result in an `ApplyReport`.
+///
+/// The caller holds the projection write lock.
 fn do_full_rebuild(
     events_dir: &Path,
     db_path: &Path,
@@ -624,7 +636,7 @@ fn do_full_rebuild(
 ) -> Result<ApplyReport> {
     tracing::info!(reason, "falling back to full projection rebuild");
 
-    let report = rebuild::rebuild(events_dir, db_path)
+    let report = rebuild::rebuild_locked(events_dir, db_path)
         .context("full rebuild during incremental apply fallback")?;
 
     Ok(ApplyReport {

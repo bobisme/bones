@@ -1,10 +1,26 @@
 //! Full projection rebuild from the event log.
 //!
-//! `bn admin rebuild` drops and recreates the entire `SQLite` DB from the canonical
+//! `bn admin rebuild` recreates the entire `SQLite` DB from the canonical
 //! event log, proving the projection is disposable and reproducible.
+//!
+//! The rebuild builds a fresh database in a private staging file, then copies
+//! it into the live `bones.db` with `SQLite`'s backup API in one step. The live
+//! file is never deleted while it may be open (bn-x6aa):
+//!
+//! - A connection that stays open across the rebuild (a TUI session, another
+//!   `bn` process) sees the old projection until the copy commits and the
+//!   rebuilt one afterwards. Deleting the file instead left such a connection
+//!   reading a deleted copy on Unix.
+//! - Windows refuses to delete a file that another handle has open, so a
+//!   delete-and-recreate rebuild failed there.
+//!
+//! The whole rebuild runs under the projection write lock
+//! ([`crate::db::projection_lock`]). Only one rebuild uses the staging file at
+//! a time, and no writer can commit event rows between the copy and its
+//! cursor write.
 
-use std::path::Path;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -173,13 +189,12 @@ pub(crate) fn observe_newest(shard_mgr: &ShardManager, newest_ts: i64) {
     }
 }
 
-/// Drop the existing DB and rebuild it from the canonical event log.
+/// Rebuild the projection from the canonical event log.
 ///
-/// 1. Deletes the existing database file (if any)
-/// 2. Creates a fresh schema via `open_projection`
-/// 3. Replays all events from `events_dir` shards through the projector
-/// 4. FTS5 index is maintained via triggers during projection
-/// 5. Updates the projection cursor with the final offset
+/// 1. Takes the projection write lock (see [`crate::db::projection_lock`]).
+/// 2. Builds a fresh projection in the staging file `bones.db.rebuild`.
+/// 3. Copies it into the live `bones.db` in one backup step, or renames it
+///    into place if there is no live file yet.
 ///
 /// # Arguments
 ///
@@ -188,23 +203,196 @@ pub(crate) fn observe_newest(shard_mgr: &ShardManager, newest_ts: i64) {
 ///
 /// # Errors
 ///
-/// Returns an error if shard reading, event parsing, or projection fails.
-#[allow(clippy::too_many_lines)]
+/// Returns an error if the projection lock times out, or if shard reading,
+/// event parsing, projection or the install fails. A failed install leaves
+/// the live projection as it was.
 pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
+    let _lock = crate::db::lock_projection(db_path).context("lock projection for rebuild")?;
+    rebuild_locked(events_dir, db_path)
+}
+
+/// [`rebuild`] for a caller that already holds the projection write lock.
+///
+/// Only the lock holder touches the staging file, so one fixed staging name
+/// is safe.
+pub(crate) fn rebuild_locked(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
+    let staging = staging_path(db_path);
+    // A crashed earlier rebuild can leave a staging file behind.
+    remove_db_files(&staging);
+
+    let report = match build_projection(events_dir, &staging) {
+        Ok(report) => report,
+        Err(err) => {
+            remove_db_files(&staging);
+            return Err(err);
+        }
+    };
+    #[cfg(test)]
+    crate::db::project::fault::before_install();
+    let installed = install_rebuilt(&staging, db_path, copy_busy_timeout());
+    remove_db_files(&staging);
+    installed?;
+    Ok(report)
+}
+
+/// The private file a rebuild builds into: `bones.db.rebuild` beside the
+/// live projection.
+fn staging_path(db_path: &Path) -> PathBuf {
+    let mut name = db_path.as_os_str().to_owned();
+    name.push(".rebuild");
+    PathBuf::from(name)
+}
+
+/// Remove a database file and its `SQLite` side files, ignoring errors.
+fn remove_db_files(path: &Path) {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        let _ = std::fs::remove_file(PathBuf::from(name));
+    }
+}
+
+/// Retry pause while the live file stays busy after the first step.
+const COPY_RETRY_PAUSE: Duration = Duration::from_millis(50);
+
+#[cfg(test)]
+thread_local! {
+    static COPY_BUSY_TIMEOUT: std::cell::Cell<Option<Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Shorten the install's busy timeout on this thread (tests only).
+#[cfg(test)]
+fn set_copy_busy_timeout(timeout: Option<Duration>) {
+    COPY_BUSY_TIMEOUT.with(|t| t.set(timeout));
+}
+
+// Not const: the test build reads a thread-local override.
+#[allow(clippy::missing_const_for_fn)]
+fn copy_busy_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(timeout) = COPY_BUSY_TIMEOUT.with(std::cell::Cell::get) {
+        return timeout;
+    }
+    crate::db::DEFAULT_BUSY_TIMEOUT
+}
+
+/// Make the staged projection the live one.
+///
+/// With no live file yet, the staging file is renamed into place: nothing
+/// can have it open. Otherwise the staged pages are copied into the live
+/// file in one backup step, so its open connections stay valid and see the
+/// rebuilt data once the step commits.
+///
+/// The live file is replaced (deleted, then renamed over) only when it is not
+/// a usable database. Any other copy failure, such as a writer that holds
+/// the database past twice the busy timeout, returns an error and leaves the live
+/// file alone: deleting a file that others have open is the bug this module
+/// avoids, and Windows refuses it anyway.
+fn install_rebuilt(staging: &Path, db_path: &Path, busy_timeout: Duration) -> Result<()> {
+    if !db_path.exists() {
+        return std::fs::rename(staging, db_path).with_context(|| {
+            format!(
+                "move rebuilt projection {} to {}",
+                staging.display(),
+                db_path.display()
+            )
+        });
+    }
+    let source = open_staged(staging)?;
+    match copy_into_live(&source, db_path, busy_timeout) {
+        Ok(()) => Ok(()),
+        Err(err) if live_is_unusable(&err) => {
+            drop(source);
+            tracing::warn!(
+                error = %err,
+                path = %db_path.display(),
+                "live projection is not a usable database; replacing the file"
+            );
+            remove_db_files(db_path);
+            std::fs::rename(staging, db_path).with_context(|| {
+                format!(
+                    "replace unusable projection db {} (copy failed: {err})",
+                    db_path.display()
+                )
+            })
+        }
+        Err(err) => Err(anyhow::Error::new(err).context(format!(
+            "copy rebuilt projection into {}; the live projection is unchanged \
+             (another process may hold a write transaction on it)",
+            db_path.display()
+        ))),
+    }
+}
+
+/// Open the staged projection and check that it reads, so a later copy error
+/// is known to come from the live file.
+fn open_staged(staging: &Path) -> Result<rusqlite::Connection> {
+    let source = rusqlite::Connection::open(staging)
+        .with_context(|| format!("open staged projection {}", staging.display()))?;
+    let _: i64 = source
+        .query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))
+        .with_context(|| format!("read staged projection {}", staging.display()))?;
+    Ok(source)
+}
+
+/// The live file cannot be a database at all, so replacing it loses nothing
+/// and nobody can be using it.
+fn live_is_unusable(err: &rusqlite::Error) -> bool {
+    matches!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    )
+}
+
+/// Copy every page of `source` into the live database in one backup step.
+fn copy_into_live(
+    source: &rusqlite::Connection,
+    db_path: &Path,
+    busy_timeout: Duration,
+) -> rusqlite::Result<()> {
+    use rusqlite::backup::{Backup, StepResult};
+
+    let mut live = rusqlite::Connection::open(db_path)?;
+    live.busy_timeout(busy_timeout)?;
+    // Read the header first: a file that is not a database fails here with
+    // SQLITE_NOTADB, before the backup starts.
+    let _: i64 = live.query_row("PRAGMA schema_version", [], |row| row.get(0))?;
+    let backup = Backup::new(source, &mut live)?;
+    // -1 copies all pages in one step, so readers never see a partial copy.
+    //
+    // The first step waits up to the busy timeout for a writer. SQLite does
+    // not reset its busy count between backup steps, so a later step returns
+    // BUSY at once. Retry with a short pause until twice the busy timeout
+    // has passed: the worst case is bounded, and the pause gives a short
+    // writer time to finish.
+    let deadline = Instant::now() + busy_timeout * 2;
+    loop {
+        let step = backup.step(-1)?;
+        if step == StepResult::Done {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some(format!(
+                    "projection database stayed busy during rebuild copy \
+                     ({step:?} after {:?})",
+                    busy_timeout * 2
+                )),
+            ));
+        }
+        std::thread::sleep(COPY_RETRY_PAUSE);
+    }
+}
+
+/// Build a complete projection from the event log into a new file at
+/// `db_path`, which must not exist.
+#[allow(clippy::too_many_lines)]
+fn build_projection(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let start = Instant::now();
 
-    // 1. Delete existing database file
-    if db_path.exists() {
-        std::fs::remove_file(db_path)
-            .with_context(|| format!("remove existing projection db {}", db_path.display()))?;
-        // Also remove WAL and SHM files
-        let wal_path = db_path.with_extension("db-wal");
-        let shm_path = db_path.with_extension("db-shm");
-        let _ = std::fs::remove_file(wal_path);
-        let _ = std::fs::remove_file(shm_path);
-    }
-
-    // 2. Create fresh schema
+    // 1. Create fresh schema
     let conn = open_projection(db_path).context("create fresh projection database")?;
     configure_rebuild_pragmas(&conn).context("configure rebuild sqlite pragmas")?;
     project::ensure_tracking_table(&conn).context("create tracking table")?;
@@ -318,6 +506,17 @@ pub fn rebuild(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> {
     let item_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
         .context("count items after rebuild")?;
+
+    // Leave the staged file in WAL mode, the mode of a live projection. A
+    // staged file renamed into place is then WAL from its first open, and a
+    // copy into a live WAL file keeps WAL.
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+        .context("PRAGMA journal_mode = WAL after rebuild")?;
+    anyhow::ensure!(
+        mode.eq_ignore_ascii_case("wal"),
+        "staged projection did not switch to WAL (journal_mode={mode})"
+    );
 
     let elapsed = start.elapsed();
 
@@ -510,6 +709,342 @@ mod tests {
             "updated_at_us of the failed event rolled back: {}",
             rebuilt[0]
         );
+    }
+
+    /// A connection that stays open across a rebuild, as a TUI session does,
+    /// must see the rebuilt projection, not a deleted copy. On Windows the
+    /// rebuild must not fail because the file is open (bn-x6aa).
+    #[test]
+    fn connection_open_across_rebuild_sees_rebuilt_data() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+
+        let reader = open_projection(&db_path).expect("open reader");
+        let count = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+                .expect("count items")
+        };
+        assert_eq!(count(&reader), 1);
+
+        append_event(&shard_mgr, &make_create_event("bn-two", "Two", 2_000));
+        rebuild(&events_dir, &db_path).expect("rebuild with a reader open");
+
+        assert_eq!(count(&reader), 2, "the open reader sees the rebuilt data");
+        let fresh = open_projection(&db_path).expect("open fresh");
+        assert_eq!(count(&fresh), 2);
+    }
+
+    /// The rebuild keeps the projection file itself, so no open handle is
+    /// left on a deleted copy (bn-x6aa).
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_keeps_the_same_file() {
+        use std::os::unix::fs::MetadataExt;
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+        let inode = std::fs::metadata(&db_path).expect("stat").ino();
+
+        rebuild(&events_dir, &db_path).expect("second rebuild");
+        assert_eq!(std::fs::metadata(&db_path).expect("stat").ino(), inode);
+    }
+
+    /// A live file that is not a valid database cannot take the copy, so the
+    /// rebuild replaces it.
+    #[test]
+    fn rebuild_replaces_a_live_file_that_is_not_a_database() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        std::fs::write(&db_path, b"this is not a sqlite database").expect("write junk");
+
+        let report = rebuild(&events_dir, &db_path).expect("rebuild over junk");
+        assert_eq!(report.item_count, 1);
+        let conn = open_projection(&db_path).expect("open rebuilt");
+        let items: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(items, 1);
+    }
+
+    /// A staging file left by a crashed rebuild is discarded, and no staging
+    /// file remains afterwards.
+    #[test]
+    fn rebuild_discards_stale_staging_and_leaves_none() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+
+        let staging = staging_path(&db_path);
+        std::fs::write(&staging, b"left by a crash").expect("write stale staging");
+        rebuild(&events_dir, &db_path).expect("rebuild with stale staging");
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".rebuild"))
+            .collect();
+        assert!(leftovers.is_empty(), "staging files left: {leftovers:?}");
+    }
+
+    fn item_count(conn: &rusqlite::Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .expect("count items")
+    }
+
+    /// Concurrent rebuilds shared one staging file: one deleted the other's
+    /// file mid-build, and the fallback then installed a half-built
+    /// projection or deleted the live one (bn-x6aa review). The projection
+    /// lock runs them one at a time.
+    #[test]
+    fn concurrent_rebuilds_keep_every_item() {
+        use std::sync::{Arc, Barrier};
+        const ITEMS: i64 = 2_000;
+        const THREADS: usize = 3;
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        for i in 0..ITEMS {
+            append_event(
+                &shard_mgr,
+                &make_create_event(&format!("bn-{i:05}"), "T", 1_000 + i),
+            );
+        }
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+
+        let mut failures = Vec::new();
+        for round in 0..4 {
+            let barrier = Arc::new(Barrier::new(THREADS));
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    let (events_dir, db_path) = (events_dir.clone(), db_path.clone());
+                    let barrier = Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        rebuild(&events_dir, &db_path)
+                            .map(|report| report.item_count)
+                            .map_err(|err| format!("{err:#}"))
+                    })
+                })
+                .collect();
+            for handle in handles {
+                let result = handle.join().expect("rebuild thread panicked");
+                if result != Ok(usize::try_from(ITEMS).unwrap()) {
+                    failures.push(format!("round {round}: {result:?}"));
+                }
+            }
+            match open_projection(&db_path).map(|conn| item_count(&conn)) {
+                Ok(ITEMS) => {}
+                other => failures.push(format!(
+                    "round {round}: live db {other:?}, exists={}",
+                    db_path.exists()
+                )),
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Run `write` (which projects `bn-two` and then writes the cursor)
+    /// against a rebuild that staged the log before `bn-two` was appended.
+    /// Test hooks ask the rebuild to install in the writer's gap between its
+    /// event rows and its cursor write. Returns the items a fresh
+    /// `ensure_projection` sees.
+    fn race_writer_against_rebuild(write: impl FnOnce(&Path, &Path, &Event)) -> i64 {
+        use crate::db::project::fault;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+
+        let (staged_tx, staged_rx) = mpsc::channel::<()>();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let (installed_tx, installed_rx) = mpsc::channel::<()>();
+        let rebuilder = {
+            let (events_dir, db_path) = (events_dir.clone(), db_path.clone());
+            std::thread::spawn(move || {
+                fault::set_before_install(Some(Box::new(move || {
+                    let _ = staged_tx.send(());
+                    // Wait for the writer's gap. Under the lock the writer
+                    // cannot start, so give up after a short wait.
+                    let _ = go_rx.recv_timeout(Duration::from_millis(500));
+                })));
+                let result = rebuild(&events_dir, &db_path).map_err(|e| format!("{e:#}"));
+                let _ = installed_tx.send(());
+                result
+            })
+        };
+        staged_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("rebuild staged");
+
+        // The writer appends after the rebuild read the log.
+        let two = make_create_event("bn-two", "Two", 2_000);
+        append_event(&shard_mgr, &two);
+        fault::set_before_cursor_write(Some(Box::new(move || {
+            let _ = go_tx.send(());
+            let _ = installed_rx.recv_timeout(Duration::from_secs(2));
+        })));
+        write(&events_dir, &db_path, &two);
+        fault::set_before_cursor_write(None);
+
+        rebuilder
+            .join()
+            .expect("rebuild thread panicked")
+            .expect("racing rebuild");
+        let conn = crate::db::ensure_projection(dir.path())
+            .expect("ensure projection")
+            .expect("projection exists");
+        item_count(&conn)
+    }
+
+    /// A single-event projection holds the projection lock across its rows
+    /// and its cursor write. A rebuild that copied in between left the
+    /// cursor covering an event it had removed, so the event was lost
+    /// (bn-x6aa review).
+    #[test]
+    fn rebuild_cannot_land_between_event_rows_and_cursor() {
+        let items = race_writer_against_rebuild(|_, db_path, event| {
+            let writer = open_projection(db_path).expect("open writer");
+            crate::db::project::Projector::new(&writer)
+                .project_event(event)
+                .expect("project event");
+        });
+        assert_eq!(items, 2, "bn-two lost after a racing rebuild");
+    }
+
+    /// The same race for an incremental apply: its replayed rows and its
+    /// cursor write are one locked unit.
+    #[test]
+    fn rebuild_cannot_land_between_incremental_rows_and_cursor() {
+        let items = race_writer_against_rebuild(|events_dir, db_path, _| {
+            let report = crate::db::incremental::incremental_apply(events_dir, db_path, false)
+                .expect("incremental apply");
+            assert!(!report.full_rebuild_triggered, "{report:?}");
+        });
+        assert_eq!(items, 2, "bn-two lost after a racing rebuild");
+    }
+
+    /// A writer that holds the live database past the busy timeout makes the
+    /// rebuild fail. The live file is not deleted: others may have it open.
+    #[test]
+    fn busy_live_database_fails_the_rebuild_and_stays() {
+        use std::time::Duration;
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&db_path).expect("stat").ino()
+        };
+
+        let holder = open_projection(&db_path).expect("open holder");
+        holder
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold write lock");
+        append_event(&shard_mgr, &make_create_event("bn-two", "Two", 2_000));
+
+        let timeout = Duration::from_millis(300);
+        set_copy_busy_timeout(Some(timeout));
+        let result = rebuild(&events_dir, &db_path);
+        set_copy_busy_timeout(None);
+        // Time only the copy step, not the build, so a loaded machine does
+        // not make the bound flaky.
+        let staging = staging_path(&db_path);
+        build_projection(&events_dir, &staging).expect("stage");
+        let started = Instant::now();
+        let copy = install_rebuilt(&staging, &db_path, timeout);
+        let waited = started.elapsed();
+        remove_db_files(&staging);
+        assert!(copy.is_err(), "copy must fail while the live db is busy");
+
+        let err = result.expect_err("rebuild must fail while the live db is busy");
+        assert!(format!("{err:#}").contains("unchanged"), "{err:#}");
+        // The copy waits for the writer, but only about twice the timeout.
+        assert!(waited >= timeout, "copy gave up after {waited:?}");
+        assert!(
+            waited < timeout * 2 + Duration::from_millis(400),
+            "copy retries took {waited:?}"
+        );
+        assert!(db_path.exists(), "live projection deleted");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(std::fs::metadata(&db_path).expect("stat").ino(), inode);
+        }
+        holder.execute_batch("ROLLBACK").expect("release");
+        assert_eq!(item_count(&holder), 1, "live data intact");
+        drop(holder);
+        assert_eq!(item_count(&open_projection(&db_path).expect("open")), 1);
+    }
+
+    /// A rebuilt projection is in WAL mode at the latest schema version,
+    /// both when it is renamed into place and when it is copied in.
+    #[test]
+    fn rebuilt_projection_is_wal_at_latest_schema() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+
+        for pass in ["rename", "copy"] {
+            rebuild(&events_dir, &db_path).expect("rebuild");
+            // A raw connection reports the mode stored in the file.
+            let raw = rusqlite::Connection::open(&db_path).expect("open raw");
+            let mode: String = raw
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .expect("journal_mode");
+            let version: u32 = raw
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("user_version");
+            assert_eq!(mode, "wal", "{pass}");
+            assert_eq!(
+                version,
+                crate::db::migrations::LATEST_SCHEMA_VERSION,
+                "{pass}"
+            );
+        }
+    }
+
+    /// A reader inside a read transaction keeps its snapshot across the
+    /// rebuild, then sees the rebuilt data once the transaction ends.
+    #[test]
+    fn reader_snapshot_survives_rebuild() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+
+        let reader = open_projection(&db_path).expect("open reader");
+        reader.execute_batch("BEGIN").expect("begin");
+        assert_eq!(item_count(&reader), 1);
+
+        append_event(&shard_mgr, &make_create_event("bn-two", "Two", 2_000));
+        rebuild(&events_dir, &db_path).expect("rebuild with a read transaction open");
+
+        assert_eq!(
+            item_count(&reader),
+            1,
+            "snapshot kept inside the transaction"
+        );
+        reader.execute_batch("COMMIT").expect("commit");
+        assert_eq!(item_count(&reader), 2, "rebuilt data after the transaction");
     }
 
     #[test]

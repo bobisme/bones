@@ -9,6 +9,7 @@ pub mod fts;
 pub mod incremental;
 pub mod migrations;
 pub mod project;
+pub mod projection_lock;
 pub mod query;
 pub mod rebuild;
 pub mod schema;
@@ -17,6 +18,11 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::{path::Path, path::PathBuf, time::Duration};
 use tracing::debug;
+
+pub use projection_lock::{
+    PROJECTION_LOCK_FILE, PROJECTION_LOCK_TIMEOUT, ProjectionLock, lock_projection,
+    projection_lock_path,
+};
 
 /// Busy timeout used for projection DB connections.
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
