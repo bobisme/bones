@@ -1,5 +1,72 @@
 # Changelog
 
+## v0.26.0 — 2026-09-27
+
+This release is a correctness pass on the CRDT and projection layers, driven by
+property tests, a deterministic simulator, Kani and Verus. Replicas that hold
+the same events now show the same items, whatever order the events arrived in.
+
+**Upgrade note:** the projection schema moves to v8. The first `bn` command
+after upgrading rebuilds `.bones/bones.db` from the event log once. The event
+log format is unchanged, and old event lines still parse and hash the same.
+
+### Added
+
+- **Verified merge kernels (`bones-verified` crate).** The LWW ordering, the
+  lifecycle (epoch/phase) merge and the created/updated timestamp merges are
+  now small functions proved correct with [Verus](https://github.com/verus-lang/verus)
+  for all inputs. `bones-core` calls them. A plain `cargo build` does not need
+  Verus; `just verus` runs the proofs. The crate depends on `vstd`, which adds
+  seven crates to the build.
+- **Kani proofs** for the binary cache codec (varints, zigzag, timestamp
+  deltas, run-length encoding) and for the LWW order. Run them with
+  `just kani`; each harness runs in its own memory-capped scope.
+- **Projection simulator** in `bones-sim`: seeded multi-replica runs with
+  union and rebase pulls, duplicate lines and dropped projections, checking
+  that incremental apply matches a full rebuild and that replicas converge.
+
+### Changed
+
+- **Your edits after a pull win, even with a slow clock.** Applying events now
+  moves the local clock past the newest one seen (capped at one hour ahead),
+  so a write made after pulling gets a later timestamp than what was pulled.
+- **LWW ties no longer depend on causal stamps.** Writes are ordered by
+  `(wall clock, agent, event hash)` only. The old causal step could make the
+  order non-transitive under clock skew, so merges depended on merge order.
+- **Interval Tree Clocks are removed.** `bn` no longer writes a stamp file per
+  event. New events carry the constant `itc:AQ` in the `itc` column, which is
+  kept for format compatibility. Old `.bones/itc/` directories can be deleted.
+- **`bn update --description ""` clears the description** (stored as none).
+- **Malformed update values are ignored.** An invalid kind, urgency, size or
+  parent in an update is no write, instead of failing or writing a default.
+  `null` still clears description, size and parent.
+- **Compaction snapshots match `bn show`.** Snapshots keep raw link types and a
+  separate compact summary, ignore duplicate log lines, and re-running
+  `bn compact` no longer adds a new snapshot when nothing changed. Snapshots
+  carry a format version (`_format: 3`); older snapshots are regenerated.
+- **A link or parent to an item with no events** creates a hidden placeholder
+  row instead of failing. It does not appear in lists, search, triage or the
+  TUI, and `bn dep add` to that ID still reports it as not found.
+- A projection built by a newer `bn` is never written by an older one; it is
+  rebuilt at the older binary's schema instead.
+
+### Fixed
+
+- The SQLite projection no longer depends on the order of events in the log:
+  per-field winner keys decide every field, set member, reset and redaction.
+- Incremental apply no longer resumes at a stale byte offset after a rebase
+  pull rewrites the log before the cursor; a prefix digest forces a rebuild.
+- `created_at` is correct for items that had events at time 0, such as items
+  migrated from beads with dependencies (they showed 1970 before).
+- Negative timestamps no longer win every LWW merge.
+- A failing event during a full rebuild no longer leaves partial writes.
+- Two processes migrating the projection at once no longer trigger a
+  spurious rebuild.
+- Varint decoding in the binary cache accepts only canonical encodings.
+- Link keys can no longer collide when a target ID contains `/`.
+- Redacting an event also hides content that a snapshot copied from it.
+- Labels containing a NUL character are removed correctly by a label reset.
+
 ## v0.25.0 - 2026-08-09
 
 ### Added
