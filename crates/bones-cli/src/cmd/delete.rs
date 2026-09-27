@@ -55,12 +55,15 @@ fn find_bones_dir(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+/// Hidden reference placeholders (`is_deleted = 1` with no
+/// `deleted_at_us`, see `bones_core::db::project`) are not items to delete.
 fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Result<Option<String>> {
     let input = input.trim();
 
     let exact: Option<String> = conn
         .query_row(
-            "SELECT item_id FROM items WHERE item_id = ?1 LIMIT 1",
+            "SELECT item_id FROM items WHERE item_id = ?1 \
+                 AND NOT (is_deleted = 1 AND deleted_at_us IS NULL) LIMIT 1",
             params![input],
             |row| row.get(0),
         )
@@ -73,7 +76,8 @@ fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
         let like_pattern = format!("{input}%");
         let prefix: Option<String> = conn
             .query_row(
-                "SELECT item_id FROM items WHERE item_id LIKE ?1 ORDER BY item_id LIMIT 1",
+                "SELECT item_id FROM items WHERE item_id LIKE ?1 \
+                 AND NOT (is_deleted = 1 AND deleted_at_us IS NULL) ORDER BY item_id LIMIT 1",
                 params![like_pattern],
                 |row| row.get(0),
             )
@@ -85,7 +89,8 @@ fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
         let with_prefix = format!("bn-{input}");
         let exact2: Option<String> = conn
             .query_row(
-                "SELECT item_id FROM items WHERE item_id = ?1 LIMIT 1",
+                "SELECT item_id FROM items WHERE item_id = ?1 \
+                 AND NOT (is_deleted = 1 AND deleted_at_us IS NULL) LIMIT 1",
                 params![with_prefix],
                 |row| row.get(0),
             )
@@ -97,7 +102,8 @@ fn resolve_any_item_id(conn: &rusqlite::Connection, input: &str) -> anyhow::Resu
         let like_pattern = format!("bn-{input}%");
         let prefix: Option<String> = conn
             .query_row(
-                "SELECT item_id FROM items WHERE item_id LIKE ?1 ORDER BY item_id LIMIT 1",
+                "SELECT item_id FROM items WHERE item_id LIKE ?1 \
+                 AND NOT (is_deleted = 1 AND deleted_at_us IS NULL) ORDER BY item_id LIMIT 1",
                 params![like_pattern],
                 |row| row.get(0),
             )

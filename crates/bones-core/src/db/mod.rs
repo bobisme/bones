@@ -487,6 +487,51 @@ mod tests {
     }
 
     #[test]
+    fn v6_projection_is_rebuilt_under_v7_semantics() {
+        // bn-18fs: rows a v6 bn projected can differ from a replay by this
+        // bn (empty descriptions, malformed values, snapshots, deleted_at).
+        // Without a rebuild such a row would stay until its fields change.
+        let (_dir, bones_dir) = built_projection();
+        let db_path = bones_dir.join("bones.db");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open raw");
+            conn.execute_batch(
+                "UPDATE items SET description = '' WHERE item_id = 'bn-one';
+                 UPDATE projection_meta SET schema_version = 6 WHERE id = 1;
+                 PRAGMA user_version = 6;",
+            )
+            .expect("make v6 projection");
+        }
+
+        {
+            let conn = open_projection(&db_path).expect("open and migrate");
+            assert!(
+                projection_dirty_marker_path(&bones_dir).exists(),
+                "v6 rows need a rebuild"
+            );
+            let (offset, hash) = crate::db::query::get_projection_cursor(&conn).expect("cursor");
+            assert_eq!((offset, hash), (0, None));
+            assert_eq!(
+                migrations::current_schema_version(&conn).expect("version"),
+                7
+            );
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure projection")
+            .expect("projection connection");
+        let description: Option<String> = conn
+            .query_row(
+                "SELECT description FROM items WHERE item_id = 'bn-one'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read description");
+        assert_eq!(description, None, "rebuilt row");
+        assert!(!projection_dirty_marker_path(&bones_dir).exists());
+    }
+
+    #[test]
     fn v5_projection_with_zero_created_at_is_rebuilt() {
         // bn-t37g: a v5 bn folded time-0 events (e.g. `bn migrate` links)
         // into created_at_us as 0. The v6 rule reads 0 as "unknown", so

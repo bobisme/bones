@@ -79,6 +79,7 @@ use crate::crdt::state::{EpochPhaseState, Phase};
 use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
+use crate::model::field_value;
 use crate::model::item::{Kind, Size, State, Urgency};
 
 use super::Timestamp;
@@ -338,15 +339,23 @@ impl WorkItemState {
                         agent_id.clone(),
                         event_hash.clone(),
                     );
+                    // A malformed parent is none (`field_value::parent_or_none`).
                     lww_set(
                         &mut self.parent,
-                        data.parent.clone().unwrap_or_default(),
+                        field_value::parent_or_none(data.parent.as_deref())
+                            .unwrap_or_default()
+                            .to_string(),
                         wall_ts,
                         agent_id.clone(),
                         event_hash.clone(),
                     );
-                    // Apply initial labels via OR-Set.
-                    for label in &data.labels {
+                    // Apply initial labels via OR-Set. Blank members are
+                    // no write, as in the projection (bn-18fs).
+                    for label in data
+                        .labels
+                        .iter()
+                        .filter(|l| !field_value::is_blank_member(l))
+                    {
                         let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, label);
                         self.labels.add(label.clone(), tag);
                     }
@@ -356,52 +365,45 @@ impl WorkItemState {
             EventType::Update => {
                 if let EventData::Update(data) = &event.data {
                     match data.field.as_str() {
+                        // Malformed values are no write, as in the
+                        // projection: see `model::field_value` (bn-18fs).
                         "title" => {
-                            // A non-string title writes "", as in the projection.
-                            let title = data.value.as_str().unwrap_or_default().to_string();
-                            lww_set(&mut self.title, title, wall_ts, agent_id, event_hash);
+                            if let Some(title) = field_value::title(&data.value) {
+                                lww_set(
+                                    &mut self.title,
+                                    title.to_string(),
+                                    wall_ts,
+                                    agent_id,
+                                    event_hash,
+                                );
+                            }
                         }
                         "description" => {
-                            let desc = data
-                                .value
-                                .as_str()
-                                .map(|s| s.to_string())
-                                .unwrap_or_default();
-                            lww_set(&mut self.description, desc, wall_ts, agent_id, event_hash);
+                            if let Some(desc) = field_value::description(&data.value) {
+                                let desc = desc.unwrap_or_default().to_string();
+                                lww_set(&mut self.description, desc, wall_ts, agent_id, event_hash);
+                            }
                         }
                         "kind" => {
-                            // A non-string kind writes the default, as in the
-                            // projection. An unknown string is skipped: the
-                            // register cannot hold it.
-                            let kind = data
-                                .value
-                                .as_str()
-                                .map_or(Some(Kind::Task), |s| s.parse::<Kind>().ok());
-                            if let Some(kind) = kind {
+                            if let Some(kind) = field_value::kind(&data.value) {
                                 lww_set(&mut self.kind, kind, wall_ts, agent_id, event_hash);
                             }
                         }
                         "size" => {
-                            let size = data.value.as_str().and_then(|s| s.parse::<Size>().ok());
-                            lww_set(&mut self.size, size, wall_ts, agent_id, event_hash);
+                            if let Some(size) = field_value::size(&data.value) {
+                                lww_set(&mut self.size, size, wall_ts, agent_id, event_hash);
+                            }
                         }
                         "urgency" => {
-                            // As for kind: non-string writes the default.
-                            let urgency = data
-                                .value
-                                .as_str()
-                                .map_or(Some(Urgency::Default), |s| s.parse::<Urgency>().ok());
-                            if let Some(urgency) = urgency {
+                            if let Some(urgency) = field_value::urgency(&data.value) {
                                 lww_set(&mut self.urgency, urgency, wall_ts, agent_id, event_hash);
                             }
                         }
                         "parent" => {
-                            let parent = data
-                                .value
-                                .as_str()
-                                .map(|s| s.to_string())
-                                .unwrap_or_default();
-                            lww_set(&mut self.parent, parent, wall_ts, agent_id, event_hash);
+                            if let Some(parent) = field_value::parent(&data.value) {
+                                let parent = parent.unwrap_or_default().to_string();
+                                lww_set(&mut self.parent, parent, wall_ts, agent_id, event_hash);
+                            }
                         }
                         "labels" => {
                             if let Some(labels) = data.value.as_array() {
@@ -410,6 +412,7 @@ impl WorkItemState {
                                 let wanted: Vec<String> = labels
                                     .iter()
                                     .filter_map(|l| l.as_str())
+                                    .filter(|l| !field_value::is_blank_member(l))
                                     .map(str::to_string)
                                     .collect();
                                 // Labels it keeps are not removed, so that a
@@ -439,7 +442,7 @@ impl WorkItemState {
                                     .unwrap_or("")
                                     .to_string();
 
-                                if !label.is_empty() {
+                                if !field_value::is_blank_member(&label) {
                                     match action {
                                         "add" => {
                                             let tag = make_orset_tag(
@@ -474,6 +477,7 @@ impl WorkItemState {
             EventType::Assign => {
                 if let EventData::Assign(data) = &event.data {
                     match data.action {
+                        AssignAction::Assign if field_value::is_blank_member(&data.agent) => {}
                         AssignAction::Assign => {
                             let tag = make_orset_tag(wall_ts, &agent_id, &event_hash, &data.agent);
                             self.assignees.add(data.agent.clone(), tag);
@@ -493,7 +497,9 @@ impl WorkItemState {
             }
 
             EventType::Link => {
-                if let EventData::Link(data) = &event.data {
+                if let EventData::Link(data) = &event.data
+                    && !field_value::is_blank_member(&data.link_type)
+                {
                     // Every link type is kept, keyed by (target, type), as
                     // in the projection (bn-t37g).
                     let key = LinkKey {
@@ -1376,19 +1382,44 @@ mod tests {
     }
 
     #[test]
-    fn non_string_values_write_defaults() {
+    fn malformed_values_are_no_write() {
+        // The rule of `model::field_value`, shared with the projection
+        // (bn-18fs): the earlier values survive.
         let events = [
             create_event("T", 1_000, "alice", "blake3:c"),
             update_event("kind", serde_json::json!("bug"), 1_500, "blake3:k"),
             update_event("urgency", serde_json::json!("urgent"), 1_500, "blake3:u"),
+            update_event("size", serde_json::json!("l"), 1_500, "blake3:s"),
+            update_event("parent", serde_json::json!("bn-p1"), 1_500, "blake3:p"),
             update_event("title", serde_json::json!(5), 2_000, "blake3:t2"),
             update_event("kind", serde_json::Value::Null, 2_000, "blake3:k2"),
+            update_event("kind", serde_json::json!("epic"), 2_000, "blake3:k3"),
             update_event("urgency", serde_json::json!(1), 2_000, "blake3:u2"),
+            update_event("size", serde_json::json!("mega"), 2_000, "blake3:s2"),
+            update_event("parent", serde_json::json!("no id"), 2_000, "blake3:p2"),
+            update_event("description", serde_json::json!(7), 2_000, "blake3:d2"),
         ];
         let state = WorkItemState::from_events(&events);
-        assert_eq!(state.title.value, "");
-        assert_eq!(state.kind.value, Kind::Task);
-        assert_eq!(state.urgency.value, Urgency::Default);
+        assert_eq!(state.title.value, "T");
+        assert_eq!(state.kind.value, Kind::Bug);
+        assert_eq!(state.urgency.value, Urgency::Urgent);
+        assert_eq!(state.size.value, Some(Size::L));
+        assert_eq!(state.parent.value, "bn-p1");
+        assert_eq!(state.title.event_hash, "blake3:c");
+
+        // null clears the optional fields.
+        let cleared = [
+            events[0].clone(),
+            events[3].clone(),
+            events[4].clone(),
+            update_event("size", serde_json::Value::Null, 3_000, "blake3:s3"),
+            update_event("parent", serde_json::Value::Null, 3_000, "blake3:p3"),
+            update_event("description", serde_json::Value::Null, 3_000, "blake3:d3"),
+        ];
+        let state = WorkItemState::from_events(&cleared);
+        assert_eq!(state.size.value, None);
+        assert_eq!(state.parent.value, "");
+        assert_eq!(state.description.value, "");
     }
 
     #[test]

@@ -242,6 +242,25 @@ SET schema_version = 6,
 WHERE id = 1;
 ";
 
+/// Migration v7: projection semantics of bn-18fs.
+///
+/// Rows projected by an older bn can differ from a replay of the same log:
+/// an empty description was stored as `""` (now NULL), `deleted_at_us`
+/// held the raw wall clock (now the ordering time), malformed update
+/// values were written (now no write, see `model::field_value`), snapshots
+/// set only `snapshot_json` (now merged field by field), and a parent or
+/// link target without a row failed the foreign key (now a hidden
+/// reference placeholder). No schema change: the cursor is cleared and
+/// `REBUILD_REQUIRED_BELOW` forces a full rebuild.
+pub const MIGRATION_V7_SQL: &str = r"
+UPDATE projection_meta
+SET schema_version = 7,
+    last_event_offset = 0,
+    last_event_hash = NULL,
+    last_event_prefix_digest = NULL
+WHERE id = 1;
+";
+
 /// Indexes expected by list/filter/triage query paths.
 pub const REQUIRED_INDEXES: &[&str] = &[
     "idx_items_state_urgency_updated",

@@ -176,10 +176,17 @@ pub struct SnapshotPayload {
 /// Format of the snapshots this bn writes.
 ///
 /// Format 2 (bn-t37g) matches the projection: raw link types, a separate
-/// compact summary, and creates that write absent fields. `bn compact`
+/// compact summary, and creates that write absent fields. Format 3
+/// (bn-18fs) reads update values by the rules of `model::field_value`
+/// (malformed values and blank members are no write). `bn compact`
 /// replaces a snapshot of an older format even when its events did not
 /// change.
-pub const SNAPSHOT_FORMAT: u32 = 2;
+///
+/// The projection merges the fields of a snapshot of this format or newer
+/// only (`db::project`). An older snapshot can hold values that this bn
+/// never writes from the same events, so it stays JSON only there. Its
+/// source events stay in the log, so nothing is lost.
+pub const SNAPSHOT_FORMAT: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // WorkItemState ↔ SnapshotPayload conversion
@@ -1273,6 +1280,19 @@ mod tests {
         let by_item = BTreeMap::from([("bn-test1".to_string(), old_log)]);
         let (redo, _) = compact_items(&by_item, "compactor", 30, now, &redacted);
         assert_eq!(redo.len(), 1, "an old-format snapshot must be replaced");
+        assert_eq!(redo[0].event_hash, first[0].event_hash);
+
+        // So is a snapshot of format 2, from before the field_value rules
+        // (bn-18fs).
+        let mut format_2 = first[0].clone();
+        if let EventData::Snapshot(data) = &mut format_2.data {
+            data.state["_format"] = serde_json::json!(2);
+        }
+        let mut format_2_log = events.clone();
+        format_2_log.push(format_2);
+        let by_item = BTreeMap::from([("bn-test1".to_string(), format_2_log)]);
+        let (redo, _) = compact_items(&by_item, "compactor", 30, now, &redacted);
+        assert_eq!(redo.len(), 1, "a format 2 snapshot must be replaced");
         assert_eq!(redo[0].event_hash, first[0].event_hash);
 
         // The earlier snapshot is not a source: with a new event, the new

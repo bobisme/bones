@@ -727,11 +727,16 @@ pub fn count_items(conn: &Connection, filter: &ItemFilter) -> Result<u64> {
 
 /// Check if an item exists in the projection.
 ///
+/// A hidden reference placeholder (a parent or link target with no events
+/// of its own, see `db::project`) does not count: it is `is_deleted = 1`
+/// with no `deleted_at_us`, which a delete never leaves.
+///
 /// # Errors
 ///
 /// Returns an error if the query fails.
 pub fn item_exists(conn: &Connection, item_id: &str) -> Result<bool> {
-    let sql = "SELECT EXISTS(SELECT 1 FROM items WHERE item_id = ?1)";
+    let sql = "SELECT EXISTS(SELECT 1 FROM items WHERE item_id = ?1 \
+               AND NOT (is_deleted = 1 AND deleted_at_us IS NULL))";
     let exists: bool = conn
         .query_row(sql, params![item_id], |row| row.get(0))
         .context("check item_exists")?;
@@ -1700,6 +1705,16 @@ mod tests {
 
         assert!(item_exists(&conn, "bn-001").unwrap());
         assert!(!item_exists(&conn, "bn-nope").unwrap());
+
+        // A hidden reference placeholder is not an item.
+        conn.execute(
+            "INSERT INTO items (item_id, title, kind, state, urgency, is_deleted, \
+             search_labels, created_at_us, updated_at_us) \
+             VALUES ('bn-ref', '', 'task', 'open', 'default', 1, '', 1, 1)",
+            [],
+        )
+        .unwrap();
+        assert!(!item_exists(&conn, "bn-ref").unwrap());
     }
 
     // -----------------------------------------------------------------------

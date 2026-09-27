@@ -11,6 +11,14 @@
 //! optional fields, malformed update values, legacy label arrays, every link
 //! type, compact events and duplicate lines.
 //!
+//! Malformed update values are no write in both (bn-18fs, see
+//! `model::field_value`).
+//!
+//! The projection of the snapshot alone, as a compacted log holds it, must
+//! also show the same item (bn-18fs), except for comments (a snapshot
+//! keeps their hashes, not their bodies) and `updated_at` (the snapshot
+//! sorts after its sources).
+//!
 //! Known representation gaps, normalized here: the state stores "no
 //! description" and "no parent" as `""` where the projection stores NULL.
 //! Redactions are left out: compaction refuses items with redacted events.
@@ -122,7 +130,8 @@ fn arb_urgency() -> impl Strategy<Value = Urgency> {
     ]
 }
 
-/// A value that is not a string: the malformed update values.
+/// Malformed update values (see `model::field_value`): values that are not
+/// strings, and strings that do not parse.
 fn arb_non_string() -> impl Strategy<Value = serde_json::Value> {
     prop_oneof![
         Just(serde_json::Value::Null),
@@ -132,8 +141,27 @@ fn arb_non_string() -> impl Strategy<Value = serde_json::Value> {
     ]
 }
 
+/// Strings that no kind, urgency or size parses, and that are no item ID.
+fn arb_bad_string() -> impl Strategy<Value = serde_json::Value> {
+    prop_oneof![
+        Just(serde_json::json!("")),
+        Just(serde_json::json!("bogus")),
+    ]
+}
+
 fn arb_update() -> impl Strategy<Value = Op> {
     prop_oneof![
+        arb_bad_string().prop_map(|v| Op::Update("kind", v)),
+        arb_bad_string().prop_map(|v| Op::Update("urgency", v)),
+        arb_bad_string().prop_map(|v| Op::Update("size", v)),
+        arb_bad_string().prop_map(|v| Op::Update("parent", v)),
+        Just(Op::Update("description", serde_json::json!(""))),
+        // Blank members are no write (bn-18fs).
+        Just(Op::Update(
+            "labels",
+            serde_json::json!({"action": "add", "label": "  "})
+        )),
+        Just(Op::Update("labels", serde_json::json!(["", "label-1"]))),
         (0u8..3).prop_map(|n| Op::Update("title", serde_json::json!(format!("title {n}")))),
         arb_non_string().prop_map(|v| Op::Update("title", v)),
         (0u8..3).prop_map(|n| Op::Update("description", serde_json::json!(format!("desc {n}")))),
@@ -587,6 +615,24 @@ proptest! {
             let restored = WorkItemState::from_snapshot_payload(&payload);
             prop_assert_eq!(&state_view(&restored), &projected, "snapshot of {}", item);
             prop_assert_eq!(link_views_agree(&restored), Ok(()), "snapshot link views of {}", item);
+
+            // The compacted log: the other items' events, and this item's
+            // snapshot in place of its events.
+            let compacted: Vec<Event> = events
+                .iter()
+                .filter(|e| e.item_id.as_str() != item)
+                .cloned()
+                .chain(std::iter::once(snapshot.clone()))
+                .collect();
+            let compacted_conn = project(&compacted);
+            let mut from_snapshot =
+                projection_view(&compacted_conn, item).expect("snapshot projects its item");
+            let mut expected = projected;
+            for view in [&mut from_snapshot, &mut expected] {
+                view.comments.clear();
+                view.updated_at = 0;
+            }
+            prop_assert_eq!(&from_snapshot, &expected, "projected snapshot of {}", item);
         }
     }
 }

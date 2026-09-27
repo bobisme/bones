@@ -34,8 +34,12 @@ fn configure_rebuild_pragmas(conn: &rusqlite::Connection) -> Result<()> {
     // Bulk-load tuning: this DB was just created and is about to be
     // populated from the canonical event log. If anything goes wrong the
     // whole file is discarded and the rebuild is re-run, so crash durability
-    // during the rebuild window has no value. Turning fsync + journaling off
-    // saves the bulk-load from paying for either.
+    // during the rebuild window has no value. fsync is off.
+    //
+    // The journal stays, in memory: project_batch rolls a failed event back
+    // to its savepoint, and with journal_mode=OFF SQLite cannot roll back.
+    // The failed event's partial writes would then stay in a rebuilt
+    // projection but not in an incremental one (bn-39tj).
     //
     // `configure_pragmas` in db/mod.rs restores the safe defaults
     // (journal_mode=WAL, synchronous=NORMAL) the next time this DB is
@@ -43,8 +47,8 @@ fn configure_rebuild_pragmas(conn: &rusqlite::Connection) -> Result<()> {
     conn.pragma_update(None, "synchronous", "OFF")
         .context("PRAGMA synchronous = OFF")?;
     let _: String = conn
-        .query_row("PRAGMA journal_mode = OFF", [], |row| row.get(0))
-        .context("PRAGMA journal_mode = OFF")?;
+        .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
+        .context("PRAGMA journal_mode = MEMORY")?;
     let _: String = conn
         .query_row("PRAGMA locking_mode = EXCLUSIVE", [], |row| row.get(0))
         .context("PRAGMA locking_mode = EXCLUSIVE")?;
@@ -419,6 +423,93 @@ mod tests {
         shard_mgr
             .append_raw(year, month, &line)
             .expect("append event");
+    }
+
+    /// Items, field keys and projected hashes of a projection file.
+    fn dump(db_path: &Path) -> Vec<String> {
+        let conn = rusqlite::Connection::open(db_path).expect("open projection");
+        let mut out = Vec::new();
+        for sql in [
+            "SELECT item_id, title, description, kind, state, size, is_deleted, \
+             created_at_us, updated_at_us FROM items ORDER BY item_id",
+            "SELECT item_id, field, wall_ts_us, agent, event_hash FROM field_clocks \
+             ORDER BY item_id, field",
+            "SELECT item_id, label FROM item_labels ORDER BY item_id, label",
+            "SELECT event_hash FROM projected_events ORDER BY event_hash",
+        ] {
+            let mut stmt = conn.prepare(sql).expect("prepare dump");
+            let columns = stmt.column_count();
+            let rows = stmt
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|i| {
+                            row.get::<_, rusqlite::types::Value>(i)
+                                .map(|v| format!("{v:?}"))
+                        })
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .expect("query dump");
+            for row in rows {
+                out.push(row.expect("read dump row").join(" | "));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn failed_event_leaves_no_partial_writes_in_rebuild_or_incremental() {
+        // bn-39tj: project_batch rolls a failed event back to its savepoint.
+        // The rebuild ran with journal_mode=OFF, where SQLite cannot roll
+        // back, so a rebuilt projection kept the failed event's writes and
+        // an incremental one did not.
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-001", "Item", 1_000));
+
+        let mut doomed = Event {
+            wall_ts_us: 2_000,
+            agent: "test-agent".into(),
+            itc: "itc:AQ".into(),
+            parents: vec![],
+            event_type: EventType::Update,
+            item_id: ItemId::new_unchecked("bn-001"),
+            data: EventData::Update(UpdateData {
+                field: "labels".into(),
+                value: serde_json::json!({"action": "add", "label": "doomed"}),
+                extra: BTreeMap::new(),
+            }),
+            event_hash: String::new(),
+        };
+        writer::write_event(&mut doomed).expect("compute hash");
+
+        // Incremental: the failing event arrives after a rebuild.
+        rebuild(&events_dir, &db_path).unwrap();
+        append_event(&shard_mgr, &doomed);
+        crate::db::project::fault::fail_after_handler(Some(&doomed.event_hash));
+        let report = crate::db::incremental::incremental_apply(&events_dir, &db_path, false)
+            .expect("incremental apply");
+        assert!(!report.full_rebuild_triggered);
+        assert_eq!(report.projection_errors, 1);
+        let incremental = dump(&db_path);
+
+        // Full rebuild of the same log.
+        let report = rebuild(&events_dir, &db_path).unwrap();
+        assert_eq!(report.projection_errors, 1);
+        let rebuilt = dump(&db_path);
+        crate::db::project::fault::fail_after_handler(None);
+
+        assert_eq!(rebuilt, incremental);
+        assert!(
+            rebuilt.iter().all(|row| !row.contains(&doomed.event_hash)),
+            "no field key of the failed event: {rebuilt:#?}"
+        );
+        assert!(rebuilt.iter().all(|row| !row.contains("doomed")));
+        assert!(
+            rebuilt[0].ends_with("Integer(1000) | Integer(1000)"),
+            "updated_at_us of the failed event rolled back: {}",
+            rebuilt[0]
+        );
     }
 
     #[test]

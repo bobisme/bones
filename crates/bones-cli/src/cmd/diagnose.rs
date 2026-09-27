@@ -483,9 +483,17 @@ fn collect_projection_report(
             .push("projection is missing projected_events tracking table".to_string());
     }
 
-    report.item_count = query_count_usize(&conn, "SELECT COUNT(*) FROM items");
-    report.placeholder_item_count =
-        query_count_usize(&conn, "SELECT COUNT(*) FROM items WHERE title = ''");
+    // Hidden reference placeholders (a parent or link target with no
+    // events of its own: `is_deleted = 1`, no `deleted_at_us`) are not items.
+    report.item_count = query_count_usize(
+        &conn,
+        "SELECT COUNT(*) FROM items WHERE NOT (is_deleted = 1 AND deleted_at_us IS NULL)",
+    );
+    report.placeholder_item_count = query_count_usize(
+        &conn,
+        "SELECT COUNT(*) FROM items WHERE title = '' \
+         AND NOT (is_deleted = 1 AND deleted_at_us IS NULL)",
+    );
 
     if let Some(placeholder_count) = report.placeholder_item_count
         && placeholder_count > 0
