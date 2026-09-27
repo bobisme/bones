@@ -38,7 +38,9 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-#[cfg(feature = "jemalloc")]
+// Precedence when several allocator features are on (e.g. --all-features):
+// dhat-heap, then jemalloc, then mimalloc. Exactly one binding compiles.
+#[cfg(all(feature = "jemalloc", not(feature = "dhat-heap")))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -47,6 +49,7 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 // without `--no-default-features`.
 #[cfg(all(
     feature = "mimalloc",
+    not(windows),
     not(any(feature = "jemalloc", feature = "dhat-heap"))
 ))]
 #[global_allocator]

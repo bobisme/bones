@@ -48,13 +48,16 @@ crossterm = { workspace = true }
 unicode-width = { workspace = true }
 dhat = { version = "0.3", optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
-mimalloc = { version = "0.1", default-features = false, optional = true }
 
 ## Auto-select the best semantic backend per platform.
 ## On non-Windows: ORT (ONNX Runtime) for highest quality embeddings.
 ## On Windows: model2vec (safetensors) to avoid CRT linking conflicts.
 [target.'cfg(not(windows))'.dependencies]
 bones-search = { workspace = true, features = ["semantic-ort"] }
+## mimalloc links the dynamic MSVC C runtime (/MD), while model2vec's
+## tokenizer dependency (esaxx-rs) links the static one (/MT); MSVC refuses
+## to mix them (LNK2038). Windows keeps the system allocator.
+mimalloc = { version = "0.1", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 bones-search = { workspace = true, features = ["semantic-model2vec"] }
@@ -78,6 +81,7 @@ jemalloc = ["dep:tikv-jemallocator"]
 ## sessions — so it is on by default. Selecting `jemalloc` or `dhat-heap`
 ## takes precedence and disables mimalloc at the global_allocator binding,
 ## so `cargo build --features jemalloc` works without `--no-default-features`.
+## On Windows the feature has no effect (see the target dependency above).
 mimalloc = ["dep:mimalloc"]
 
 [dev-dependencies]

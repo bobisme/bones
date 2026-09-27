@@ -1011,11 +1011,19 @@ mod tests {
         let mut conn = Connection::open(&db_path).expect("file db");
         migrations::migrate(&mut conn).expect("migrate");
 
-        let expected_cache = bones_dir.join("cache").join(PAGERANK_CACHE_FILE);
-        assert_eq!(project_root_from_conn(&conn).as_deref(), Some(dir.path()));
+        // SQLite reports the resolved path (e.g. /private/var on macOS,
+        // where /var is a symlink), so compare canonical paths.
+        let canonical = |p: &std::path::Path| p.canonicalize().expect("canonicalize");
+        let root = project_root_from_conn(&conn).expect("project root");
+        assert_eq!(canonical(&root), canonical(dir.path()));
+        let cache = pagerank_cache_path(&conn).expect("cache path");
         assert_eq!(
-            pagerank_cache_path(&conn).as_deref(),
-            Some(expected_cache.as_path())
+            cache
+                .strip_prefix(&root)
+                .expect("cache under the project root"),
+            std::path::Path::new(".bones")
+                .join("cache")
+                .join(PAGERANK_CACHE_FILE)
         );
     }
 

@@ -91,13 +91,10 @@ impl Model2VecBackend {
 
         let embeddings: Vec<f32> = tensor
             .data()
-            .chunks_exact(4)
-            .map(|c| {
-                f32::from_le_bytes(
-                    c.try_into()
-                        .expect("chunks_exact(4) guarantees 4-byte slices"),
-                )
-            })
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect();
 
         if embeddings.len() != vocab_size * dimensions {
