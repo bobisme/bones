@@ -51,9 +51,12 @@ session using `gpt-daybreak-blue-latest`, assigns
 vote, reports the anchored Rite verdict, terminates the dedicated Vessel
 session, and only then releases the claim.
 
-For a re-review after fixes, keep the same Seal review, run:
+For a re-review after fixes, keep the same Seal review. First retarget it to
+the fixed commits — `seal reviews request` alone leaves the review's target
+commit pinned at the old, pre-fix anchor — then re-request:
 
 ```bash
+maw exec "$WS" -- seal reviews retarget "$review_id" --agent "$AGENT"
 maw exec "$WS" -- seal reviews request "$review_id" \
   --reviewers "$EDICT_PROJECT-security" --agent "$AGENT"
 request_anchor=$(rite send --agent "$AGENT" "$EDICT_PROJECT" \
@@ -75,6 +78,6 @@ workspace `head`. Never start a second review for ordinary feedback fixes.
   If termination fails, keep the review claim held and report the operational
   blocker. Do not fall back to an @mention or a workspace scan.
 - If the Seal vote blocks, use [review-response](review-response.md), then
-  re-request and launch the same review with a new anchor.
+  retarget, re-request, and launch the same review with a new anchor.
 - Do not close the bone, merge the workspace, or release the work claim until
   Seal records the required current approval.

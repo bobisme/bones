@@ -239,6 +239,9 @@ launch the one-review Daybreak session in
 `@<project>-security` mention: the ambient hook is retired.
 
 ```bash
+# Retarget first — `seal reviews request` alone leaves the review's target
+# commit pinned at the old, pre-fix anchor.
+maw exec $WS -- seal reviews retarget <review-id> --agent $AGENT
 maw exec $WS -- seal reviews request <review-id> --reviewers $PROJECT-security --agent $AGENT
 req=$(rite send --agent $AGENT $PROJECT "Dedicated security re-review requested: <review-id> in $WS" -L review-response --format json | jq -r .id)
 bn bone comment add <bone-id> "Review anchor: $req for <review-id>"

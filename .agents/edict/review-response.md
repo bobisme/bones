@@ -40,7 +40,11 @@ Run this when:
    b. Commit the fixes in your workspace:
       - `maw exec $WS -- git add -A`
       - `maw exec $WS -- git commit -m "fix: address review feedback on <review-id>"`
-   c. Re-request review: `maw exec $WS -- seal reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
+   c. Retarget the review to the fixed commits, then re-request it — `seal
+      reviews request` alone leaves the review's target commit pinned at the
+      old, pre-fix anchor:
+      - `maw exec $WS -- seal reviews retarget <review-id> --agent $AGENT`
+      - `maw exec $WS -- seal reviews request <review-id> --agent $AGENT --reviewers <reviewer>`
    d. Create a NEW anchor and launch one exact Daybreak re-review. Do not use an
       @mention or wait for a hook:
       ```bash

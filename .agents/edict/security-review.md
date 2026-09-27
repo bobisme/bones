@@ -46,7 +46,7 @@ claim="review://$EDICT_PROJECT/$review_id"
 session="security-${review_id}-${head:0:12}"
 
 rite claims stake --agent "$reviewer" "$claim" \
-  -m "Dedicated Daybreak review $review_id in $ws" --ttl 20m
+  -m "Dedicated Daybreak review $review_id in $ws" --ttl 1200
 
 vessel spawn --name "$session" \
   --label "project:$EDICT_PROJECT" \
@@ -54,7 +54,7 @@ vessel spawn --name "$session" \
   --label "workspace:$ws" \
   --label "role:security-review" \
   --rows 50 --cols 200 --timeout 900 --record \
-  --cwd ".maw/workspaces/$ws" \
+  --cwd "$(maw cd "$ws")" \
   --env "AGENT=$reviewer" \
   --env "RITE_AGENT=$reviewer" \
   --env "EDICT_PROJECT=$EDICT_PROJECT" \
@@ -149,8 +149,11 @@ Proceed only if Seal records the required vote from `$reviewer` on the current
 review range **and** teardown succeeds. The author sends the anchored
 `review-done` Rite message after that verification, using the Agentbus result
 only for its concise finding summary. If the review is blocked, fix the
-findings in the authoring workspace, re-request the **same** review, create a
-fresh Rite anchor, and run this contract again with the new target commit.
+findings in the authoring workspace, retarget the **same** review to the
+fixed commits (`maw exec "$ws" -- seal reviews retarget "$review_id" --agent
+"$AGENT"` — `seal reviews request` alone leaves the review's target commit
+pinned at the old anchor), re-request it, create a fresh Rite anchor, and run
+this contract again with the new target commit.
 
 ## Reviewer boundaries
 
