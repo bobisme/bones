@@ -35,13 +35,17 @@
 //!
 //! A closed vocabulary, see [`Fault`]: a duplicated log line (what a union
 //! merge produces when two replicas pulled the same event), a deleted
-//! projection database, and rebase pulls that rewrite the log.
+//! projection database, a log that changes while no `bn` command runs
+//! (the next write projects through the CLI write path), and rebase pulls
+//! that rewrite the log.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use bones_core::db::incremental::incremental_apply;
+use bones_core::db::open_projection;
+use bones_core::db::project::Projector;
 use bones_core::db::rebuild::rebuild;
 use bones_core::event::Event;
 use bones_core::event::data::{
@@ -147,6 +151,14 @@ pub enum Fault {
     /// `FP_DROP_PROJECTION`: delete the projection database, which forces
     /// the next apply to rebuild from the log.
     DropProjection,
+    /// `FP_UNPROJECTED_APPEND`: the agent's log changes while no `bn`
+    /// command runs: a `git pull`, or a writer that appended and crashed
+    /// before it projected. Until the agent's next write, its pulls and
+    /// faults append without an apply. That write takes the CLI write path:
+    /// append, then `Projector::project_event`, with no apply first. A
+    /// write that moves the cursor over the unprojected lines loses them
+    /// (bn-1lsg).
+    UnprojectedAppend,
 }
 
 /// How a pull merges the other agent's log into this one.
@@ -407,18 +419,15 @@ pub fn generate(seed: u64, profile: Profile) -> Plan {
             }
         } else if roll < 93 {
             pull_step(&mut rng, agent, &agents)
-        } else if rng.hit_rate_percent(50) {
-            Step::Fault {
-                agent,
-                fault: Fault::DuplicateLine {
+        } else {
+            let fault = match rng.next_bounded(3) {
+                0 => Fault::DuplicateLine {
                     pick: u16::try_from(rng.next_bounded(1 << 16)).unwrap_or(0),
                 },
-            }
-        } else {
-            Step::Fault {
-                agent,
-                fault: Fault::DropProjection,
-            }
+                1 => Fault::DropProjection,
+                _ => Fault::UnprojectedAppend,
+            };
+            Step::Fault { agent, fault }
         };
 
         match &step {
@@ -477,8 +486,13 @@ pub struct Shapes {
     pub redact_before_target: usize,
     /// Pulls in rebase mode.
     pub rebase_pulls: usize,
-    /// Faults injected, by kind: duplicate line, dropped projection.
-    pub faults: [usize; 2],
+    /// Faults injected, by kind: duplicate line, dropped projection,
+    /// unprojected append.
+    pub faults: [usize; 3],
+    /// Writes at an agent whose log took a pull since its last apply: the
+    /// write's `project_event` finds foreign lines between the cursor and
+    /// its own line.
+    pub lagging_writes: usize,
 }
 
 fn field_key(item: usize, op: &WriteOp) -> Option<(usize, String)> {
@@ -502,8 +516,29 @@ pub fn shapes(plan: &Plan) -> Shapes {
     // (item, field) -> earlier writes as (step, wall_ts).
     let mut writes: BTreeMap<(usize, String), Vec<(usize, i64)>> = BTreeMap::new();
     let mut ts_of: BTreeMap<usize, i64> = BTreeMap::new();
+    // Per agent: deferred, and whether a pull landed while deferred.
+    let mut deferred: Vec<Option<bool>> = vec![None; plan.profile.agents];
 
     for (index, step) in plan.steps.iter().enumerate() {
+        match step {
+            Step::Create { agent, .. } | Step::Write { agent, .. } | Step::Redact { agent, .. } => {
+                if deferred[*agent].take() == Some(true) {
+                    out.lagging_writes += 1;
+                }
+            }
+            Step::Pull { to, .. } => {
+                if let Some(pulled) = deferred[*to].as_mut() {
+                    *pulled = true;
+                }
+            }
+            Step::Fault {
+                agent,
+                fault: Fault::UnprojectedAppend,
+            } => {
+                deferred[*agent].get_or_insert(false);
+            }
+            Step::Fault { .. } => {}
+        }
         match step {
             Step::Create {
                 agent, wall_ts_us, ..
@@ -554,6 +589,7 @@ pub fn shapes(plan: &Plan) -> Shapes {
             Step::Fault { fault, .. } => match fault {
                 Fault::DuplicateLine { .. } => out.faults[0] += 1,
                 Fault::DropProjection => out.faults[1] += 1,
+                Fault::UnprojectedAppend => out.faults[2] += 1,
             },
         }
     }
@@ -667,6 +703,9 @@ struct Replica {
     hashes: BTreeSet<String>,
     snapshot: Vec<String>,
     applies: ApplyCounts,
+    /// Set by [`Fault::UnprojectedAppend`]: no apply runs until the next
+    /// write, which projects through `project_event`.
+    deferred: bool,
 }
 
 impl Replica {
@@ -685,6 +724,7 @@ impl Replica {
             hashes: BTreeSet::new(),
             snapshot: Vec::new(),
             applies: ApplyCounts::default(),
+            deferred: false,
         })
     }
 
@@ -726,6 +766,22 @@ impl Replica {
                     .with_context(|| format!("remove {}", path.display()))?;
             }
         }
+        Ok(())
+    }
+
+    /// The CLI write path for `event`, already appended: open the
+    /// projection and project the one event, with no apply first. A missing
+    /// projection is left for the apply that follows, as `bn` would build
+    /// it before the write.
+    fn project_write(&self, event: &Event) -> Result<()> {
+        let db_path = self.db_path();
+        if !db_path.exists() {
+            return Ok(());
+        }
+        let conn = open_projection(&db_path).context("open projection for write")?;
+        Projector::new(&conn)
+            .project_event(event)
+            .context("project written event")?;
         Ok(())
     }
 
@@ -1070,15 +1126,32 @@ pub fn drive(plan: &Plan, plant: Option<Plant>) -> Result<std::result::Result<Ou
                         replica.append(&line)?;
                     }
                     Fault::DropProjection => replica.drop_projection()?,
+                    Fault::UnprojectedAppend => replica.deferred = true,
                 }
                 None
             }
         };
 
+        let replica = &mut replicas[actor];
         if let Some(mut event) = event {
             let line = write_event(&mut event).context("serialize event")?;
             step_hash.insert(index, event.event_hash.clone());
-            replicas[actor].append(&line)?;
+            replica.append(&line)?;
+            if replica.deferred {
+                replica.deferred = false;
+                if let Err(err) = replica.project_write(&event) {
+                    return Ok(Err(Violation::ApplyFailed {
+                        step: Some(index),
+                        agent: actor,
+                        error: format!("{err:#}"),
+                    }));
+                }
+            }
+        } else if replica.deferred {
+            // No bn command ran: the projection is stale on purpose, so
+            // it takes no part in the oracles until the next write.
+            replica.snapshot.clear();
+            continue;
         }
 
         let corrupt = plant == Some(Plant::CorruptAfterStep(index));
@@ -1108,6 +1181,7 @@ pub fn drive(plan: &Plan, plant: Option<Plant>) -> Result<std::result::Result<Ou
         }
     }
     for (agent, replica) in replicas.iter_mut().enumerate() {
+        replica.deferred = false;
         if let Some(v) = replica.apply_and_check(agent, None, false)? {
             return Ok(Err(v));
         }

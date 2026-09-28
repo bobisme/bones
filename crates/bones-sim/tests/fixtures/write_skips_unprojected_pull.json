@@ -1,0 +1,76 @@
+{
+  "seed": 8,
+  "profile": {
+    "agents": 3,
+    "items": 3,
+    "steps": 40,
+    "tick_millis": 100,
+    "max_abs_skew_millis": 1000,
+    "max_abs_drift_ppm": 50000
+  },
+  "clocks": [
+    {
+      "base_millis": 1700000000000,
+      "tick_millis": 100,
+      "drift_ppm": -4972,
+      "skew_millis": -195
+    },
+    {
+      "base_millis": 1700000000000,
+      "tick_millis": 100,
+      "drift_ppm": 43245,
+      "skew_millis": 938
+    },
+    {
+      "base_millis": 1700000000000,
+      "tick_millis": 100,
+      "drift_ppm": -8490,
+      "skew_millis": 288
+    }
+  ],
+  "steps": [
+    {
+      "Write": {
+        "agent": 2,
+        "item": 1,
+        "op": {
+          "Title": 1
+        },
+        "wall_ts_us": 1700000002470000
+      }
+    },
+    {
+      "Fault": {
+        "agent": 2,
+        "fault": "UnprojectedAppend"
+      }
+    },
+    {
+      "Write": {
+        "agent": 1,
+        "item": 1,
+        "op": {
+          "Title": 2
+        },
+        "wall_ts_us": 1700000003859001
+      }
+    },
+    {
+      "Pull": {
+        "to": 2,
+        "from": 1,
+        "mode": "Union"
+      }
+    },
+    {
+      "Write": {
+        "agent": 2,
+        "item": 2,
+        "op": {
+          "Move": 1
+        },
+        "wall_ts_us": 1700000003858002
+      }
+    }
+  ]
+}

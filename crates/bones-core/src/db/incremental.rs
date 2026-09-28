@@ -198,16 +198,6 @@ pub(crate) fn cursor_prefix_matches(
     Ok(log_prefix_digest(shard_mgr, offset)?.as_deref() == Some(stored.as_str()))
 }
 
-/// Record the prefix digest for the cursor just written at `offset`.
-pub(crate) fn record_cursor_prefix(
-    conn: &Connection,
-    shard_mgr: &ShardManager,
-    offset: usize,
-) -> Result<()> {
-    let digest = log_prefix_digest(shard_mgr, offset)?;
-    query::set_projection_prefix_digest(conn, digest.as_deref())
-}
-
 /// Read `user_version` without migrating or configuring the database.
 fn peek_schema_version(db_path: &Path) -> Option<u32> {
     if !db_path.exists() {
@@ -242,7 +232,6 @@ fn peek_schema_version(db_path: &Path) -> Option<u32> {
 /// # Errors
 ///
 /// Returns an error if reading shards, parsing events, or projection fails.
-#[allow(clippy::too_many_lines)]
 pub fn incremental_apply(
     events_dir: &Path,
     db_path: &Path,
@@ -289,29 +278,108 @@ pub fn incremental_apply(
         );
     };
 
-    // Read cursor
+    let resumed = match resume_from_cursor(&conn, events_dir, false)? {
+        Resume::Applied(resumed) => resumed,
+        Resume::Untrusted(reason) => {
+            drop(conn);
+            return do_full_rebuild(events_dir, db_path, start, &reason);
+        }
+    };
+
+    if resumed.from != resumed.to {
+        tracing::info!(
+            events_applied = resumed.projected,
+            duplicates = resumed.duplicates,
+            errors = resumed.errors,
+            shards_scanned = resumed.shards_scanned,
+            byte_offset_from = resumed.from,
+            byte_offset_to = resumed.to,
+            elapsed_ms = start.elapsed().as_millis(),
+            "incremental projection apply complete"
+        );
+    }
+
+    Ok(ApplyReport {
+        events_applied: resumed.projected,
+        projection_errors: resumed.errors,
+        shards_scanned: resumed.shards_scanned,
+        full_rebuild_triggered: false,
+        full_rebuild_reason: None,
+        elapsed: start.elapsed(),
+    })
+}
+
+/// What [`resume_from_cursor`] did.
+pub(crate) enum Resume {
+    /// The log from the cursor to its end was projected, and the cursor now
+    /// sits at that end.
+    Applied(Resumed),
+    /// The cursor cannot be trusted, for the given reason. Nothing was
+    /// written: only a full rebuild can bring the projection up to date.
+    Untrusted(String),
+}
+
+/// Counts from a [`Resume::Applied`] replay.
+pub(crate) struct Resumed {
+    /// Events projected.
+    pub(crate) projected: usize,
+    /// Events skipped as already projected.
+    pub(crate) duplicates: usize,
+    /// Events that failed to project (the batch marks the projection dirty).
+    pub(crate) errors: usize,
+    /// Shards in the log.
+    pub(crate) shards_scanned: usize,
+    /// Cursor byte offset before the replay.
+    pub(crate) from: usize,
+    /// Cursor byte offset after the replay.
+    pub(crate) to: usize,
+}
+
+/// Project every log line after the projection cursor, then move the cursor
+/// to the end of the lines projected.
+///
+/// The cursor only ever advances over lines this call projected, so a line
+/// another process appended but has not projected yet is never skipped
+/// (bn-1lsg). Events already projected (for example the one a writer just
+/// projected itself) are skipped as duplicates.
+///
+/// A projection without a cursor (a new database, or one a schema upgrade
+/// cleared, which also marks it dirty) is [`Resume::Untrusted`], unless
+/// `replay_without_cursor` is set: then the whole log is replayed. That is
+/// the rebuild's result on a new database. A dirty marker still forces the
+/// next `ensure_projection` to rebuild.
+///
+/// The caller must hold the projection write lock, and `conn` must not be
+/// inside a transaction.
+///
+/// # Errors
+///
+/// Returns an error if the log cannot be read or parsed, or a write fails.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn resume_from_cursor(
+    conn: &Connection,
+    events_dir: &Path,
+    replay_without_cursor: bool,
+) -> Result<Resume> {
     let (byte_offset, last_hash) =
-        query::get_projection_cursor(&conn).context("read projection cursor")?;
+        query::get_projection_cursor(conn).context("read projection cursor")?;
 
-    // Fresh database — no events have been applied yet → full rebuild
-    if byte_offset == 0 && last_hash.is_none() {
-        drop(conn);
-        return do_full_rebuild(events_dir, db_path, start, "fresh database (no cursor)");
+    // Fresh database — no events have been applied yet.
+    let no_cursor = byte_offset == 0 && last_hash.is_none();
+    if no_cursor && !replay_without_cursor {
+        return Ok(Resume::Untrusted("fresh database (no cursor)".into()));
     }
 
-    // Run safety checks
-    if let Err(reason) = check_incremental_safety(&conn, events_dir) {
-        drop(conn);
-        return do_full_rebuild(events_dir, db_path, start, &reason);
+    if let Err(reason) = check_incremental_safety(conn, events_dir) {
+        return Ok(Resume::Untrusted(reason));
     }
 
-    // 6. Read and replay new events in streaming batches
     let bones_dir = events_dir.parent().unwrap_or_else(|| Path::new("."));
     let shard_mgr = ShardManager::new(bones_dir);
-    let shards = shard_mgr
+    let shards_scanned = shard_mgr
         .list_shards()
-        .map_err(|e| anyhow::anyhow!("list shards: {e}"))?;
-    let shards_scanned = shards.len();
+        .map_err(|e| anyhow::anyhow!("list shards: {e}"))?
+        .len();
 
     let offset = usize::try_from(byte_offset).unwrap_or(0);
 
@@ -327,23 +395,21 @@ pub fn incremental_apply(
         .replay_lines()
         .map_err(|e| anyhow::anyhow!("open shard line iterator: {e}"))?;
     let mut digest = LogDigest::new();
-    let mut prefix_ok = offset > 0;
-    while prefix_ok && digest.end() < offset {
-        match all_lines.next() {
-            Some(Ok((at, line))) if at + line.len() <= offset => digest.update(at, &line),
-            Some(Err(e)) => return Err(anyhow::anyhow!("read shard line: {e}")),
-            _ => prefix_ok = false,
+    if !no_cursor {
+        let mut prefix_ok = offset > 0;
+        while prefix_ok && digest.end() < offset {
+            match all_lines.next() {
+                Some(Ok((at, line))) if at + line.len() <= offset => digest.update(at, &line),
+                Some(Err(e)) => return Err(anyhow::anyhow!("read shard line: {e}")),
+                _ => prefix_ok = false,
+            }
         }
-    }
-    let stored = query::get_projection_prefix_digest(&conn);
-    if !prefix_ok || stored.as_deref() != Some(digest.finish().as_str()) {
-        drop(conn);
-        return do_full_rebuild(
-            events_dir,
-            db_path,
-            start,
-            "event log changed before the projection cursor",
-        );
+        let stored = query::get_projection_prefix_digest(conn);
+        if !prefix_ok || stored.as_deref() != Some(digest.finish().as_str()) {
+            return Ok(Resume::Untrusted(
+                "event log changed before the projection cursor".into(),
+            ));
+        }
     }
 
     // Validate cursor hash: it must appear in the tail of already-processed
@@ -351,45 +417,49 @@ pub fn incremental_apply(
     if let Some(ref hash) = last_hash {
         let tail_ok = validate_cursor_hash_at_offset(&shard_mgr, offset, hash).unwrap_or(false);
         if !tail_ok {
-            drop(conn);
-            return do_full_rebuild(
-                events_dir,
-                db_path,
-                start,
-                "cursor hash not found at expected byte offset",
-            );
+            return Ok(Resume::Untrusted(
+                "cursor hash not found at expected byte offset".into(),
+            ));
         }
     }
 
-    let mut line_iter = all_lines.peekable();
-    let mut newest_ts = i64::MIN;
+    let mut resumed = Resumed {
+        projected: 0,
+        duplicates: 0,
+        errors: 0,
+        shards_scanned,
+        from: offset,
+        to: offset,
+    };
 
+    let mut line_iter = all_lines.peekable();
     // If there's no new content, we're up to date
     if line_iter.peek().is_none() {
-        return Ok(ApplyReport {
-            events_applied: 0,
-            projection_errors: 0,
-            shards_scanned,
-            full_rebuild_triggered: false,
-            full_rebuild_reason: None,
-            elapsed: start.elapsed(),
-        });
+        return Ok(Resume::Applied(resumed));
     }
 
     // Ensure tracking table exists (needed for dedup)
-    project::ensure_tracking_table(&conn).context("ensure projected_events tracking table")?;
+    project::ensure_tracking_table(conn).context("ensure projected_events tracking table")?;
 
+    let mut newest_ts = i64::MIN;
     let mut version_checked = false;
     let mut shard_version = crate::event::parser::CURRENT_VERSION;
     let mut line_no = 0;
-    let mut total_projected = 0;
-    let mut total_duplicates = 0;
-    let mut total_errors = 0;
     let mut current_last_hash = last_hash;
     let mut total_byte_len = offset;
 
-    let mut current_batch: Vec<Event> = Vec::with_capacity(1000);
-    let projector = project::Projector::new(&conn);
+    let mut current_batch: Vec<Event> = Vec::with_capacity(64);
+    let projector = project::Projector::new(conn);
+    let project = |batch: &mut Vec<Event>, resumed: &mut Resumed| -> Result<()> {
+        let stats = projector
+            .project_batch(batch)
+            .context("project batch during incremental apply")?;
+        resumed.projected += stats.projected;
+        resumed.duplicates += stats.duplicates;
+        resumed.errors += stats.errors;
+        batch.clear();
+        Ok(())
+    };
 
     for line_res in line_iter {
         let (abs_offset, line): (usize, String) =
@@ -416,13 +486,7 @@ pub fn incremental_apply(
                 current_batch.push(event);
 
                 if current_batch.len() >= 1000 {
-                    let stats = projector
-                        .project_batch(&current_batch)
-                        .context("project batch during incremental apply")?;
-                    total_projected += stats.projected;
-                    total_duplicates += stats.duplicates;
-                    total_errors += stats.errors;
-                    current_batch.clear();
+                    project(&mut current_batch, &mut resumed)?;
                 }
             }
             Ok(
@@ -438,44 +502,23 @@ pub fn incremental_apply(
 
     // Final batch
     if !current_batch.is_empty() {
-        let stats = projector
-            .project_batch(&current_batch)
-            .context("project final batch during incremental apply")?;
-        total_projected += stats.projected;
-        total_duplicates += stats.duplicates;
-        total_errors += stats.errors;
+        project(&mut current_batch, &mut resumed)?;
     }
 
-    // Update cursor to the end of current content. The lock keeps any other
-    // projection writer out between the last batch commit and this write.
+    // Update cursor to the end of the lines just projected. The caller's
+    // lock keeps any other projection writer out between the last batch
+    // commit and this write.
     #[cfg(test)]
     project::fault::before_cursor_write();
     let new_offset = i64::try_from(total_byte_len).unwrap_or(i64::MAX);
-    query::update_projection_cursor(&conn, new_offset, current_last_hash.as_deref())
+    query::update_projection_cursor(conn, new_offset, current_last_hash.as_deref())
         .context("update projection cursor after incremental apply")?;
-    query::set_projection_prefix_digest(&conn, Some(&digest.finish()))
+    query::set_projection_prefix_digest(conn, Some(&digest.finish()))
         .context("record cursor prefix after incremental apply")?;
     rebuild::observe_newest(&shard_mgr, newest_ts);
 
-    tracing::info!(
-        events_applied = total_projected,
-        duplicates = total_duplicates,
-        errors = total_errors,
-        shards_scanned,
-        byte_offset_from = byte_offset,
-        byte_offset_to = new_offset,
-        elapsed_ms = start.elapsed().as_millis(),
-        "incremental projection apply complete"
-    );
-
-    Ok(ApplyReport {
-        events_applied: total_projected,
-        projection_errors: total_errors,
-        shards_scanned,
-        full_rebuild_triggered: false,
-        full_rebuild_reason: None,
-        elapsed: start.elapsed(),
-    })
+    resumed.to = total_byte_len;
+    Ok(Resume::Applied(resumed))
 }
 
 /// Read the current high-water mark from the `SQLite` metadata table.

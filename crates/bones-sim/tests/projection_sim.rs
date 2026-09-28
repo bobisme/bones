@@ -54,8 +54,10 @@ fn hostile_shapes_are_reached() {
         total.concurrent_same_field += s.concurrent_same_field;
         total.redact_before_target += s.redact_before_target;
         total.rebase_pulls += s.rebase_pulls;
-        total.faults[0] += s.faults[0];
-        total.faults[1] += s.faults[1];
+        for (total, n) in total.faults.iter_mut().zip(s.faults) {
+            *total += n;
+        }
+        total.lagging_writes += s.lagging_writes;
     }
     eprintln!("shapes over {} seeds: {total:?}", seed_count());
     assert!(total.skew_inversions > 0, "no clock-skew inversions");
@@ -69,6 +71,10 @@ fn hostile_shapes_are_reached() {
     );
     assert!(total.rebase_pulls > 0, "no rebase pulls");
     assert!(total.faults.iter().all(|&n| n > 0), "a fault never fired");
+    assert!(
+        total.lagging_writes > 0,
+        "no write projected over a pull it had not applied"
+    );
 }
 
 /// The incremental-equals-rebuild oracle is trivially true when every
@@ -171,4 +177,14 @@ fn regression_rebase_reorders_log_resumes_mid_line() {
     replay_fixture(include_str!(
         "fixtures/rebase_reorders_log_resumes_mid_line.json"
     ));
+}
+
+/// Shrunk from seed 8. Agent 2 pulls with no bn command running, then
+/// writes. The write's `project_event` moved the cursor to the log end,
+/// over the pulled event it had not projected, so that event was lost
+/// (bn-1lsg). Fixed by projecting up to the log end before moving the
+/// cursor.
+#[test]
+fn regression_write_skips_unprojected_pull() {
+    replay_fixture(include_str!("fixtures/write_skips_unprojected_pull.json"));
 }

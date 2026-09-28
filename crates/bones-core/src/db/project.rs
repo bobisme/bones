@@ -15,7 +15,10 @@
 //!
 //! After projecting a batch, the caller can persist the byte offset and
 //! last event hash via [`super::query::update_projection_cursor`] for
-//! incremental replay on next startup.
+//! incremental replay on next startup. The cursor must only cover log lines
+//! whose events are projected. [`Projector::project_event`] keeps this: it
+//! projects every line between the cursor and the log end before it moves
+//! the cursor (bn-1lsg).
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
@@ -23,12 +26,10 @@ use rusqlite::{Connection, params};
 use crate::compact::{LwwSnapshot, SNAPSHOT_FORMAT, SnapshotPayload};
 use crate::crdt::OrSet;
 use crate::crdt::item_state::LinkKey;
-use crate::db::query;
 use crate::event::Event;
 use crate::event::data::{AssignAction, EventData};
 use crate::event::types::EventType;
 use crate::model::field_value::{self, can_link};
-use crate::shard::ShardManager;
 
 // ---------------------------------------------------------------------------
 // ProjectionStats
@@ -180,6 +181,11 @@ impl<'conn> Projector<'conn> {
     /// Returns `true` if the event was projected, `false` if it was a
     /// duplicate.
     ///
+    /// For an on-disk projection it then projects any other events that sit
+    /// between the projection cursor and the end of the log (appended by
+    /// another process that has not projected them yet), and moves the
+    /// cursor to the log end.
+    ///
     /// For an on-disk projection this takes the projection write lock (see
     /// [`crate::db::projection_lock`]). Do not call it while this thread
     /// holds that lock.
@@ -239,10 +245,7 @@ impl<'conn> Projector<'conn> {
             }
         };
 
-        #[cfg(test)]
-        fault::before_cursor_write();
-        if let Err(err) = self.update_cursor_to_event_log_end(&event.event_hash, db_file.as_deref())
-        {
+        if let Err(err) = Self::catch_up_cursor(self.conn, db_file.as_deref()) {
             tracing::warn!(
                 event_hash = %event.event_hash,
                 error = %err,
@@ -377,30 +380,44 @@ impl<'conn> Projector<'conn> {
         Ok(Some(std::path::PathBuf::from(main_db_file)))
     }
 
-    fn update_cursor_to_event_log_end(
-        &self,
-        event_hash: &str,
-        db_file: Option<&std::path::Path>,
-    ) -> Result<()> {
+    /// Bring the cursor up to the end of the log, projecting every line
+    /// between the cursor and the end on the way.
+    ///
+    /// The cursor must only ever cover lines whose events are projected.
+    /// Another process may have appended after this writer's event and not
+    /// projected yet (or crashed first): moving the cursor straight to the
+    /// log end would hide that event from every later `ensure_projection`
+    /// (bn-1lsg). The replay skips the event just projected as a duplicate,
+    /// so on the usual path it reads one line past the cursor.
+    ///
+    /// A projection without a cursor (the first write to a new database)
+    /// replays the whole log: every earlier event in it is projected too.
+    /// When the cursor cannot be trusted (log rewritten before the cursor),
+    /// it stays where it is: the next `ensure_projection` sees the drift
+    /// and rebuilds.
+    ///
+    /// The caller holds the projection write lock.
+    fn catch_up_cursor(conn: &Connection, db_file: Option<&std::path::Path>) -> Result<()> {
         // In-memory projections used in tests have no on-disk log context.
-        let Some(db_path) = db_file else {
+        let Some(bones_dir) = db_file.and_then(std::path::Path::parent) else {
             return Ok(());
         };
-        let Some(bones_dir) = db_path.parent() else {
+        let events_dir = bones_dir.join("events");
+        if !events_dir.is_dir() {
             return Ok(());
-        };
+        }
 
-        let shard_mgr = ShardManager::new(bones_dir);
-        let total_len = shard_mgr
-            .total_content_len()
-            .map_err(|e| anyhow::anyhow!("read event-log size for cursor update: {e}"))?;
-        let total_len_i64 = i64::try_from(total_len).unwrap_or(i64::MAX);
-
-        query::update_projection_cursor(self.conn, total_len_i64, Some(event_hash))
-            .context("write projection cursor after single-event projection")?;
-        crate::db::incremental::record_cursor_prefix(self.conn, &shard_mgr, total_len)
-            .context("record cursor prefix after single-event projection")?;
-
+        match crate::db::incremental::resume_from_cursor(conn, &events_dir, true)
+            .context("project the log up to its end after single-event projection")?
+        {
+            crate::db::incremental::Resume::Applied(_) => {}
+            crate::db::incremental::Resume::Untrusted(reason) => {
+                tracing::debug!(
+                    reason,
+                    "projection cursor left in place after single-event projection"
+                );
+            }
+        }
         Ok(())
     }
 

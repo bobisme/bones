@@ -1032,4 +1032,207 @@ mod tests {
         );
         assert_eq!(projected_title(&conn, "bn-b"), "bravo");
     }
+
+    /// Every row a user can see, in a stable order, plus the projected
+    /// event hashes.
+    fn projection_rows(conn: &rusqlite::Connection) -> Vec<String> {
+        let mut out = Vec::new();
+        for sql in [
+            "SELECT 'item', item_id, title, state, is_deleted, created_at_us, updated_at_us \
+             FROM items ORDER BY item_id",
+            "SELECT 'event', event_hash, item_id, event_type, '', 0, 0 \
+             FROM projected_events ORDER BY event_hash",
+        ] {
+            let mut stmt = conn.prepare(sql).expect("prepare");
+            let rows = stmt
+                .query_map([], |row| {
+                    let mut parts = Vec::new();
+                    for i in 0..7 {
+                        let value: rusqlite::types::Value = row.get(i)?;
+                        parts.push(format!("{value:?}"));
+                    }
+                    Ok(parts.join(" | "))
+                })
+                .expect("query");
+            out.extend(rows.map(|r| r.expect("row")));
+        }
+        out
+    }
+
+    /// The live projection equals a full rebuild of the log.
+    fn assert_matches_rebuild(bones_dir: &Path, conn: &rusqlite::Connection) {
+        let check = bones_dir.join("check.db");
+        crate::db::rebuild::rebuild(&bones_dir.join("events"), &check).expect("check rebuild");
+        let rebuilt = open_projection(&check).expect("open check db");
+        assert_eq!(projection_rows(conn), projection_rows(&rebuilt));
+    }
+
+    /// Two processes write at once: A appends its event, B appends its
+    /// event, and B projects first. B's projection must not move the cursor
+    /// over A's line while A is not projected (bn-1lsg). Before the fix the
+    /// cursor jumped to the log end, the prefix digest matched, and A's item
+    /// never reached the projection.
+    #[test]
+    fn project_event_does_not_skip_an_unprojected_earlier_append() {
+        use crate::db::project::Projector;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+        append_create(&shard_mgr, "bn-base", "base", 1_700_000_000_000_000);
+        drop(
+            ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn"),
+        );
+
+        let (event_a, _) = append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_001);
+        let (event_b, _) = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_002);
+        let db_path = bones_dir.join("bones.db");
+        {
+            let conn = open_projection(&db_path).expect("open projection");
+            assert!(
+                Projector::new(&conn)
+                    .project_event(&event_b)
+                    .expect("project b")
+            );
+            // The catch-up projected A too, so the write shows at once.
+            assert_eq!(projected_title(&conn, "bn-a"), "alpha");
+            let (offset, _) = super::query::get_projection_cursor(&conn).expect("cursor");
+            assert_eq!(
+                usize::try_from(offset).expect("offset"),
+                shard_mgr.total_content_len().expect("log length")
+            );
+        }
+
+        // A's writer now gets the lock: its event is a duplicate.
+        {
+            let conn = open_projection(&db_path).expect("open projection");
+            assert!(
+                !Projector::new(&conn)
+                    .project_event(&event_a)
+                    .expect("project a")
+            );
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure")
+            .expect("conn");
+        assert_eq!(projected_title(&conn, "bn-a"), "alpha");
+        assert_eq!(projected_title(&conn, "bn-b"), "bravo");
+        assert_matches_rebuild(&bones_dir, &conn);
+    }
+
+    /// A writer appends A and crashes before it projects. B's writer opened
+    /// the projection before A's append, then appends and projects B. The
+    /// next read must show A.
+    #[test]
+    fn crashed_writer_event_is_projected_by_the_next_write() {
+        use crate::db::project::Projector;
+
+        for a_first in [true, false] {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+            append_create(&shard_mgr, "bn-base", "base", 1_700_000_000_000_000);
+
+            // B's writer: ensure_projection runs before either append.
+            let conn = ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn");
+            let event_b = if a_first {
+                append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_001);
+                append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_002).0
+            } else {
+                let b = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_002).0;
+                append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_001);
+                b
+            };
+            Projector::new(&conn)
+                .project_event(&event_b)
+                .expect("project b");
+            drop(conn);
+
+            let conn = ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn");
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM items WHERE item_id = 'bn-a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count bn-a");
+            assert_eq!(count, 1, "crashed writer's item lost (a_first={a_first})");
+            assert_matches_rebuild(&bones_dir, &conn);
+        }
+    }
+
+    /// The first write to a new projection (no cursor: `bones.db` deleted,
+    /// or a new clone) must not move the cursor over the events already in
+    /// the log. It replays them, as a rebuild would.
+    #[test]
+    fn first_write_to_a_new_projection_projects_the_whole_log() {
+        use crate::db::project::Projector;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+        append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_000);
+        let (event_b, _) = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_001);
+        {
+            let conn = open_projection(&bones_dir.join("bones.db")).expect("open new projection");
+            Projector::new(&conn)
+                .project_event(&event_b)
+                .expect("project b");
+            assert_eq!(projected_title(&conn, "bn-a"), "alpha");
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure")
+            .expect("conn");
+        assert_eq!(projected_title(&conn, "bn-a"), "alpha");
+        assert_matches_rebuild(&bones_dir, &conn);
+    }
+
+    /// A rewrite before the cursor (a rebase pull) is not hidden by a
+    /// single-event write: the write leaves the cursor, and the next read
+    /// rebuilds.
+    #[test]
+    fn single_event_write_does_not_hide_a_rewrite_before_the_cursor() {
+        use crate::db::project::Projector;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let (bones_dir, shard_mgr) = init_bones_dir(&dir);
+        let (_, line_a) = append_create(&shard_mgr, "bn-a", "alpha", 1_700_000_000_000_000);
+        let (_, line_b) = append_create(&shard_mgr, "bn-b", "bravo", 1_700_000_000_000_001);
+        drop(
+            ensure_projection(&bones_dir)
+                .expect("ensure")
+                .expect("conn"),
+        );
+        plant_canary(&bones_dir, "bn-a");
+
+        let (year, month) = shard_mgr.active_shard().expect("shard").expect("some");
+        let path = shard_mgr.shard_path(year, month);
+        let content = std::fs::read_to_string(&path).expect("read shard");
+        let ab = format!("{line_a}{line_b}");
+        std::fs::write(&path, content.replace(&ab, &format!("{line_b}{line_a}")))
+            .expect("rewrite shard");
+
+        let (event_c, _) = append_create(&shard_mgr, "bn-c", "charlie", 1_700_000_000_000_002);
+        {
+            let conn = open_projection(&bones_dir.join("bones.db")).expect("open projection");
+            Projector::new(&conn)
+                .project_event(&event_c)
+                .expect("project c");
+        }
+
+        let conn = ensure_projection(&bones_dir)
+            .expect("ensure")
+            .expect("conn");
+        assert_eq!(
+            projected_title(&conn, "bn-a"),
+            "alpha",
+            "the rewrite must still force a full rebuild"
+        );
+        assert_matches_rebuild(&bones_dir, &conn);
+    }
 }
