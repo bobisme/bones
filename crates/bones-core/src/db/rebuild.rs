@@ -289,8 +289,17 @@ fn copy_busy_timeout() -> Duration {
 /// the database past twice the busy timeout, returns an error and leaves the live
 /// file alone: deleting a file that others have open is the bug this module
 /// avoids, and Windows refuses it anyway.
+///
+/// The staged file is checked with `PRAGMA quick_check` first. A corrupt
+/// staged file fails the install and never replaces or overwrites the live
+/// file (cr-1kqdjk). The backup API copies pages as they are, so without the
+/// check a corrupt staged page would reach the live file, and a corruption
+/// error from the staged side during the copy would look like a live-file
+/// problem.
 fn install_rebuilt(staging: &Path, db_path: &Path, busy_timeout: Duration) -> Result<()> {
+    let source = open_staged(staging)?;
     if !db_path.exists() {
+        drop(source);
         return std::fs::rename(staging, db_path).with_context(|| {
             format!(
                 "move rebuilt projection {} to {}",
@@ -299,7 +308,6 @@ fn install_rebuilt(staging: &Path, db_path: &Path, busy_timeout: Duration) -> Re
             )
         });
     }
-    let source = open_staged(staging)?;
     match copy_into_live(&source, db_path, busy_timeout) {
         Ok(()) => Ok(()),
         Err(err) if live_is_unusable(&err) => {
@@ -325,19 +333,33 @@ fn install_rebuilt(staging: &Path, db_path: &Path, busy_timeout: Duration) -> Re
     }
 }
 
-/// Open the staged projection and check that it reads, so a later copy error
-/// is known to come from the live file.
+/// Open the staged projection and verify it with `PRAGMA quick_check`.
+///
+/// After this check a corruption error during the copy is known to come from
+/// the live file, so [`live_is_unusable`] can blame the live side.
 fn open_staged(staging: &Path) -> Result<rusqlite::Connection> {
     let source = rusqlite::Connection::open(staging)
         .with_context(|| format!("open staged projection {}", staging.display()))?;
-    let _: i64 = source
-        .query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))
-        .with_context(|| format!("read staged projection {}", staging.display()))?;
+    let verdict = source
+        .query_row("PRAGMA quick_check(1)", [], |row| row.get::<_, String>(0))
+        .with_context(|| {
+            format!(
+                "verify staged projection {}; the live projection is unchanged",
+                staging.display()
+            )
+        })?;
+    if verdict != "ok" {
+        anyhow::bail!(
+            "staged projection {} is corrupt ({verdict}); the live projection is unchanged",
+            staging.display()
+        );
+    }
     Ok(source)
 }
 
 /// The live file cannot be a database at all, so replacing it loses nothing
-/// and nobody can be using it.
+/// and nobody can be using it. The staged side was verified before the copy
+/// ([`open_staged`]), so the error comes from the live file.
 fn live_is_unusable(err: &rusqlite::Error) -> bool {
     matches!(
         err.sqlite_error_code(),
@@ -1276,5 +1298,85 @@ mod tests {
             "rebuild of 100 items took {}ms, expected <1000ms",
             report.elapsed.as_millis()
         );
+    }
+
+    /// Overwrite the first page of the `items` table in `path` with junk.
+    /// The schema on page 1 stays readable.
+    fn corrupt_items_table(path: &Path) {
+        use std::io::{Seek, SeekFrom, Write};
+        let (page_size, root): (i64, i64) = {
+            let conn = rusqlite::Connection::open(path).expect("open staged");
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                .expect("checkpoint");
+            let page_size = conn
+                .query_row("PRAGMA page_size", [], |row| row.get(0))
+                .expect("page size");
+            let root = conn
+                .query_row(
+                    "SELECT rootpage FROM sqlite_master WHERE name = 'items'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("items root page");
+            (page_size, root)
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open for corruption");
+        file.seek(SeekFrom::Start(
+            u64::try_from((root - 1) * page_size).expect("offset"),
+        ))
+        .expect("seek");
+        file.write_all(&vec![0xA5; usize::try_from(page_size).expect("size")])
+            .expect("write junk");
+        file.sync_all().expect("sync");
+    }
+
+    /// A corrupt staged file never replaces or overwrites a good live
+    /// projection (cr-1kqdjk): the install fails and the live data stays.
+    #[test]
+    fn corrupt_staging_never_replaces_a_good_live_db() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        rebuild(&events_dir, &db_path).expect("first rebuild");
+        let before = dump(&db_path);
+
+        append_event(&shard_mgr, &make_create_event("bn-two", "Two", 2_000));
+        let staging = staging_path(&db_path);
+        build_projection(&events_dir, &staging).expect("stage");
+        corrupt_items_table(&staging);
+
+        let result = install_rebuilt(&staging, &db_path, Duration::from_secs(1));
+        remove_db_files(&staging);
+        let err = result.expect_err("a corrupt staged file must not install");
+        assert!(format!("{err:#}").contains("unchanged"), "{err:#}");
+
+        let conn = open_projection(&db_path).expect("open live");
+        let verdict: String = conn
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .expect("check live");
+        assert_eq!(verdict, "ok", "live projection damaged");
+        drop(conn);
+        assert_eq!(dump(&db_path), before, "live projection changed");
+    }
+
+    /// With no live file, a corrupt staged file is not moved into place.
+    #[test]
+    fn corrupt_staging_is_not_installed_as_a_new_db() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+        let staging = staging_path(&db_path);
+        build_projection(&events_dir, &staging).expect("stage");
+        corrupt_items_table(&staging);
+
+        let result = install_rebuilt(&staging, &db_path, Duration::from_secs(1));
+        remove_db_files(&staging);
+        result.expect_err("a corrupt staged file must not install");
+        assert!(!db_path.exists(), "corrupt projection installed");
     }
 }

@@ -16,10 +16,17 @@
 //! event that the copy had removed, and the event was lost for good. Two
 //! concurrent rebuilds also shared one staging file.
 //!
-//! The lock is an exclusive advisory lock on a separate file,
-//! `.bones/projection.lock`, not on `bones.db`. On Windows a `LockFileEx`
-//! lock on the database file conflicts with the byte-range locks of `SQLite`.
-//! Readers do not take the lock. `SQLite` gives them a consistent snapshot.
+//! The lock is an exclusive advisory lock on a separate file beside the
+//! database, `<db file>.lock` (`.bones/bones.db.lock`), not on `bones.db`.
+//! On Windows a `LockFileEx` lock on the database file conflicts with the
+//! byte-range locks of `SQLite`. Readers do not take the lock. `SQLite` gives
+//! them a consistent snapshot.
+//!
+//! The lock is per database file, not per directory: two projection
+//! databases in one directory (for example the bones-sim check databases)
+//! have separate locks. Waiters queue through a gate file,
+//! `<db file>.lock.gate` (see [`crate::lock::DbWriteLock`]), so a process
+//! that projects in a loop cannot starve another writer.
 //!
 //! # Lock order
 //!
@@ -45,8 +52,9 @@ use anyhow::{Context, Result};
 
 use crate::lock::DbWriteLock;
 
-/// File name of the projection write lock, beside `bones.db`.
-pub const PROJECTION_LOCK_FILE: &str = "projection.lock";
+/// Suffix of the projection write lock file: `bones.db` locks
+/// `bones.db.lock`.
+pub const PROJECTION_LOCK_SUFFIX: &str = ".lock";
 
 /// How long a projection writer waits for another one.
 ///
@@ -60,14 +68,17 @@ thread_local! {
     static HELD: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The projection lock path for the projection database at `db_path`.
+/// The projection lock path for the projection database at `db_path`:
+/// `<db_path>.lock`.
 #[must_use]
 pub fn projection_lock_path(db_path: &Path) -> PathBuf {
-    let parent = match db_path.parent() {
-        Some(p) if !p.as_os_str().is_empty() => p,
-        _ => Path::new("."),
-    };
-    parent.join(PROJECTION_LOCK_FILE)
+    let mut name = db_path.as_os_str().to_owned();
+    name.push(PROJECTION_LOCK_SUFFIX);
+    let path = PathBuf::from(name);
+    match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => path,
+        _ => Path::new(".").join(path),
+    }
 }
 
 /// RAII guard for the projection write lock. Dropping it releases the lock.
@@ -117,13 +128,20 @@ pub fn lock_projection(db_path: &Path) -> Result<ProjectionLock> {
 pub fn lock_projection_with_timeout(db_path: &Path, timeout: Duration) -> Result<ProjectionLock> {
     let path = projection_lock_path(db_path);
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().with_context(|| {
+        format!(
+            "projection database path {} has no file name",
+            db_path.display()
+        )
+    })?;
     std::fs::create_dir_all(dir)
         .with_context(|| format!("create projection lock directory {}", dir.display()))?;
-    // One key for every spelling of the same directory.
+    // One key for every spelling of the same lock file: the canonical
+    // directory plus the lock file name.
     let key = dir
         .canonicalize()
         .unwrap_or_else(|_| dir.to_path_buf())
-        .join(PROJECTION_LOCK_FILE);
+        .join(file_name);
 
     if HELD.with(|held| held.borrow().contains(&key)) {
         anyhow::bail!(
@@ -154,11 +172,11 @@ mod tests {
     fn lock_path_is_beside_the_database() {
         assert_eq!(
             projection_lock_path(Path::new("/repo/.bones/bones.db")),
-            PathBuf::from("/repo/.bones/projection.lock")
+            PathBuf::from("/repo/.bones/bones.db.lock")
         );
         assert_eq!(
             projection_lock_path(Path::new("bones.db")),
-            PathBuf::from("./projection.lock")
+            PathBuf::from("./bones.db.lock")
         );
     }
 
@@ -194,5 +212,113 @@ mod tests {
         let db = dir.path().join("bones.db");
         drop(lock_projection(&db).expect("first"));
         let _again = lock_projection(&db).expect("after release");
+    }
+
+    /// A thread that takes and releases the lock in a tight loop must not
+    /// starve another writer (cr-1kqdjk). With plain polling the waiter only
+    /// got in when a poll landed in the short gap between a release and the
+    /// next acquire.
+    #[test]
+    fn writer_is_not_starved_by_a_tight_lock_loop() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::time::Instant;
+
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let db = dir.path().join("bones.db");
+        let stop = Arc::new(AtomicBool::new(false));
+        let cycles = Arc::new(AtomicU64::new(0));
+        let looper = {
+            let (db, stop, cycles) = (db.clone(), Arc::clone(&stop), Arc::clone(&cycles));
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let held = lock_projection_with_timeout(&db, Duration::from_secs(60))
+                        .expect("looper acquire");
+                    // Hold briefly, like a short projection write.
+                    std::thread::sleep(Duration::from_millis(2));
+                    drop(held);
+                    cycles.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+        };
+        // Let the loop reach a steady state.
+        while cycles.load(Ordering::Relaxed) < 5 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // Several acquires in a row, each with a short timeout. A fair lock
+        // lets each one in after at most about one looper hold. The bounds
+        // are loose for coarse CI timers (macOS sleeps can round up a lot).
+        let timeout = Duration::from_secs(3);
+        let mut waits = Vec::new();
+        for _ in 0..5 {
+            let started = Instant::now();
+            let got = lock_projection_with_timeout(&db, timeout);
+            waits.push(started.elapsed());
+            match got {
+                Ok(held) => {
+                    drop(held);
+                    // Let the looper run two more cycles, so each acquire
+                    // meets a busy loop, not a looper that is asleep. This
+                    // also shows that the looper is not starved in turn.
+                    let resume = cycles.load(Ordering::Relaxed) + 2;
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while cycles.load(Ordering::Relaxed) < resume {
+                        assert!(Instant::now() < deadline, "looper starved");
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                Err(err) => {
+                    stop.store(true, Ordering::Relaxed);
+                    looper.join().expect("join looper");
+                    panic!("writer starved: {err:#}; waits so far {waits:?}");
+                }
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        looper.join().expect("join looper");
+        eprintln!("waits: {waits:?}");
+        for wait in &waits {
+            assert!(
+                *wait < Duration::from_secs(2),
+                "writer waited {wait:?}: {waits:?}"
+            );
+        }
+    }
+
+    /// Two databases in one directory have separate locks (cr-1kqdjk): one
+    /// thread can hold both, and each still rejects re-entry, also through
+    /// another spelling of its path.
+    #[test]
+    fn databases_in_one_directory_have_separate_locks() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let live = dir.path().join("bones.db");
+        let check = dir.path().join("check.db");
+        let _live = lock_projection(&live).expect("lock bones.db");
+        let _check = lock_projection_with_timeout(&check, Duration::from_millis(200))
+            .expect("nested lock on check.db in the same directory");
+
+        let respelled = dir.path().join(".").join("check.db");
+        let err = lock_projection(&respelled).expect_err("re-entry through ./check.db");
+        assert!(format!("{err:#}").contains("already held"), "{err:#}");
+
+        // Another thread is excluded from check.db only.
+        let (live2, check2) = (live.clone(), check.clone());
+        let (live_err, check_err) = std::thread::spawn(move || {
+            (
+                lock_projection_with_timeout(&live2, Duration::from_millis(50)).is_err(),
+                lock_projection_with_timeout(&check2, Duration::from_millis(50)).is_err(),
+            )
+        })
+        .join()
+        .expect("join");
+        assert!(live_err && check_err, "other thread got a held lock");
+        let other = dir.path().join("other.db");
+        std::thread::spawn(move || {
+            lock_projection_with_timeout(&other, Duration::from_millis(200)).map(|_| ())
+        })
+        .join()
+        .expect("join")
+        .expect("a third database is not locked");
     }
 }

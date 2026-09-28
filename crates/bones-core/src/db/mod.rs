@@ -20,7 +20,7 @@ use std::{path::Path, path::PathBuf, time::Duration};
 use tracing::debug;
 
 pub use projection_lock::{
-    PROJECTION_LOCK_FILE, PROJECTION_LOCK_TIMEOUT, ProjectionLock, lock_projection,
+    PROJECTION_LOCK_SUFFIX, PROJECTION_LOCK_TIMEOUT, ProjectionLock, lock_projection,
     projection_lock_path,
 };
 

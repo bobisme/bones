@@ -7,6 +7,8 @@ const MANAGED_ENTRIES: &[&str] = &[
     "bones.db",
     "bones.db-shm",
     "bones.db-wal",
+    "bones.db.lock",
+    "bones.db.lock.gate",
     "bones.db.rebuild",
     "bones.db.rebuild-journal",
     "bones.db.rebuild-shm",
@@ -16,7 +18,6 @@ const MANAGED_ENTRIES: &[&str] = &[
     "cache/",
     "itc/",
     "lock",
-    "projection.lock",
     "events/current.events",
 ];
 
@@ -77,6 +78,8 @@ mod tests {
         assert!(content.contains("bones.db-wal"));
         assert!(content.contains("cache/"));
         assert!(content.contains("itc/"));
+        assert!(content.lines().any(|line| line == "bones.db.lock"));
+        assert!(content.lines().any(|line| line == "bones.db.lock.gate"));
         assert!(content.contains("lock"));
     }
 

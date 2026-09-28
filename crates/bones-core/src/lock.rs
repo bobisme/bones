@@ -69,14 +69,81 @@ struct FileGuard {
     path: PathBuf,
 }
 
+/// First pause between two lock attempts. It doubles up to
+/// [`MAX_RETRY_PAUSE`].
+const MIN_RETRY_PAUSE: Duration = Duration::from_millis(1);
+/// Longest pause between two lock attempts, before jitter.
+const MAX_RETRY_PAUSE: Duration = Duration::from_millis(10);
+
+/// The gate file for a gated lock at `path`: `<path>.gate`.
+fn gate_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".gate");
+    PathBuf::from(name)
+}
+
+/// A pause of 75-125% of `base`, so that waiters do not poll in step.
+fn jittered(base: Duration) -> Duration {
+    use std::hash::{BuildHasher, Hasher};
+    // Each `RandomState` has fresh random keys, so this is a cheap random
+    // number without a dependency.
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u32(base.subsec_nanos());
+    let permille = 750 + hasher.finish() % 501;
+    base * u32::try_from(permille).unwrap_or(1000) / 1000
+}
+
 impl FileGuard {
     fn acquire(path: &Path, timeout: Duration, kind: LockKind) -> Result<Self, LockError> {
+        Self::acquire_until(path, Instant::now(), timeout, kind)
+    }
+
+    /// Acquire a lock at `path` through its gate file (see [`gate_path`]).
+    ///
+    /// Plain polling is not fair. A process that releases the lock and at
+    /// once takes it again wins nearly every time, and a waiter gets in only
+    /// if a poll lands in the short gap between them (cr-1kqdjk saw a 45 s
+    /// wait). Here every acquirer first takes the gate, exclusive, then the
+    /// lock, and then releases the gate. The gate holder is the only process
+    /// that can take a free lock, so it gets the lock at its next poll after
+    /// the holder releases it. The previous holder must pass the gate to take
+    /// the lock again, so it waits behind the gate holder.
+    ///
+    /// All waiters poll the gate the same way, with jittered pauses, so no
+    /// waiter has a built-in advantage. The gate is only a queue position:
+    /// the lock itself still gives the mutual exclusion. A process that
+    /// takes the lock without the gate (an older binary) is still excluded,
+    /// it only skips the queue.
+    ///
+    /// The gate is released on every return path, also on a timeout, and
+    /// the OS releases both locks if the process dies.
+    fn acquire_gated(path: &Path, timeout: Duration, kind: LockKind) -> Result<Self, LockError> {
+        let start = Instant::now();
+        let gate = Self::acquire_until(&gate_path(path), start, timeout, LockKind::Exclusive)
+            .map_err(|err| match err {
+                LockError::Timeout { waited, .. } => LockError::Timeout {
+                    path: path.to_path_buf(),
+                    waited,
+                },
+                other @ LockError::IoError(_) => other,
+            })?;
+        let lock = Self::acquire_until(path, start, timeout, kind);
+        gate.release();
+        lock
+    }
+
+    fn acquire_until(
+        path: &Path,
+        start: Instant,
+        timeout: Duration,
+        kind: LockKind,
+    ) -> Result<Self, LockError> {
         let parent = path.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "lock path has no parent")
         })?;
         fs::create_dir_all(parent)?;
 
-        let start = Instant::now();
+        let mut pause = MIN_RETRY_PAUSE;
         loop {
             let file = OpenOptions::new()
                 .create(true)
@@ -86,25 +153,27 @@ impl FileGuard {
                 .open(path)?;
 
             let locked = match kind {
-                LockKind::Shared => file.try_lock_shared().is_err(),
-                LockKind::Exclusive => file.try_lock_exclusive().is_err(),
+                LockKind::Shared => file.try_lock_shared().is_ok(),
+                LockKind::Exclusive => file.try_lock_exclusive().is_ok(),
             };
 
-            if !locked {
+            if locked {
                 return Ok(Self {
                     file,
                     path: path.to_path_buf(),
                 });
             }
 
-            if start.elapsed() >= timeout {
+            let waited = start.elapsed();
+            if waited >= timeout {
                 return Err(LockError::Timeout {
                     path: path.to_path_buf(),
-                    waited: start.elapsed(),
+                    waited,
                 });
             }
 
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(jittered(pause).min(timeout.saturating_sub(waited)));
+            pause = (pause * 2).min(MAX_RETRY_PAUSE);
         }
     }
 
@@ -162,13 +231,16 @@ pub struct DbReadLock {
 impl DbReadLock {
     /// Acquire a shared advisory lock on the projection DB path.
     ///
+    /// The acquire queues through the gate file `<path>.gate`, so a waiting
+    /// writer is not starved by readers, and waiters take turns.
+    ///
     /// # Errors
     ///
     /// Returns [`LockError::Timeout`] if the lock cannot be acquired within
     /// the given timeout, or [`LockError::IoError`] on I/O failure.
     pub fn acquire(path: &Path, timeout: Duration) -> Result<Self, LockError> {
         Ok(Self {
-            guard: FileGuard::acquire(path, timeout, LockKind::Shared)?,
+            guard: FileGuard::acquire_gated(path, timeout, LockKind::Shared)?,
         })
     }
 
@@ -192,13 +264,17 @@ pub struct DbWriteLock {
 impl DbWriteLock {
     /// Acquire an exclusive advisory lock on the projection DB path.
     ///
+    /// The acquire queues through the gate file `<path>.gate`, so a process
+    /// that releases the lock and takes it again at once cannot starve a
+    /// waiter.
+    ///
     /// # Errors
     ///
     /// Returns [`LockError::Timeout`] if the lock cannot be acquired within
     /// the given timeout, or [`LockError::IoError`] on I/O failure.
     pub fn acquire(path: &Path, timeout: Duration) -> Result<Self, LockError> {
         Ok(Self {
-            guard: FileGuard::acquire(path, timeout, LockKind::Exclusive)?,
+            guard: FileGuard::acquire_gated(path, timeout, LockKind::Exclusive)?,
         })
     }
 
