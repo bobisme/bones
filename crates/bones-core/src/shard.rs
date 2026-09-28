@@ -848,6 +848,37 @@ impl ShardManager {
         self.replay_lines_from_offset(0)
     }
 
+    /// Like [`replay_lines`](Self::replay_lines), but without a torn tail.
+    ///
+    /// A writer appends a whole line, newline included, but a reader that
+    /// does not hold the shard lock can see the write half done: the last
+    /// line of the log then has no trailing newline. This iterator drops
+    /// such a final line, so projection readers stop before it and pick it
+    /// up once the write completes, instead of failing to parse it (bn-1oan).
+    /// A line without a newline anywhere else is still yielded.
+    ///
+    /// Recovery and verification keep using `replay_lines`, which yields the
+    /// torn tail so they can report it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShardError::Io`] if directory or shard reading fails.
+    pub fn replay_complete_lines(
+        &self,
+    ) -> Result<impl Iterator<Item = io::Result<(usize, String)>>, ShardError> {
+        let mut lines = self.replay_lines()?.peekable();
+        Ok(std::iter::from_fn(move || {
+            let item = lines.next()?;
+            if let Ok((_, line)) = &item
+                && !line.ends_with('\n')
+                && lines.peek().is_none()
+            {
+                return None;
+            }
+            Some(item)
+        }))
+    }
+
     /// Iterate over event lines starting from a given absolute byte offset.
     ///
     /// Yields `(absolute_offset, line_content)` pairs.

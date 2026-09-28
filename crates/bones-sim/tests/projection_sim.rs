@@ -31,6 +31,29 @@ fn campaign_converges() {
 }
 
 /// Determinism self-check: the generator is a pure function of its seed.
+/// The seed-7 plan draws no fault step, so it does not pin the fault
+/// generator. Seed 6 draws every fault kind; its digest guards that branch
+/// (bn-1oan). The kind check keeps the seed meaningful if the generator
+/// changes: pick a new seed then, do not drop the check.
+#[test]
+fn fault_plan_generation_is_deterministic() {
+    use bones_sim::replica::{Fault, Step};
+    let plan = generate(6, Profile::default());
+    assert_eq!(plan, generate(6, Profile::default()));
+    let kinds = |pred: fn(&Fault) -> bool| {
+        plan.steps
+            .iter()
+            .any(|step| matches!(step, Step::Fault { fault, .. } if pred(fault)))
+    };
+    assert!(kinds(|f| matches!(f, Fault::DuplicateLine { .. })));
+    assert!(kinds(|f| matches!(f, Fault::DropProjection)));
+    assert!(kinds(|f| matches!(f, Fault::UnprojectedAppend)));
+    assert_eq!(
+        plan.digest(),
+        include_str!("projection_sim_seed6_faults.digest").trim()
+    );
+}
+
 /// If this digest changes without a deliberate generator change, something
 /// nondeterministic leaked into generation.
 #[test]

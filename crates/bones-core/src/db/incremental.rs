@@ -88,7 +88,7 @@ pub fn event_log_cursor(events_dir: &Path) -> Result<(usize, Option<String>)> {
     let mut total_byte_len = 0;
     let mut last_event_hash = None;
 
-    let shard_line_iter = shard_mgr.replay_lines()?;
+    let shard_line_iter = shard_mgr.replay_complete_lines()?;
     for line_res in shard_line_iter {
         let (offset, line): (usize, String) =
             line_res.map_err(|e: io::Error| anyhow::anyhow!("read shard line: {e}"))?;
@@ -172,7 +172,7 @@ pub fn log_prefix_digest(shard_mgr: &ShardManager, offset: usize) -> Result<Opti
     if offset == 0 {
         return Ok(Some(digest.finish()));
     }
-    for line in shard_mgr.replay_lines()? {
+    for line in shard_mgr.replay_complete_lines()? {
         let (at, line) = line.map_err(|e| anyhow::anyhow!("read log prefix: {e}"))?;
         if at + line.len() > offset {
             return Ok(None);
@@ -392,7 +392,7 @@ pub(crate) fn resume_from_cursor(
     // the same bytes, and the digest stored afterwards covers exactly the
     // lines projected (bn-2xjb).
     let mut all_lines = shard_mgr
-        .replay_lines()
+        .replay_complete_lines()
         .map_err(|e| anyhow::anyhow!("open shard line iterator: {e}"))?;
     let mut digest = LogDigest::new();
     if !no_cursor {
@@ -989,6 +989,67 @@ mod tests {
     /// A rewrite before the cursor that keeps the length and the last line
     /// (the case the old 512-byte hash window could not see) forces a
     /// rebuild, in incremental_apply and in ensure_projection's check.
+    fn item_ids(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT item_id FROM items ORDER BY item_id")
+            .unwrap();
+        stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    /// A reader can see another process's append half done: the last line
+    /// has no newline yet. Projection must stop before it, not fail on it,
+    /// and pick the event up once the write completes (bn-1oan).
+    #[test]
+    fn torn_last_line_is_left_for_later() {
+        let (dir, shard_mgr) = setup_bones_dir();
+        let db_path = dir.path().join("bones.db");
+        let events_dir = dir.path().join("events");
+        append_event(&shard_mgr, &make_create_event("bn-one", "One", 1_000));
+
+        let two = writer::write_line(&make_create_event("bn-two", "Two", 2_000))
+            .expect("serialize event");
+        let (head, tail) = two.split_at(two.len() / 2);
+        let (year, month) = shard_mgr.active_shard().unwrap().unwrap();
+        shard_mgr
+            .append_raw(year, month, head)
+            .expect("append torn half");
+
+        // Both a full rebuild and an incremental apply succeed and leave the
+        // torn line unprojected, with the cursor before it.
+        rebuild::rebuild(&events_dir, &db_path).expect("rebuild with torn tail");
+        let report = incremental_apply(&events_dir, &db_path, false).expect("apply with torn tail");
+        assert_eq!(report.projection_errors, 0);
+        let conn = open_projection(&db_path).unwrap();
+        assert_eq!(item_ids(&conn), vec!["bn-one".to_string()]);
+        let (cursor, _) = query::get_projection_cursor(&conn).unwrap();
+        let full_len = shard_mgr.total_content_len().unwrap();
+        assert_eq!(
+            usize::try_from(cursor).unwrap(),
+            full_len - head.len(),
+            "cursor stops before the torn line"
+        );
+        drop(conn);
+
+        // The write completes; the next apply projects it incrementally.
+        shard_mgr
+            .append_raw(year, month, tail)
+            .expect("finish the line");
+        let report = incremental_apply(&events_dir, &db_path, false).expect("apply after write");
+        assert!(
+            !report.full_rebuild_triggered,
+            "{:?}",
+            report.full_rebuild_reason
+        );
+        let conn = open_projection(&db_path).unwrap();
+        assert_eq!(
+            item_ids(&conn),
+            vec!["bn-one".to_string(), "bn-two".to_string()]
+        );
+    }
+
     #[test]
     fn same_length_rewrite_before_cursor_forces_rebuild() {
         let (dir, shard_mgr) = setup_bones_dir();

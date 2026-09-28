@@ -190,6 +190,10 @@ impl<'conn> Projector<'conn> {
     /// [`crate::db::projection_lock`]). Do not call it while this thread
     /// holds that lock.
     ///
+    /// `conn` must not be inside a transaction: the catch-up opens its own
+    /// `BEGIN IMMEDIATE`. If it cannot, the event rows stay, the cursor does
+    /// not move, and the projection is marked dirty for a rebuild.
+    ///
     /// # Errors
     ///
     /// Returns an error if the projection fails, or if the projection lock

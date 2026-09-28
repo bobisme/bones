@@ -451,7 +451,7 @@ fn build_projection(events_dir: &Path, db_path: &Path) -> Result<RebuildReport> 
     let mut current_batch: Vec<Event> = Vec::with_capacity(batch_size);
     let projector = project::Projector::new(&conn);
 
-    let shard_line_iter = shard_mgr.replay_lines()?;
+    let shard_line_iter = shard_mgr.replay_complete_lines()?;
     // Digest the exact lines replayed; see incremental::LogDigest.
     let mut digest = crate::db::incremental::LogDigest::new();
     let mut newest_ts = i64::MIN;
