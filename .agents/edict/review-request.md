@@ -15,6 +15,40 @@ All Seal commands run through `maw exec $WS --`. The reviewer identity remains
 `$EDICT_PROJECT-security` so that Seal's approval gate is stable, but never
 mention `@$EDICT_PROJECT-security`: the ambient mention hook is retired.
 
+## Before you request review
+
+Commit everything in the workspace first:
+
+```bash
+maw exec "$WS" -- git add -A
+maw exec "$WS" -- git commit -m "<bone-id>: <summary>"
+```
+
+A review covers commits, and an approval covers one commit. Uncommitted changes are not
+in the review, but `maw ws merge` merges them anyway. After the LGTM, the only commit
+allowed is the review log (see
+[merge-check.md](merge-check.md#the-review-log-and-the-clean-check)).
+
+## What a review covers
+
+A review covers the range `<base>..<target>`:
+
+- **Base.** `seal reviews create` finds the fork point of your workspace, so the review
+  covers every commit of the feature. `--base <rev>` sets the base yourself (exclusive);
+  `--base HEAD~1` reviews only the current commit.
+- **Check the range.** `seal reviews create` prints the range and the commit count. If the
+  count is not what you expect, fix it before you launch a reviewer.
+- **The target does not move by itself.** After fixes, `seal reviews retarget` moves the
+  review's target to the new HEAD (only the author can retarget). A retarget clears the
+  votes, so the new code needs a fresh decision. See the re-review steps below.
+- **The base is persisted.** A retarget extends the range from the same base instead of
+  shifting it, so a re-review covers the whole feature, not only the fix. (After a rebase
+  onto a newer trunk, or with an explicit `--base`, a retarget moves the base too.)
+- To see what the approval covers now, run
+  `maw exec "$WS" -- seal diff <review-id> --format json`. It reports `approval_stale`,
+  `approved_commit` and `uncovered_commits` (see
+  [review-response.md](review-response.md#commit-no-code-after-the-lgtm)).
+
 ## Risk routing
 
 - **risk:low** — do not create a review; record the self-review on the bone.
@@ -70,8 +104,9 @@ workspace `head`. Never start a second review for ordinary feedback fixes.
 
 ## Terminal rules
 
-- Agentbus `done` is only evidence that the session answered; inspect
-  `maw exec "$WS" -- seal review "$review_id" --format json` before moving on.
+- Agentbus completion is not approval. `done` is only evidence that the session
+  answered; inspect `maw exec "$WS" -- seal review "$review_id" --format json` and
+  confirm the vote before moving on. The same holds for a subagent's report.
 - If Agentbus is unresolved, blocked, unavailable, or times out, post one
   anchored `task-blocked` message, record it on the bone, snapshot and
   terminate the dedicated Vessel session, release the review claim, and stop.

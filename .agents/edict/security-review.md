@@ -16,7 +16,8 @@ created or re-requested:
 - `review_id` — one existing Seal review id;
 - `ws` — the one Maw workspace containing that review;
 - `bone_id` — the tracked work item;
-- `request_anchor` — the Rite message id to which the reviewer must reply; and
+- `request_anchor` — the Rite message id that the author's `review-done` verdict
+  answers (the reviewer itself sends no Rite messages); and
 - `kind` — `review-request` for a first review or `review-response` for a
   re-review.
 
@@ -154,6 +155,20 @@ fixed commits (`maw exec "$ws" -- seal reviews retarget "$review_id" --agent
 "$AGENT"` — `seal reviews request` alone leaves the review's target commit
 pinned at the old anchor), re-request it, create a fresh Rite anchor, and run
 this contract again with the new target commit.
+
+## Who sends what
+
+- **The author** sends the request anchor (`-L review-request` for a first review,
+  `-L review-response` for a re-review). After it verifies the Seal vote, the author sends
+  the verdict: `-L review-done --reply-to "$request_anchor"`. A top-level verdict is not an
+  anchored result.
+- **The dedicated reviewer** sends no Rite messages. It writes only Seal metadata and
+  returns its result through Agentbus.
+- **Agentbus completion is not approval.** Only the Seal vote from `$reviewer` on the
+  current review range is.
+- **`--reviewers` spawns nobody.** It records the approval-gate identity in Seal. The
+  launch contract above is the only way a dedicated reviewer starts.
+- **Never `@$EDICT_PROJECT-security`.** No hook answers that mention.
 
 ## Reviewer boundaries
 

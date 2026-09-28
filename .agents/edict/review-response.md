@@ -13,7 +13,7 @@ Your identity is `$AGENT`. All seal and rite commands must include `--agent $AGE
 
 Run this when:
 - `maw exec $WS -- seal inbox --agent $AGENT` shows threads with new comments on your review (check each workspace)
-- `rite inbox` contains a `review-done` message indicating your review was blocked
+- The Seal verdict of a dedicated security review is BLOCK. You read it with `seal review <review-id> --format json` and report it in the anchored `review-done` message yourself; the dedicated reviewer sends no Rite messages (see [security-review](security-review.md#who-sends-what))
 - You previously requested review and are checking back for feedback
 
 **Note:** All seal commands below use `maw exec $WS --` because the review exists in your workspace, not the repo root.
@@ -93,7 +93,8 @@ This is not a glitch to work around. Fix it in this order:
 
 1. **Ask for a fresh LGTM.** Re-request the reviewer as in step 3 above. A repeat
    LGTM moves the approval onto the new commit and clears the block. This is the
-   normal path and the only one that keeps the merge honest.
+   normal path and the only one that keeps the merge honest. A re-review must end in a
+   Seal vote: an unvoted re-review leaves the merge blocked.
 2. `--allow-stale-approval` merges past the check. Use it only when you can say
    why the new commits are outside what was reviewed, and record that reason in a
    bone comment.
