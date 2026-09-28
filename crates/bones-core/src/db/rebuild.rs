@@ -975,10 +975,12 @@ mod tests {
 
         let err = result.expect_err("rebuild must fail while the live db is busy");
         assert!(format!("{err:#}").contains("unchanged"), "{err:#}");
-        // The copy waits for the writer, but only about twice the timeout.
+        // The copy waits for the writer, but stays bounded. SQLite's busy
+        // handler sleeps in whole seconds on builds without usleep (seen on
+        // macOS CI: 1.04s for a 300ms timeout), so the bound is loose.
         assert!(waited >= timeout, "copy gave up after {waited:?}");
         assert!(
-            waited < timeout * 2 + Duration::from_millis(400),
+            waited < timeout * 2 + Duration::from_secs(3),
             "copy retries took {waited:?}"
         );
         assert!(db_path.exists(), "live projection deleted");
