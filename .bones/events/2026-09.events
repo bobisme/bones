@@ -170,3 +170,5 @@
 1790630642942330	bones-h89jct	itc:AQ		item.move	bn-1c0n	{"state":"done"}	blake3:mEjJBrdbiSNNpgql_OnoDWxIIiL9Y8zSE7DpIbXKIa8
 1790638338425469	bones-h89jct	itc:AQ		item.move	bn-1oan	{"state":"doing"}	blake3:Eph8i0aKG78fMFj48XMOOmjPcUeeXwEQ4DEn_cb4FaM
 1790638338432694	bones-h89jct	itc:AQ		item.assign	bn-1oan	{"action":"assign","agent":"bones-h89jct"}	blake3:OnHswLQzksgC4rUSc-uKVgKMp4Zivh-vv6Z59XtMLAs
+1790640144762907	bones-h89jct	itc:AQ		item.comment	bn-1oan	{"body":"Merged at 5b2db7f0; CI green on all platforms (run 36498947382)."}	blake3:hlzVBcgasSjDhIp0pGcu-smJiDZGdT0Ml_OCLg-1oOs
+1790640144799129	bones-h89jct	itc:AQ		item.move	bn-1oan	{"state":"done"}	blake3:TmjGLkGyfVvxzjyMMCsQaN2p6KwT--33X_FKD76ZWx0
